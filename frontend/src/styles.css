@@ -1,0 +1,44 @@
+:root {
+  color: #18324b;
+  background: #f2f6f8;
+  font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; }
+
+.page-shell {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.hero-card {
+  background: #fff;
+  border: 1px solid #dce8ee;
+  border-radius: 20px;
+  box-shadow: 0 24px 60px rgba(24, 50, 75, 0.1);
+  max-width: 680px;
+  padding: 56px;
+  width: 100%;
+}
+
+.eyebrow { color: #218c87; font-size: 12px; font-weight: 700; letter-spacing: .16em; margin: 0 0 18px; }
+h1 { font-size: clamp(32px, 7vw, 56px); letter-spacing: -.04em; margin: 0; }
+.subtitle { color: #62798a; font-size: 18px; line-height: 1.7; margin: 20px 0 32px; }
+.status { align-items: center; border-radius: 10px; display: flex; font-size: 15px; gap: 10px; padding: 14px 16px; }
+.status-checking { background: #fff8e7; color: #8a6719; }
+.status-ok { background: #e9f7f1; color: #217357; }
+.status-error { background: #fff0ef; color: #a24843; }
+.status-dot { background: currentColor; border-radius: 50%; height: 9px; width: 9px; }
+.api-config { color: #8093a0; font-size: 13px; margin: 24px 0 0; }
+code { color: #38566d; }
+
+@media (max-width: 560px) {
+  .hero-card { padding: 32px 24px; }
+}
+

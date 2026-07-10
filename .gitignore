@@ -14,3 +14,11 @@ data/
 *.log
 .DS_Store
 .~*
+
+# Sensitive documents and spreadsheets
+docs/
+xlsx/
+*.doc
+*.docx
+*.xls
+*.xlsx

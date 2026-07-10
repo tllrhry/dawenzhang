@@ -1,4 +1,4 @@
-.PHONY: backend-install backend-dev frontend-install frontend-dev test migrate init-mysql clear-cache docker-up
+.PHONY: backend-install backend-dev frontend-install frontend-dev test migrate docker-up
 
 backend-install:
 	python -m pip install -r backend/requirements-dev.txt
@@ -18,12 +18,6 @@ test:
 
 migrate:
 	bash backend/scripts/migrate.sh
-
-init-mysql:
-	bash backend/scripts/init_mysql.sh
-
-clear-cache:
-	PYTHONPATH=backend python backend/scripts/clear_cache.py
 
 docker-up:
 	docker compose up --build

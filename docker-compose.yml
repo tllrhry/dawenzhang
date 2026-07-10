@@ -7,27 +7,17 @@ services:
       - ${ENV_FILE:-.env}
     environment:
       BACKEND_HOST: 0.0.0.0
-      MYSQL_HOST: ${DOCKER_MYSQL_HOST:-ai_tag_fix_mysql}
-      REDIS_HOST: ${DOCKER_REDIS_HOST:-ai_tag_fix_redis}
-    ports:
-      - "${BACKEND_PORT:-8000}:8000"
-    networks:
-      - ai_tag_fix_default
+      DATABASE_URL: sqlite:////data/dawenzhang.db
+      UPLOAD_DIR: /data/uploads
+      EXPORT_DIR: /data/exports
+    volumes:
+      - ${APP_DATA_DIR:-./data}:/data
 
   frontend:
     build:
       context: .
       dockerfile: frontend/Dockerfile
-    environment:
-      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://127.0.0.1:8000/api/v1}
     ports:
-      - "${FRONTEND_PORT:-5173}:5173"
+      - "${HTTP_PORT:-8080}:80"
     depends_on:
       - backend
-    networks:
-      - ai_tag_fix_default
-
-networks:
-  ai_tag_fix_default:
-    external: true
-    name: ai_tag_fix_default

@@ -1,7 +1,9 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import make_url
 
 
 class Settings(BaseSettings):
@@ -26,41 +28,34 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("CORS_ORIGINS"),
     )
 
-    mysql_host: str = Field(default="127.0.0.1", validation_alias=AliasChoices("MYSQL_HOST"))
-    mysql_port: int = Field(default=3306, validation_alias=AliasChoices("MYSQL_PORT"))
-    mysql_database: str = Field(default="dawenzhang", validation_alias=AliasChoices("MYSQL_DATABASE"))
-    mysql_user: str = Field(default="dawenzhang_app", validation_alias=AliasChoices("MYSQL_USER"))
-    mysql_password: str = Field(default="", validation_alias=AliasChoices("MYSQL_PASSWORD"))
-    mysql_pool_pre_ping: bool = Field(default=True, validation_alias=AliasChoices("MYSQL_POOL_PRE_PING"))
-
-    redis_host: str = Field(default="127.0.0.1", validation_alias=AliasChoices("REDIS_HOST"))
-    redis_port: int = Field(default=6379, validation_alias=AliasChoices("REDIS_PORT"))
-    redis_db: int = Field(default=1, validation_alias=AliasChoices("REDIS_DB"))
-    redis_password: str | None = Field(default=None, validation_alias=AliasChoices("REDIS_PASSWORD"))
-    redis_key_prefix: str = Field(default="dawenzhang:", validation_alias=AliasChoices("REDIS_KEY_PREFIX"))
+    database_url: str = Field(
+        default="sqlite:///./data/dawenzhang.db",
+        validation_alias=AliasChoices("DATABASE_URL"),
+    )
+    upload_dir: Path = Field(default=Path("./data/uploads"), validation_alias=AliasChoices("UPLOAD_DIR"))
+    export_dir: Path = Field(default=Path("./data/exports"), validation_alias=AliasChoices("EXPORT_DIR"))
 
     ai_base_url: str | None = Field(default=None, validation_alias=AliasChoices("AI_BASE_URL"))
     ai_api_key: str | None = Field(default=None, validation_alias=AliasChoices("AI_API_KEY"))
+    ai_connect_timeout_seconds: float = Field(
+        default=10.0, validation_alias=AliasChoices("AI_CONNECT_TIMEOUT_SECONDS")
+    )
+    ai_read_timeout_seconds: float = Field(
+        default=90.0, validation_alias=AliasChoices("AI_READ_TIMEOUT_SECONDS")
+    )
 
-    @field_validator("mysql_database")
+    @field_validator("database_url")
     @classmethod
-    def validate_mysql_database(cls, value: str) -> str:
-        if value != "dawenzhang":
-            raise ValueError("MYSQL_DATABASE must be 'dawenzhang'; refusing to connect to another database")
+    def validate_database_url(cls, value: str) -> str:
+        if make_url(value).drivername != "sqlite":
+            raise ValueError("DATABASE_URL must use SQLite for the demonstration runtime")
         return value
 
-    @field_validator("redis_db")
+    @field_validator("ai_connect_timeout_seconds", "ai_read_timeout_seconds")
     @classmethod
-    def validate_redis_db(cls, value: int) -> int:
-        if value != 1:
-            raise ValueError("REDIS_DB must be 1; db0 is reserved for the existing ai_tag_fix project")
-        return value
-
-    @field_validator("redis_key_prefix")
-    @classmethod
-    def validate_redis_key_prefix(cls, value: str) -> str:
-        if not value.startswith("dawenzhang:") or not value.endswith(":"):
-            raise ValueError("REDIS_KEY_PREFIX must use the dawenzhang: namespace")
+    def validate_positive_timeout(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("AI timeouts must be greater than zero")
         return value
 
     @property
@@ -68,17 +63,11 @@ class Settings(BaseSettings):
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
     @property
-    def sqlalchemy_database_url(self) -> str:
-        from sqlalchemy.engine import URL
-
-        return URL.create(
-            "mysql+pymysql",
-            username=self.mysql_user,
-            password=self.mysql_password,
-            host=self.mysql_host,
-            port=self.mysql_port,
-            database=self.mysql_database,
-        ).render_as_string(hide_password=False)
+    def database_path(self) -> Path | None:
+        database = make_url(self.database_url).database
+        if database is None or database == ":memory:":
+            return None
+        return Path(database)
 
 
 @lru_cache

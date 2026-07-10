@@ -11,10 +11,12 @@ from app.core.config import Settings, get_settings
 @lru_cache
 def get_engine() -> Engine:
     settings = get_settings()
+    database_path = settings.database_path
+    if database_path is not None:
+        database_path.parent.mkdir(parents=True, exist_ok=True)
     return create_engine(
-        settings.sqlalchemy_database_url,
-        pool_pre_ping=settings.mysql_pool_pre_ping,
-        pool_recycle=1800,
+        settings.database_url,
+        connect_args={"check_same_thread": False},
         future=True,
     )
 
@@ -24,16 +26,10 @@ def get_db() -> Generator:
         yield connection
 
 
-def check_mysql(settings: Settings | None = None) -> dict[str, object]:
-    settings = settings or get_settings()
-    if settings.mysql_database != "dawenzhang":
-        return {"status": "error", "detail": "database isolation validation failed"}
+def check_database() -> dict[str, object]:
     try:
         with get_engine().connect() as connection:
-            database = connection.execute(text("SELECT DATABASE()")).scalar_one_or_none()
-        if database != "dawenzhang":
-            return {"status": "error", "detail": "connected database is not dawenzhang"}
-        return {"status": "ok", "database": "dawenzhang"}
+            connection.execute(text("SELECT 1"))
+        return {"status": "ok", "engine": "sqlite"}
     except SQLAlchemyError:
-        return {"status": "error", "detail": "MySQL connection failed"}
-
+        return {"status": "error", "detail": "SQLite connection failed"}

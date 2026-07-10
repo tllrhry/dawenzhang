@@ -3,19 +3,18 @@ import pytest
 from app.core.config import Settings
 
 
-def test_default_isolation_settings() -> None:
+def test_default_demo_settings() -> None:
     settings = Settings(_env_file=None)
-    assert settings.mysql_database == "dawenzhang"
-    assert settings.redis_db == 1
-    assert settings.redis_key_prefix == "dawenzhang:"
+    assert settings.database_url.startswith("sqlite:///")
+    assert settings.ai_connect_timeout_seconds == 10
+    assert settings.ai_read_timeout_seconds == 90
 
 
-def test_rejects_existing_project_database() -> None:
-    with pytest.raises(ValueError, match="dawenzhang"):
-        Settings(_env_file=None, mysql_database="ai_tag_fix")
+def test_rejects_non_sqlite_database() -> None:
+    with pytest.raises(ValueError, match="SQLite"):
+        Settings(_env_file=None, database_url="mysql+pymysql://localhost/dawenzhang")
 
 
-def test_rejects_redis_db0() -> None:
-    with pytest.raises(ValueError, match="db0"):
-        Settings(_env_file=None, redis_db=0)
-
+def test_rejects_non_positive_ai_timeout() -> None:
+    with pytest.raises(ValueError, match="greater than zero"):
+        Settings(_env_file=None, ai_read_timeout_seconds=0)

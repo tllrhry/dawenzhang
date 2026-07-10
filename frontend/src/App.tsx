@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-const defaultApiBaseUrl = 'http://127.0.0.1:8000/api/v1'
+const defaultApiBaseUrl = '/api/v1'
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || defaultApiBaseUrl).replace(/\/$/, '')
 
 type HealthState = 'checking' | 'ok' | 'error'
@@ -17,7 +17,7 @@ function App() {
         const data = await response.json() as { status?: string }
         if (data.status !== 'ok') throw new Error('后端依赖未就绪')
         setHealthState('ok')
-        setHealthMessage('后端、MySQL 和 Redis 已连接')
+        setHealthMessage('后端与本地演示数据库已连接')
       } catch (error) {
         setHealthState('error')
         setHealthMessage(`后端暂不可用：${error instanceof Error ? error.message : '未知错误'}`)
@@ -43,4 +43,3 @@ function App() {
 }
 
 export default App
-

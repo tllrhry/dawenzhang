@@ -15,10 +15,7 @@ data/
 .DS_Store
 .~*
 
-# Sensitive documents and spreadsheets
-docs/
-xlsx/
-*.doc
-*.docx
-*.xls
-*.xlsx
+# Sensitive project data directories
+/五篇大文章映射/
+/国民经济/
+/模板文件/

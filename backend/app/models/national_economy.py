@@ -1,7 +1,17 @@
 from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -121,6 +131,10 @@ class NationalEconomyClassificationResult(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     industry_code: Mapped[str | None] = mapped_column(String(4), nullable=True)
     industry_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    loan_industry_code: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    loan_industry_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    loan_matching_basis: Mapped[str | None] = mapped_column(Text, nullable=True)
+    loan_matches_enterprise: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     confidence: Mapped[int | None] = mapped_column(Integer, nullable=True)
     rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
     ai_summary: Mapped[str | None] = mapped_column(Text, nullable=True)

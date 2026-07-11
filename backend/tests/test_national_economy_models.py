@@ -3,7 +3,7 @@ from sqlalchemy import inspect
 from sqlalchemy.dialects.postgresql import JSONB
 
 from app.core.config import get_settings
-from app.db.session import get_engine
+from app.db.session import get_engine, get_sessionmaker
 from app.models import (
     NationalEconomyCatalogVersion,
     NationalEconomyClassificationCase,
@@ -77,6 +77,10 @@ def test_model_metadata_contains_case_and_result_history_fields() -> None:
         "status",
         "industry_code",
         "industry_name",
+        "loan_industry_code",
+        "loan_industry_name",
+        "loan_matching_basis",
+        "loan_matches_enterprise",
         "confidence",
         "rationale",
         "ai_summary",
@@ -89,7 +93,11 @@ def test_model_metadata_contains_case_and_result_history_fields() -> None:
     assert isinstance(result_columns["objection"].type, JSONB)
     assert isinstance(result_columns["model_output"].type, JSONB)
     assert not result_columns["status"].nullable
-    assert result_columns["case_id"].foreign_keys.pop().target_fullname == (
+    assert result_columns["loan_industry_code"].nullable
+    assert result_columns["loan_industry_name"].nullable
+    assert result_columns["loan_matching_basis"].nullable
+    assert result_columns["loan_matches_enterprise"].nullable
+    assert next(iter(result_columns["case_id"].foreign_keys)).target_fullname == (
         "national_economy_classification_cases.id"
     )
 
@@ -115,9 +123,67 @@ def test_migration_creates_case_and_result_history_tables() -> None:
     assert str(result_columns["objection"]["type"]) == "JSONB"
     assert str(result_columns["model_output"]["type"]) == "JSONB"
     assert not result_columns["status"]["nullable"]
+    for column_name in (
+        "loan_industry_code",
+        "loan_industry_name",
+        "loan_matching_basis",
+        "loan_matches_enterprise",
+    ):
+        assert column_name in result_columns
+        assert result_columns[column_name]["nullable"]
+    assert str(result_columns["loan_industry_code"]["type"]) == "VARCHAR(4)"
+    assert str(result_columns["loan_industry_name"]["type"]) == "VARCHAR(255)"
+    assert str(result_columns["loan_matching_basis"]["type"]) == "TEXT"
+    assert str(result_columns["loan_matches_enterprise"]["type"]) == "BOOLEAN"
     foreign_keys = inspector.get_foreign_keys("national_economy_classification_results")
     assert any(
         foreign_key["constrained_columns"] == ["case_id"]
         and foreign_key["referred_table"] == "national_economy_classification_cases"
         for foreign_key in foreign_keys
     )
+
+
+def test_pre_loan_direction_result_remains_readable_without_overwriting_enterprise_fields() -> None:
+    session = get_sessionmaker()()
+    case = NationalEconomyClassificationCase(
+        scenario="pre-loan-direction-result",
+        input_payload={"enterprise_name": "旧结果测试企业"},
+        original_filename=None,
+        status="completed",
+    )
+    result = NationalEconomyClassificationResult(
+        case=case,
+        version=1,
+        status="completed",
+        industry_code="3742",
+        industry_name="航天器及运载火箭制造",
+        confidence=91,
+        rationale="旧版本企业匹配依据",
+        ai_summary="旧版本结论",
+        candidate_snapshot=[],
+        objection=None,
+        model_output={"legacy": True},
+    )
+
+    try:
+        session.add(result)
+        session.commit()
+        result_id = result.id
+        session.expire_all()
+
+        loaded = session.get(NationalEconomyClassificationResult, result_id)
+        assert loaded is not None
+        assert loaded.industry_code == "3742"
+        assert loaded.industry_name == "航天器及运载火箭制造"
+        assert loaded.rationale == "旧版本企业匹配依据"
+        assert loaded.loan_industry_code is None
+        assert loaded.loan_industry_name is None
+        assert loaded.loan_matching_basis is None
+        assert loaded.loan_matches_enterprise is None
+    finally:
+        session.rollback()
+        persisted_case = session.get(NationalEconomyClassificationCase, case.id)
+        if persisted_case is not None:
+            session.delete(persisted_case)
+            session.commit()
+        session.close()

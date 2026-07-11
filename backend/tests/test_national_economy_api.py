@@ -74,6 +74,23 @@ def _completed_result(case: NationalEconomyClassificationCase, version: int = 1)
     )
 
 
+def _loan_result(
+    case: NationalEconomyClassificationCase,
+    *,
+    version: int = 1,
+    loan_industry_code: str,
+    loan_industry_name: str,
+    loan_matching_basis: str,
+    loan_matches_enterprise: bool,
+) -> NationalEconomyClassificationResult:
+    result = _completed_result(case, version)
+    result.loan_industry_code = loan_industry_code
+    result.loan_industry_name = loan_industry_name
+    result.loan_matching_basis = loan_matching_basis
+    result.loan_matches_enterprise = loan_matches_enterprise
+    return result
+
+
 def test_scenarios_list_available_and_coming_soon_entries(client: TestClient) -> None:
     response = client.get("/api/v1/scenarios")
 
@@ -218,6 +235,174 @@ def test_classification_objection_history_and_failure_responses(
     failed = client.post(f"/api/v1/national-economy/cases/{case_id}/classifications")
     assert failed.status_code == 502
     assert failed.json()["detail"]["message"] == "分类服务暂时不可用，请稍后重试"
+
+
+def test_specific_loan_direction_is_returned_by_classification_endpoint(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    case_id = _upload(client).json()["id"]
+
+    def fake_classify(session: Session, case: NationalEconomyClassificationCase):
+        result = _loan_result(
+            case,
+            loan_industry_code="5263",
+            loan_industry_name="汽车零配件零售",
+            loan_matching_basis=(
+                "实际投向用于汽车零部件采购，匹配经营范围内销售汽车零部件，"
+                "对应四级代码 5263"
+            ),
+            loan_matches_enterprise=False,
+        )
+        session.add(result)
+        case.status = "completed"
+        session.commit()
+        session.refresh(result)
+        return result
+
+    monkeypatch.setattr(route_module, "classify_case", fake_classify)
+
+    response = client.post(
+        f"/api/v1/national-economy/cases/{case_id}/classifications"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["loan_industry_code"] == "5263"
+    assert payload["loan_industry_name"] == "汽车零配件零售"
+    assert "汽车零部件采购" in payload["loan_matching_basis"]
+    assert payload["loan_matches_enterprise"] is False
+
+
+def test_loan_no_match_is_returned_as_needs_review_not_as_enterprise_match(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    case_id = _upload(client).json()["id"]
+    review_reason = "贷款用途超出营业执照经营范围，贷款投向需人工复核"
+
+    def fake_classify(session: Session, case: NationalEconomyClassificationCase):
+        result = _completed_result(case)
+        result.status = "needs_review"
+        result.loan_matching_basis = review_reason
+        session.add(result)
+        case.status = "needs_review"
+        session.commit()
+        session.refresh(result)
+        return result
+
+    monkeypatch.setattr(route_module, "classify_case", fake_classify)
+
+    response = client.post(
+        f"/api/v1/national-economy/cases/{case_id}/classifications"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "needs_review"
+    assert payload["loan_industry_code"] is None
+    assert payload["loan_industry_name"] is None
+    assert payload["loan_matching_basis"] == review_reason
+    assert payload["loan_matches_enterprise"] is False
+
+
+def test_matching_loan_direction_is_returned_by_case_and_objection_endpoints(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    case_id = _upload(client).json()["id"]
+    case = db_session.get(NationalEconomyClassificationCase, case_id)
+    assert case is not None
+    db_session.add(
+        _loan_result(
+            case,
+            loan_industry_code="0111",
+            loan_industry_name="稻谷种植",
+            loan_matching_basis="贷款用途笼统，按企业主营业务判定",
+            loan_matches_enterprise=True,
+        )
+    )
+    case.status = "completed"
+    db_session.commit()
+
+    case_response = client.get(f"/api/v1/national-economy/cases/{case_id}")
+
+    assert case_response.status_code == 200
+    current_result = case_response.json()["current_result"]
+    assert current_result["loan_industry_code"] == current_result["industry_code"]
+    assert current_result["loan_industry_name"] == current_result["industry_name"]
+    assert current_result["loan_matching_basis"] == (
+        "贷款用途笼统，按企业主营业务判定"
+    )
+    assert current_result["loan_matches_enterprise"] is True
+
+    def fake_reclassify(
+        session: Session,
+        current_case: NationalEconomyClassificationCase,
+        objection_text: str,
+    ):
+        result = _loan_result(
+            current_case,
+            version=2,
+            loan_industry_code="0111",
+            loan_industry_name="稻谷种植",
+            loan_matching_basis="具体贷款用途命中企业主营业务",
+            loan_matches_enterprise=True,
+        )
+        result.objection = {"description": objection_text}
+        session.add(result)
+        session.commit()
+        session.refresh(result)
+        return result
+
+    monkeypatch.setattr(route_module, "reclassify_case", fake_reclassify)
+    objection_response = client.post(
+        f"/api/v1/national-economy/cases/{case_id}/objections",
+        json={"objection_text": "贷款用于主营稻谷种植"},
+    )
+
+    assert objection_response.status_code == 200
+    objection_payload = objection_response.json()
+    assert objection_payload["loan_industry_code"] == "0111"
+    assert objection_payload["loan_matches_enterprise"] is True
+
+
+def test_legacy_result_is_backfilled_by_case_and_history_endpoints(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    case_id = _upload(client).json()["id"]
+    case = db_session.get(NationalEconomyClassificationCase, case_id)
+    assert case is not None
+    legacy_result = _completed_result(case)
+    assert legacy_result.loan_industry_code is None
+    assert legacy_result.loan_industry_name is None
+    assert legacy_result.loan_matching_basis is None
+    assert legacy_result.loan_matches_enterprise is None
+    db_session.add(legacy_result)
+    case.status = "completed"
+    db_session.commit()
+
+    case_response = client.get(f"/api/v1/national-economy/cases/{case_id}")
+    history_response = client.get(
+        f"/api/v1/national-economy/cases/{case_id}/history"
+    )
+
+    assert case_response.status_code == 200
+    assert history_response.status_code == 200
+    expected = {
+        "loan_industry_code": "0111",
+        "loan_industry_name": "稻谷种植",
+        "loan_matching_basis": "贷款投向未单独评估，与企业主营一致",
+        "loan_matches_enterprise": True,
+    }
+    assert {
+        key: case_response.json()["current_result"][key] for key in expected
+    } == expected
+    assert {
+        key: history_response.json()["items"][0][key] for key in expected
+    } == expected
 
 
 def test_export_download_contains_three_expected_sheets(

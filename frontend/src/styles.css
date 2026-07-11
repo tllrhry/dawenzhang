@@ -20,3 +20,12 @@ button { font: inherit; }
 @media (max-width: 1100px) { .site-header { gap: 18px; }.brand { min-width: 330px; }.brand strong { font-size: 22px; }.main-nav { gap: 20px; }.scenario-grid { grid-template-columns: 1fr; }.scenario-card { min-height: auto; }.scene-body { min-height: 185px; }.history-row { grid-template-columns: 1.25fr 1fr 1.4fr .7fr .9fr; }.history-row > :last-child { grid-column: 1 / -1; } }
 @media (max-width: 900px) { .result-layout { grid-template-columns: 1fr; }.result-error, .input-result-card, .conclusion-result-card, .review-card, .evidence-card { grid-column: 1; } }
 @media (max-width: 760px) { .site-header { height: auto; min-height: 86px; flex-wrap: wrap; padding: 14px 20px; }.brand { min-width: 0; flex: 1; }.brand small { display: none; }.brand-mark { width: 42px; height: 42px; font-size: 24px; }.brand strong { font-size: 18px; }.main-nav { order: 3; width: 100%; height: 38px; gap: 22px; overflow: auto; }.user-menu > span:not(.user-avatar) { display: none; }.user-avatar { width: 37px; height: 37px; font-size: 20px; }.hero-section { padding: 30px 20px 28px; }.hero-section > p:last-child { font-size: 15px; line-height: 1.6; }.home-content, .page-content { padding-left: 17px; padding-right: 17px; }.flow-card { padding: 21px 16px; }.process-flow { grid-template-columns: repeat(2, 1fr); row-gap: 25px; }.process-step::after { display: none; }.workspace-grid { grid-template-columns: 1fr; }.workspace-steps { overflow-x: auto; min-width: 0; }.template-panel { align-items: flex-start; flex-direction: column; }.result-status { flex-wrap: wrap; }.result-actions { justify-content: flex-start; }.source-details .ant-descriptions-item-label { width: 120px; }.history-row { display: flex; flex-direction: column; align-items: flex-start; }.history-row-head { display: none; }.site-footer { gap: 8px; }.site-footer i { display: none; } }
+
+.loan-direction-divider { margin: 18px 0 0 !important; color: #52647e !important; font-size: 13px !important; }
+.loan-direction-details { margin-top: 12px; }
+.loan-direction-details .ant-descriptions-item-label { width: 132px; }
+.history-conclusion, .history-basis { display: flex; flex-direction: column; gap: 7px; }
+.history-conclusion > small { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: #71809a; line-height: 1.5; }
+.history-conclusion > small strong { color: #4c73b5; }
+.history-conclusion .ant-tag { margin-inline-end: 0; font-size: 11px; line-height: 18px; }
+.history-basis small { color: #71809a; line-height: 1.5; }

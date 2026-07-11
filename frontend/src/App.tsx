@@ -338,6 +338,13 @@ function ResultPanel({ caseData, result, errorMessage, showReview, setShowReview
         <Descriptions.Item label="行业名称">{result.industry_name || '--'}</Descriptions.Item>
         <Descriptions.Item label="案例状态"><Tag color={needsReview ? 'warning' : 'success'}>{needsReview ? '待人工复核' : '已完成'}</Tag></Descriptions.Item>
         <Descriptions.Item label="匹配依据">{result.matching_basis || '--'}</Descriptions.Item>
+      </Descriptions>
+      <Divider className="loan-direction-divider" orientation="left" plain>贷款投向结论</Divider>
+      <Descriptions className="result-details loan-direction-details" column={1} size="small">
+        <Descriptions.Item label="贷款投向代码">{result.loan_industry_code || '--'}</Descriptions.Item>
+        <Descriptions.Item label="贷款投向名称">{result.loan_industry_name || '--'}</Descriptions.Item>
+        <Descriptions.Item label="贷款投向是否一致"><Tag color={result.loan_matches_enterprise ? 'success' : 'warning'}>{result.loan_matches_enterprise ? '与企业主营一致' : '与企业主营不一致'}</Tag></Descriptions.Item>
+        <Descriptions.Item label="贷款投向匹配依据">{result.loan_matching_basis || '--'}</Descriptions.Item>
         {result.objection?.description && <Descriptions.Item label="关联异议">{result.objection.description}</Descriptions.Item>}
       </Descriptions>
       <div className="result-actions"><Button icon={<DownloadOutlined />} onClick={() => window.location.assign(exportUrl(caseData.id))}>导出 Excel</Button><Button icon={<HistoryOutlined />} onClick={() => navigate('/history')}>查看判定历史</Button><Button type="primary" onClick={() => setShowReview(!showReview)}>提出异议并复核</Button></div>
@@ -380,7 +387,7 @@ function HistoryPage() {
     <Card className="history-card" bordered={false}>
       <div className="history-row history-row-head"><span>企业名称</span><span>行业结论</span><span>匹配依据</span><span>状态</span><span>最近更新时间</span><span>操作</span></div>
       {errorMessage && <div className="history-row empty-row"><Alert type="error" showIcon message={errorMessage} /></div>}
-      {history.map((item) => <div className="history-row" key={item.id}><b>{caseData?.original_filename || '当前企业案例'}<small>版本 {item.version}{item.objection?.description ? ` · 异议：${item.objection.description}` : ''}</small></b><span><strong>{item.industry_code || '--'}</strong> {item.industry_name || '待人工复核'}</span><span className="history-basis">{item.matching_basis || '--'}</span><span><Tag color={item.status === 'needs_review' ? 'warning' : 'success'}>{item.status === 'needs_review' ? '待人工复核' : '已完成'}</Tag></span><span>{new Date(item.created_at).toLocaleString('zh-CN')}</span><button type="button" onClick={() => navigate('/classify')}>查看详情 <ArrowRightOutlined /></button></div>)}
+      {history.map((item) => <div className="history-row" key={item.id}><b>{caseData?.original_filename || '当前企业案例'}<small>版本 {item.version}{item.objection?.description ? ` · 异议：${item.objection.description}` : ''}</small></b><span className="history-conclusion"><span><strong>{item.industry_code || '--'}</strong> {item.industry_name || '待人工复核'}</span><small><span>贷款投向 <strong>{item.loan_industry_code || '--'}</strong> {item.loan_industry_name || '--'}</span><Tag color={item.loan_matches_enterprise ? 'success' : 'warning'}>{item.loan_matches_enterprise ? '一致' : '不一致'}</Tag></small></span><span className="history-basis">{item.matching_basis || '--'}<small>贷款投向依据：{item.loan_matching_basis || '--'}</small></span><span><Tag color={item.status === 'needs_review' ? 'warning' : 'success'}>{item.status === 'needs_review' ? '待人工复核' : '已完成'}</Tag></span><span>{new Date(item.created_at).toLocaleString('zh-CN')}</span><button type="button" onClick={() => navigate('/classify')}>查看详情 <ArrowRightOutlined /></button></div>)}
       {!errorMessage && history.length === 0 && <div className="history-row empty-row"><span>暂无可展示的当前案例版本，请先完成一次分类。</span></div>}
     </Card>
   </main>

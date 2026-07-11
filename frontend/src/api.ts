@@ -19,6 +19,10 @@ export interface ClassificationResult {
   industry_code: string | null
   industry_name: string | null
   matching_basis: string | null
+  loan_industry_code: string | null
+  loan_industry_name: string | null
+  loan_matching_basis: string | null
+  loan_matches_enterprise: boolean
   candidate_snapshot: unknown[]
   objection: ResultObjection | null
   created_at: string

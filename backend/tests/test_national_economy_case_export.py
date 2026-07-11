@@ -24,10 +24,11 @@ def test_export_case_workbook_contains_input_current_result_and_full_history() -
     case = _case()
     NationalEconomyClassificationResult(
         case=case,
-        version=2,
+        version=3,
         status="needs_review",
         candidate_snapshot=[],
         rationale="候选均不匹配",
+        loan_matching_basis="贷款用途超出企业经营范围，需人工复核",
         objection={"description": "主营收入结构已变化"},
     )
     NationalEconomyClassificationResult(
@@ -39,6 +40,36 @@ def test_export_case_workbook_contains_input_current_result_and_full_history() -
         confidence=92,
         rationale="主营业务与目录定义一致",
         ai_summary="企业主要从事稻谷种植",
+        candidate_snapshot=[],
+    )
+    NationalEconomyClassificationResult(
+        case=case,
+        version=2,
+        status="completed",
+        industry_code="0111",
+        industry_name="稻谷种植",
+        confidence=94,
+        rationale="主营业务与目录定义一致",
+        loan_industry_code="0111",
+        loan_industry_name="稻谷种植",
+        loan_matching_basis="贷款用途笼统，按企业主营业务判定",
+        loan_matches_enterprise=True,
+        ai_summary="贷款用途与主营一致",
+        candidate_snapshot=[],
+    )
+    NationalEconomyClassificationResult(
+        case=case,
+        version=4,
+        status="completed",
+        industry_code="3742",
+        industry_name="航天器及运载火箭制造",
+        confidence=95,
+        rationale="主营业务为航天器制造",
+        loan_industry_code="5263",
+        loan_industry_name="汽车零配件零售",
+        loan_matching_basis="实际投向汽车零部件采购，匹配经营范围内销售汽车零部件",
+        loan_matches_enterprise=False,
+        ai_summary="贷款投向与企业主营不一致",
         candidate_snapshot=[],
     )
 
@@ -57,11 +88,19 @@ def test_export_case_workbook_contains_input_current_result_and_full_history() -
         "行业代码",
         "行业名称",
         "匹配依据",
+        "贷款投向代码",
+        "贷款投向名称",
+        "贷款投向匹配依据",
+        "贷款投向是否一致",
     )
     assert tuple(cell.value for cell in current_sheet[2]) == (
-        "0111",
-        "稻谷种植",
-        "主营业务与目录定义一致",
+        "3742",
+        "航天器及运载火箭制造",
+        "主营业务为航天器制造",
+        "5263",
+        "汽车零配件零售",
+        "实际投向汽车零部件采购，匹配经营范围内销售汽车零部件",
+        "不一致",
     )
 
     history_sheet = workbook["判定历史"]
@@ -71,21 +110,59 @@ def test_export_case_workbook_contains_input_current_result_and_full_history() -
         "行业代码",
         "行业名称",
         "匹配依据",
+        "贷款投向代码",
+        "贷款投向名称",
+        "贷款投向匹配依据",
+        "贷款投向是否一致",
         "关联异议",
     )
-    assert tuple(cell.value for cell in history_sheet[2])[:4] == (
+    assert tuple(cell.value for cell in history_sheet[2]) == (
         1,
         "completed",
         "0111",
         "稻谷种植",
+        "主营业务与目录定义一致",
+        "0111",
+        "稻谷种植",
+        "贷款投向未单独评估，与企业主营一致",
+        "一致",
+        None,
     )
     assert tuple(cell.value for cell in history_sheet[3]) == (
         2,
+        "completed",
+        "0111",
+        "稻谷种植",
+        "主营业务与目录定义一致",
+        "0111",
+        "稻谷种植",
+        "贷款用途笼统，按企业主营业务判定",
+        "一致",
+        None,
+    )
+    assert tuple(cell.value for cell in history_sheet[4]) == (
+        3,
         "needs_review",
         None,
         None,
         "候选均不匹配",
+        None,
+        None,
+        "贷款用途超出企业经营范围，需人工复核",
+        "不一致",
         "主营收入结构已变化",
+    )
+    assert tuple(cell.value for cell in history_sheet[5]) == (
+        4,
+        "completed",
+        "3742",
+        "航天器及运载火箭制造",
+        "主营业务为航天器制造",
+        "5263",
+        "汽车零配件零售",
+        "实际投向汽车零部件采购，匹配经营范围内销售汽车零部件",
+        "不一致",
+        None,
     )
 
 
@@ -104,3 +181,4 @@ def test_export_case_workbook_uses_readable_placeholder_without_completed_result
     current_values = tuple(cell.value for cell in workbook["当前结论"][2])
     assert current_values[:2] == (None, None)
     assert current_values[2] == "暂无成功结论（案例状态：needs_review）"
+    assert current_values[3:] == (None, None, None, None)

@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from app.core.config import Settings
@@ -13,6 +15,9 @@ def test_default_settings() -> None:
     assert settings.siliconflow_timeout_seconds == 30
     assert settings.deepseek_timeout_seconds == 120
     assert settings.classification_timeout_seconds == 180
+    assert settings.national_economy_template_path == Path(
+        "模板文件/国民经济/国民经济类别模版.docx"
+    )
 
 
 def test_rejects_non_postgres_database() -> None:

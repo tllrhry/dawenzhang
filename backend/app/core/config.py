@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     national_economy_catalog_path: Path | None = Field(
         default=None, validation_alias=AliasChoices("NATIONAL_ECONOMY_CATALOG_PATH")
     )
+    national_economy_template_path: Path = Field(
+        default=Path("模板文件/国民经济/国民经济类别模版.docx"),
+        validation_alias=AliasChoices("NATIONAL_ECONOMY_TEMPLATE_PATH"),
+    )
 
     # Shared HTTP connect timeout for the cloud model clients.
     http_connect_timeout_seconds: float = Field(

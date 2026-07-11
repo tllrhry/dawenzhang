@@ -19,6 +19,7 @@
 | 后端构建/启动/测试 | `Makefile`（`backend-dev`/`test`/`migrate`）、`backend/run.py` |
 | 前端结构与构建 | `frontend/`（Vite+React+TS，`package.json` scripts） |
 | 数据库迁移 | `backend/alembic/`、`backend/scripts/migrate.sh` |
+| 服务器发布/重启/健康检查 | `docs/服务器更新.md` |
 | GitNexus代码图谱 | `CLAUDE.md` GitNexus 段与 `.claude/skills/gitnexus/` |
 | 横切契约与gate | `.dual-agent/contracts.md` |
 | 已复现流程失误 | `.dual-agent/failures.md` |

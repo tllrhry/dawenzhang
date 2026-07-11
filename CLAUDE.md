@@ -70,10 +70,12 @@ This project is indexed by GitNexus as **dawenzhang** (768 symbols, 1425 relatio
 2. **模板摄取** `case_ingestion`：解析单企业 `.docx`（13 固定字段三列表格 + 旧版 `字段：内容` 段落兼容），缺失/重复/无法识别报 422 且不建案例。
 3. **判定规则** `decision_policy`：四级证据层优先级（主营营收 > 贸易合同/产业链 > 贷款用途 > 营业执照经营范围），逐级降级取最高可用层，低层冲突记录但不反转，异议并入既有层而非新增第五级。
 4. **检索** `retrieval`：按证据层分别 embedding → pgvector cosine Top30 召回 → 硅基流动 rerank Top5–8，产出可追溯 `EvidenceSnapshot`。
-5. **分类** `classification`：DeepSeek 受限判定，只能从候选中选一个四级代码/名称/匹配依据，`no_match` 转人工复核，云端失败明确抛错不臆造。
-6. **工作流** `classification_workflow`：首次分类 / 异议重判 / 版本递增（max+1），失败 rollback 不覆盖既有 completed。
-7. **导出** `case_export`：openpyxl 三工作表（案例输入 / 当前结论 / 判定历史）。
+5. **分类** `classification`：DeepSeek 受限判定，企业结论与贷款投向结论分别只能从各自候选中选择；笼统用途回落企业结论，超出经营范围或 `no_match` 转人工复核，云端失败明确抛错不臆造。
+6. **工作流** `classification_workflow`：首次分类 / 异议重判 / 版本递增（max+1），编排企业和贷款投向双候选；失败 rollback 不覆盖既有 completed。
+7. **导出** `case_export`：openpyxl 三工作表（案例输入 / 当前结论 / 判定历史），当前结论与历史均包含贷款投向字段。
 
-REST 入口 `backend/app/api/routes/national_economy.py`（8 端点：场景 / 模板下载 / 上传 / 案例 / 分类 / 异议 / 历史 / Excel 导出）；模型 `backend/app/models/national_economy.py` + 迁移 `alembic/versions/000{1..4}`。前端 `frontend/src/App.tsx` + `api.ts` 单页驱动全流程，dev 经 vite proxy 到 8000。
+REST 入口 `backend/app/api/routes/national_economy.py`（8 端点：场景 / 模板下载 / 上传 / 案例 / 分类 / 异议 / 历史 / Excel 导出）；模型 `backend/app/models/national_economy.py` + 迁移 `alembic/versions/0001` 至 `0005`。前端 `frontend/src/App.tsx` + `api.ts` 单页驱动全流程，dev 经 vite proxy 到 8000。
 
 云端依赖：硅基流动（embedding 4096 维 + rerank）、DeepSeek（最终分类）；分层超时 embedding 30s / DeepSeek 120s / 端到端 180s（nginx+uvicorn 须 ≥ 此值）。同步目录/联调前可跑 `backend/scripts/probe_models.py` 实测三 API。
+
+当前演示服务器使用 `/root/dawenzhang` 源码、`dawenzhang.service` 后端和宿主机 Nginx 静态前端；发布步骤见 `docs/服务器更新.md`。不将服务器地址、账号、密码或 `.env` 内容写入仓库。

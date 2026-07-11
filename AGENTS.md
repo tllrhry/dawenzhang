@@ -52,6 +52,6 @@ This project is indexed by GitNexus as **dawenzhang** (768 symbols, 1425 relatio
 
 ## 最小常驻事实
 
-- 后端：FastAPI + SQLAlchemy 2.x + Alembic，Python 3.12，端口 8000，API 前缀 `/api/v1`，DB 仅 SQLite；配置只经 `backend/app/core/config.py`（pydantic-settings）
+- 后端：FastAPI + SQLAlchemy 2.x + Alembic，Python 3.12，端口 8000，API 前缀 `/api/v1`，DB 仅 PostgreSQL + pgvector；配置只经 `backend/app/core/config.py`（pydantic-settings）
 - 前端：React 19 + Vite 6 + TypeScript 5.7，dev 端口 5173
-- 命令：后端测试 `PYTHONPATH=backend python -m pytest backend/tests`；前端 `npm run test`（`tsc --noEmit`）；迁移 `bash backend/scripts/migrate.sh`
+- 命令：后端测试 `PYTHONPATH=backend python -m pytest backend/tests`；前端 `npm run test`（`tsc --noEmit`）；迁移 `bash backend/scripts/migrate.sh`。生产服务器发布见 `docs/服务器更新.md`。

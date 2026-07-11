@@ -244,6 +244,18 @@ function ClassifyPage() {
     if (caseData) await runClassification(caseData.id)
   }
 
+  const backToClassification = () => {
+    window.sessionStorage.removeItem(currentCaseStorageKey)
+    setSelectedFile(undefined)
+    setCaseData(undefined)
+    setResult(undefined)
+    setErrorMessage(undefined)
+    setReviewText('')
+    setShowReview(false)
+    setStage('upload')
+    window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }))
+  }
+
   const reclassify = async () => {
     if (!caseData || !reviewText.trim()) return
     setIsSubmittingReview(true)
@@ -295,7 +307,7 @@ function ClassifyPage() {
       )}
 
       {stage === 'processing' && <ProcessingPanel fileName={caseData?.original_filename || selectedFile?.name} />}
-      {stage === 'result' && result && caseData && <ResultPanel caseData={caseData} result={result} errorMessage={errorMessage} showReview={showReview} setShowReview={setShowReview} reviewText={reviewText} setReviewText={setReviewText} isSubmittingReview={isSubmittingReview} onReclassify={() => void reclassify()} onRetry={() => void retryClassification()} />}
+      {stage === 'result' && result && caseData && <ResultPanel caseData={caseData} result={result} errorMessage={errorMessage} showReview={showReview} setShowReview={setShowReview} reviewText={reviewText} setReviewText={setReviewText} isSubmittingReview={isSubmittingReview} onBackToClassification={backToClassification} onReclassify={() => void reclassify()} onRetry={() => void retryClassification()} />}
     </main>
   )
 }
@@ -318,11 +330,18 @@ function ProcessingPanel({ fileName }: { fileName?: string }) {
   </section>
 }
 
-function ResultPanel({ caseData, result, errorMessage, showReview, setShowReview, reviewText, setReviewText, isSubmittingReview, onReclassify, onRetry }: {
-  caseData: ClassificationCase; result: ClassificationResult; errorMessage?: string; showReview: boolean; setShowReview: (value: boolean) => void; reviewText: string; setReviewText: (value: string) => void; isSubmittingReview: boolean; onReclassify: () => void; onRetry: () => void
+function ResultPanel({ caseData, result, errorMessage, showReview, setShowReview, reviewText, setReviewText, isSubmittingReview, onBackToClassification, onReclassify, onRetry }: {
+  caseData: ClassificationCase; result: ClassificationResult; errorMessage?: string; showReview: boolean; setShowReview: (value: boolean) => void; reviewText: string; setReviewText: (value: string) => void; isSubmittingReview: boolean; onBackToClassification: () => void; onReclassify: () => void; onRetry: () => void
 }) {
   const navigate = useNavigate()
   const needsReview = result.status === 'needs_review'
+  const toggleReview = () => {
+    const shouldShow = !showReview
+    setShowReview(shouldShow)
+    if (shouldShow) {
+      window.requestAnimationFrame(() => document.getElementById('classification-review')?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
+    }
+  }
   return <section className="result-layout">
     {errorMessage && <Alert className="result-error" type="error" showIcon message={errorMessage} action={<Button size="small" onClick={onRetry}>重试分类</Button>} />}
     <Card className="result-card input-result-card" bordered={false} title="Word 企业信息">
@@ -347,9 +366,9 @@ function ResultPanel({ caseData, result, errorMessage, showReview, setShowReview
         <Descriptions.Item label="贷款投向匹配依据">{result.loan_matching_basis || '--'}</Descriptions.Item>
         {result.objection?.description && <Descriptions.Item label="关联异议">{result.objection.description}</Descriptions.Item>}
       </Descriptions>
-      <div className="result-actions"><Button icon={<DownloadOutlined />} onClick={() => window.location.assign(exportUrl(caseData.id))}>导出 Excel</Button><Button icon={<HistoryOutlined />} onClick={() => navigate('/history')}>查看判定历史</Button><Button type="primary" onClick={() => setShowReview(!showReview)}>提出异议并复核</Button></div>
+      <div className="result-actions"><Button onClick={onBackToClassification}>返回国民经济分类</Button><Button icon={<DownloadOutlined />} onClick={() => window.location.assign(exportUrl(caseData.id))}>导出 Excel</Button><Button icon={<HistoryOutlined />} onClick={() => navigate('/history')}>查看判定历史</Button><Button type="primary" onClick={toggleReview}>提出异议并复核</Button></div>
     </Card>
-    {showReview && <Card className="review-card" bordered={false} title="补充异议信息，发起再次判定">
+    {showReview && <Card id="classification-review" className="review-card" bordered={false} title="补充异议信息，发起再次判定">
       <p>新的说明会与原始企业资料一同重新检索和判定，原有结论会保留在历史版本中。</p>
       <Input.TextArea value={reviewText} onChange={(event) => setReviewText(event.target.value)} placeholder="例如：企业实际主要收入来自……，请结合以下情况重新判定" autoSize={{ minRows: 4, maxRows: 6 }} />
       <div><Button onClick={() => setShowReview(false)}>取消</Button><Button type="primary" loading={isSubmittingReview} disabled={!reviewText.trim() || isSubmittingReview} onClick={onReclassify}>提交异议并重新判定</Button></div>

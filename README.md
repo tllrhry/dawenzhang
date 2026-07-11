@@ -1,6 +1,6 @@
 # 大文章智能分类 MVP
 
-本项目提供 React + TypeScript + Vite 前端和 FastAPI 后端。当前 MVP 已实现“国民经济行业分类”完整闭环：下载并填写单企业 Word 模板、上传解析 13 个经营字段、通过 PostgreSQL + pgvector 召回行业候选、使用硅基流动 rerank 重排、由 DeepSeek 生成唯一四级行业结论，并支持异议重判、版本历史和 Excel 导出。
+本项目提供 React + TypeScript + Vite 前端和 FastAPI 后端。当前 MVP 已实现“国民经济行业分类”完整闭环：下载并填写单企业 Word 模板、上传解析 13 个经营字段、通过 PostgreSQL + pgvector 召回行业候选、使用硅基流动 rerank 重排、由 DeepSeek 同时生成企业所属行业与贷款投向结论，并支持异议重判、版本历史和 Excel 导出。
 
 涉农分类和五篇大文章分类目前仅展示“暂未开放”，不进入上传或判定流程。
 
@@ -78,7 +78,7 @@ PYTHONPATH=backend python backend/scripts/sync_national_economy_catalog.py
 2. 下载 Word 模板并填写企业经营信息。
 3. 上传 `.docx`，系统解析并创建待分类案例。
 4. 发起分类，等待 embedding、pgvector 召回、rerank 和 DeepSeek 判定。
-5. 查看代码、名称、置信度、依据和 AI 总结。
+5. 查看企业所属行业结论，以及按规则回落、单独判定或转人工复核的贷款投向结论。
 6. 如有异议，补充说明并触发新版本重判。
 7. 查看历史并导出含“案例输入”“当前结论”“判定历史”的 Excel。
 
@@ -96,11 +96,15 @@ docker compose up --build -d
 
 数据库数据默认持久化到 `./data/pgdata`，上传与导出文件位于 `./data`。原始目录 Excel 通过只读挂载提供，不会打包进镜像。生产环境应在前端容器之前配置 HTTPS，并确保反向代理读取超时不低于 180 秒。
 
+## 服务器更新（当前演示环境）
+
+当前演示服务器不运行 Compose：代码位于 `/root/dawenzhang`，FastAPI 由 `dawenzhang.service` 管理，Nginx 从 `/opt/dawenzhang/frontend` 提供构建后的静态文件并反向代理 API。日常发布请按 [服务器更新手册](docs/服务器更新.md) 操作；手册包含拉取、迁移、前端构建、服务重启和健康检查的完整命令。
+
 ## MVP 范围与约束
 
 - 运行时数据库仅支持 PostgreSQL，并依赖 pgvector 扩展。
 - 当前只支持单企业 `.docx`，不支持批量上传。
-- 当前只输出一个 GB/T 4754 四位小类代码和名称，或返回“候选均不匹配”转人工复核。
+- 企业结论输出一个 GB/T 4754 四位小类代码和名称，或返回“候选均不匹配”转人工复核；贷款投向会按用途与经营范围的关系回落企业结论、单独输出行业结论或转人工复核。
 - embedding/rerank 使用硅基流动，最终分类使用 DeepSeek；云端不可用时明确失败，不伪造结论。
 - 不实现涉农、五篇大文章标签、企业名单硬匹配、消息队列或本地模型服务。
 

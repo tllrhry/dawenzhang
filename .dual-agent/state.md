@@ -22,6 +22,7 @@
 - 项目：dawenzhang（银行"五篇大文章"生成 + 国民经济分类，当前为骨架 MVP 阶段）
 - 后端：FastAPI + SQLAlchemy 2.x + Alembic，Python 3.12；入口 `backend/app/main.py`，配置 `backend/app/core/config.py`
 - 后端运行事实（默认值，环境变量/`.env`优先覆盖）：host `127.0.0.1`、port `8000`、API 前缀 `/api/v1`、DB `postgresql+psycopg://...`（仅接受 PostgreSQL，启用 pgvector）
+- 当前演示服务器：源码 `/root/dawenzhang`；`dawenzhang.service` 以 `dawenzhang` 用户运行 Uvicorn；Nginx 提供 `/opt/dawenzhang/frontend` 静态文件并代理 API。更新手册为 `docs/服务器更新.md`；不记录服务器凭据或 `.env` 内容。
 - 后端命令：启动 `PYTHONPATH=backend python backend/run.py`（Makefile `backend-dev`）；测试 `PYTHONPATH=backend python -m pytest backend/tests`（Makefile `test`）；迁移 `bash backend/scripts/migrate.sh`
 - 前端：React 19 + Vite 6 + TypeScript 5.7，dev 端口 5173；`npm run dev` / `npm run build`（`tsc -b && vite build`）/ `npm run test`（当前=`tsc --noEmit`，尚无运行时测试框架）
 - 域：`python`、`frontend`、`misc`（本项目无 Java 域）

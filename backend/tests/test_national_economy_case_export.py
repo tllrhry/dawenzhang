@@ -56,16 +56,12 @@ def test_export_case_workbook_contains_input_current_result_and_full_history() -
     assert tuple(cell.value for cell in current_sheet[1]) == (
         "行业代码",
         "行业名称",
-        "置信度",
         "匹配依据",
-        "AI 总结",
     )
     assert tuple(cell.value for cell in current_sheet[2]) == (
         "0111",
         "稻谷种植",
-        92,
         "主营业务与目录定义一致",
-        "企业主要从事稻谷种植",
     )
 
     history_sheet = workbook["判定历史"]
@@ -74,9 +70,7 @@ def test_export_case_workbook_contains_input_current_result_and_full_history() -
         "状态",
         "行业代码",
         "行业名称",
-        "置信度",
         "匹配依据",
-        "AI 总结",
         "关联异议",
     )
     assert tuple(cell.value for cell in history_sheet[2])[:4] == (
@@ -90,9 +84,7 @@ def test_export_case_workbook_contains_input_current_result_and_full_history() -
         "needs_review",
         None,
         None,
-        None,
         "候选均不匹配",
-        None,
         "主营收入结构已变化",
     )
 
@@ -110,5 +102,5 @@ def test_export_case_workbook_uses_readable_placeholder_without_completed_result
     workbook = load_workbook(BytesIO(export_case_workbook(case)))
 
     current_values = tuple(cell.value for cell in workbook["当前结论"][2])
-    assert current_values[:3] == (None, None, None)
-    assert current_values[3] == "暂无成功结论（案例状态：needs_review）"
+    assert current_values[:2] == (None, None)
+    assert current_values[2] == "暂无成功结论（案例状态：needs_review）"

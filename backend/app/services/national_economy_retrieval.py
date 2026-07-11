@@ -28,6 +28,8 @@ class RecallHit:
     chunk_type: str
     source_row: int
     distance: float
+    major_category_code: str | None = None
+    major_category_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -37,6 +39,8 @@ class IndustryCandidate:
     distance: float
     hits: tuple[RecallHit, ...]
     evidence_traces: tuple["CandidateEvidenceTrace", ...] = ()
+    major_category_code: str | None = None
+    major_category_name: str | None = None
 
     @property
     def rerank_document(self) -> str:
@@ -63,6 +67,8 @@ class EvidenceSnapshot:
     rerank_score: float
     hits: tuple[RecallHit, ...]
     evidence_traces: tuple["CandidateEvidenceTrace", ...] = ()
+    major_category_code: str | None = None
+    major_category_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -82,6 +88,8 @@ def recall_industry_chunks(
     distance = NationalEconomyIndustryChunk.embedding.cosine_distance(list(query_embedding))
     statement = (
         select(
+            NationalEconomyIndustryChunk.major_category_code,
+            NationalEconomyIndustryChunk.major_category_name,
             NationalEconomyIndustryChunk.industry_code,
             NationalEconomyIndustryChunk.industry_name,
             NationalEconomyIndustryChunk.text,
@@ -101,6 +109,8 @@ def recall_industry_chunks(
             chunk_type=row.chunk_type,
             source_row=row.source_row,
             distance=float(row.distance),
+            major_category_code=getattr(row, "major_category_code", None),
+            major_category_name=getattr(row, "major_category_name", None),
         )
         for row in rows
     )
@@ -116,6 +126,8 @@ def aggregate_recall_hits(hits: Sequence[RecallHit]) -> tuple[IndustryCandidate,
             industry_name=industry_hits[0].industry_name,
             distance=min(hit.distance for hit in industry_hits),
             hits=tuple(sorted(industry_hits, key=lambda hit: hit.distance)),
+            major_category_code=industry_hits[0].major_category_code,
+            major_category_name=industry_hits[0].major_category_name,
         )
         for industry_hits in grouped.values()
     ]
@@ -168,6 +180,8 @@ def aggregate_layer_recall_hits(
                 distance=min(hit.distance for _, hit in matches),
                 hits=tuple(sorted(unique_hits.values(), key=lambda hit: hit.distance)),
                 evidence_traces=traces,
+                major_category_code=first_hit.major_category_code,
+                major_category_name=first_hit.major_category_name,
             )
         )
     return tuple(sorted(candidates, key=lambda candidate: candidate.distance))
@@ -232,6 +246,8 @@ def rerank_candidates(
                     rerank_score=float(result["relevance_score"]),
                     hits=candidate.hits,
                     evidence_traces=candidate.evidence_traces,
+                    major_category_code=candidate.major_category_code,
+                    major_category_name=candidate.major_category_name,
                 )
             )
         return tuple(snapshots[:top_n])

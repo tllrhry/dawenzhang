@@ -19,6 +19,8 @@ INDUSTRY_CODE_PATTERN = re.compile(r"(?:[A-Z])?(\d{4})")
 
 @dataclass(frozen=True)
 class IndustryChunk:
+    major_category_code: str
+    major_category_name: str
     industry_code: str
     industry_name: str
     source_row: int
@@ -47,16 +49,24 @@ def build_industry_chunks(
 ) -> tuple[IndustryChunk, ...]:
     chunks: list[IndustryChunk] = []
     for source_row, row in enumerate(rows, start=2):
+        major_category_name = _cell_text(row, 0)
+        major_category_code = _cell_text(row, 1)
         industry_name = _cell_text(row, 2)
         raw_industry_code = _cell_text(row, 3)
         if not industry_name or not raw_industry_code:
             continue
+        if not major_category_name or not major_category_code:
+            raise ValueError(
+                f"missing major category code or name at source row {source_row}"
+            )
         industry_code = _normalize_industry_code(raw_industry_code, source_row)
         for chunk_type, column_index in CHUNK_COLUMNS:
             content = _cell_text(row, column_index)
             for text in split_bounded_text(content, max_characters):
                 chunks.append(
                     IndustryChunk(
+                        major_category_code=major_category_code,
+                        major_category_name=major_category_name,
                         industry_code=industry_code,
                         industry_name=industry_name,
                         source_row=source_row,
@@ -152,6 +162,8 @@ def full_resync_catalog(
     values = [
         {
             "catalog_version_id": version.id,
+            "major_category_code": chunk.major_category_code,
+            "major_category_name": chunk.major_category_name,
             "industry_code": chunk.industry_code,
             "industry_name": chunk.industry_name,
             "source_row": chunk.source_row,
@@ -165,6 +177,8 @@ def full_resync_catalog(
     statement = statement.on_conflict_do_update(
         constraint="uq_national_economy_industry_chunk_source",
         set_={
+            "major_category_code": statement.excluded.major_category_code,
+            "major_category_name": statement.excluded.major_category_name,
             "industry_name": statement.excluded.industry_name,
             "embedding": statement.excluded.embedding,
         },

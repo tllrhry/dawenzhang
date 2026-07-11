@@ -151,9 +151,9 @@ def test_initial_classification_saves_first_completed_version() -> None:
 
     assert result.version == 1
     assert result.status == "completed"
-    assert result.confidence == 92
+    assert result.confidence is None
     assert result.rationale == "主营业务和目录定义一致"
-    assert result.ai_summary == "企业主要从事稻谷种植"
+    assert result.ai_summary is None
     assert case.status == "completed"
     evidence_layers = retrieval.call_args.args[1]
     assert evidence_layers[0].level is EvidenceLevel.MAIN_BUSINESS_REVENUE
@@ -197,6 +197,8 @@ def test_objection_reclassification_appends_version_and_preserves_history() -> N
     assert result.objection == objection
     assert original.version == 1
     assert original.industry_code == "0112"
+    assert original.confidence == 70
+    assert original.ai_summary == "原总结"
     assert original.objection is None
     assert tuple(item.version for item in case.result_versions) == (1, 2)
     assert classifier.call_args.args[3] == objection

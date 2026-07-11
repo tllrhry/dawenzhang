@@ -29,9 +29,7 @@ class ClassificationResultResponse(BaseModel):
     status: str
     industry_code: str | None
     industry_name: str | None
-    confidence: int | None
-    rationale: str | None
-    ai_summary: str | None
+    matching_basis: str | None = Field(validation_alias="rationale")
     candidate_snapshot: list[dict[str, object]]
     objection: dict[str, object] | None
     created_at: datetime

@@ -29,6 +29,8 @@ def test_build_industry_chunks_preserves_types_and_character_limit() -> None:
     ]
     assert all(0 < len(chunk.text) <= MAX_CHUNK_CHARACTERS for chunk in chunks)
     assert chunks[0].source_row == 2
+    assert chunks[0].major_category_code == "A01"
+    assert chunks[0].major_category_name == "大类"
     assert chunks[0].industry_code == "0111"
 
 
@@ -132,6 +134,8 @@ def test_full_resync_batches_embedding_and_builds_idempotent_upsert() -> None:
     sql = str(statement.compile(dialect=postgresql.dialect()))
     assert "ON CONFLICT ON CONSTRAINT uq_national_economy_industry_chunk_source DO UPDATE" in sql
     assert "embedding = excluded.embedding" in sql
+    assert "major_category_code = excluded.major_category_code" in sql
+    assert "major_category_name = excluded.major_category_name" in sql
 
 
 def test_full_resync_does_not_create_large_index_files(tmp_path: Path) -> None:

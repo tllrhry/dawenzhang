@@ -48,6 +48,7 @@ def test_unchanged_identity_skips_full_resync(tmp_path: Path) -> None:
     result = synchronize_catalog(session, source, "embedding-model", 4096, full_resync)
 
     assert result.created is False
+    assert result.resynchronized is False
     assert result.version is existing
     statement = session.scalar.call_args.args[0]
     assert set(statement.compile().params.values()) == {
@@ -57,6 +58,39 @@ def test_unchanged_identity_skips_full_resync(tmp_path: Path) -> None:
     }
     session.add.assert_not_called()
     full_resync.assert_not_called()
+
+
+def test_force_resync_refreshes_existing_version_without_creating_one(
+    tmp_path: Path,
+) -> None:
+    catalog_path = tmp_path / "catalog.xlsx"
+    write_catalog(catalog_path)
+    source = read_catalog_source(catalog_path)
+    existing = NationalEconomyCatalogVersion(
+        id=1,
+        version="existing",
+        source_hash=source.source_hash,
+        embedding_model="embedding-model",
+        embedding_dimension=4096,
+    )
+    session = Mock()
+    session.scalar.return_value = existing
+    full_resync = Mock()
+
+    result = synchronize_catalog(
+        session,
+        source,
+        "embedding-model",
+        4096,
+        full_resync,
+        force_resync=True,
+    )
+
+    assert result.created is False
+    assert result.resynchronized is True
+    assert result.version is existing
+    full_resync.assert_called_once_with(session, existing, source.rows)
+    session.add.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -94,6 +128,7 @@ def test_any_identity_change_triggers_full_resync(
         prior_version.embedding_dimension,
     ) != ("embedding-model", 4096)
     assert result.created is True
+    assert result.resynchronized is True
     assert result.version.source_hash == source.source_hash
     assert result.version.embedding_model == "embedding-model"
     assert result.version.embedding_dimension == 4096

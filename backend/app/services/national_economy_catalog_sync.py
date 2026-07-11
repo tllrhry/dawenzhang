@@ -37,6 +37,7 @@ class CatalogSyncSource:
 @dataclass(frozen=True)
 class CatalogSyncResult:
     created: bool
+    resynchronized: bool
     version: NationalEconomyCatalogVersion
 
 
@@ -69,6 +70,8 @@ def synchronize_catalog(
     embedding_model: str,
     embedding_dimension: int,
     full_resync: FullResync,
+    *,
+    force_resync: bool = False,
 ) -> CatalogSyncResult:
     existing_version = session.scalar(
         select(NationalEconomyCatalogVersion).where(
@@ -78,7 +81,13 @@ def synchronize_catalog(
         )
     )
     if existing_version is not None:
-        return CatalogSyncResult(created=False, version=existing_version)
+        if force_resync:
+            full_resync(session, existing_version, source.rows)
+        return CatalogSyncResult(
+            created=False,
+            resynchronized=force_resync,
+            version=existing_version,
+        )
 
     version = NationalEconomyCatalogVersion(
         version=sha256(
@@ -91,4 +100,4 @@ def synchronize_catalog(
     session.add(version)
     session.flush()
     full_resync(session, version, source.rows)
-    return CatalogSyncResult(created=True, version=version)
+    return CatalogSyncResult(created=True, resynchronized=True, version=version)

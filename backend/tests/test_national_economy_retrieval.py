@@ -47,6 +47,8 @@ def test_recall_uses_pgvector_cosine_distance_and_top_30() -> None:
     session = Mock()
     session.execute.return_value.all.return_value = [
         SimpleNamespace(
+            major_category_code="A01",
+            major_category_name="农、林、牧、渔业",
             industry_code="0111",
             industry_name="稻谷种植",
             text="稻谷种植定义",
@@ -63,6 +65,8 @@ def test_recall_uses_pgvector_cosine_distance_and_top_30() -> None:
     assert "<=>" in sql
     assert statement._limit_clause.value == RECALL_LIMIT
     assert hits[0].industry_code == "0111"
+    assert hits[0].major_category_code == "A01"
+    assert hits[0].major_category_name == "农、林、牧、渔业"
 
 
 def test_aggregate_recall_hits_groups_by_four_digit_industry_code() -> None:

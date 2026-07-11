@@ -49,6 +49,8 @@ def _candidate(code: str, name: str, text: str) -> EvidenceSnapshot:
                 (hit,),
             ),
         ),
+        major_category_code="A01",
+        major_category_name="农、林、牧、渔业",
     )
 
 
@@ -97,9 +99,7 @@ def test_classification_accepts_exact_candidate_pair_and_required_fields() -> No
         "no_match": False,
         "industry_code": "0111",
         "industry_name": "稻谷种植",
-        "confidence": 87.5,
         "matching_basis": "主营水稻种植，与候选定义一致。",
-        "summary": "企业归入稻谷种植。",
     }
 
     with _client(output) as client:
@@ -114,10 +114,12 @@ def test_classification_accepts_exact_candidate_pair_and_required_fields() -> No
     assert result.status == "completed"
     assert result.industry_code == "0111"
     assert result.industry_name == "稻谷种植"
-    assert result.confidence == 87.5
+    assert result.confidence is None
     assert result.matching_basis
-    assert result.summary
+    assert result.summary is None
     assert result.objection == {"补充说明": "收入主要来自水稻"}
+    assert result.candidate_snapshot[0]["major_category_code"] == "A01"
+    assert result.candidate_snapshot[0]["major_category_name"] == "农、林、牧、渔业"
     assert result.candidate_snapshot[0]["definition_and_hits"][0]["text"] == "稻谷种植的定义"
 
 
@@ -175,6 +177,7 @@ def test_request_sends_ordered_evidence_and_traceable_candidate_fragments() -> N
     assert trace["matched_catalog_fragments"][0]["text"] == "目录命中片段"
     assert "目录命中片段" in str(user_content["candidates"])
     assert "低层冲突不得推翻高层" in captured["messages"][0]["content"]
+    assert "不得返回置信度或 AI 总结" in captured["messages"][0]["content"]
 
 
 def test_no_match_returns_needs_review_without_forced_conclusion() -> None:
@@ -202,11 +205,9 @@ def test_no_match_returns_needs_review_without_forced_conclusion() -> None:
     [
         ({"industry_code": "9999"}, "exactly match"),
         ({"industry_name": "小麦种植"}, "exactly match"),
-        ({"confidence": -1}, "between 0 and 100"),
-        ({"confidence": 101}, "between 0 and 100"),
-        ({"confidence": "90"}, "must be a number"),
         ({"matching_basis": ""}, "matching_basis must be non-empty"),
-        ({"summary": None}, "summary must be non-empty"),
+        ({"confidence": 90}, r"unexpected=\['confidence'\]"),
+        ({"summary": "分类总结"}, r"unexpected=\['summary'\]"),
     ],
 )
 def test_invalid_selected_result_fails_without_conclusion(overrides, message) -> None:
@@ -214,9 +215,7 @@ def test_invalid_selected_result_fails_without_conclusion(overrides, message) ->
         "no_match": False,
         "industry_code": "0111",
         "industry_name": "稻谷种植",
-        "confidence": 90,
         "matching_basis": "匹配定义",
-        "summary": "分类总结",
     }
     output.update(overrides)
 
@@ -228,6 +227,51 @@ def test_invalid_selected_result_fails_without_conclusion(overrides, message) ->
                     _candidate("0111", "稻谷种植", "定义"),
                     _candidate("0112", "小麦种植", "定义"),
                 ),
+                _settings(),
+                client=client,
+            )
+
+
+@pytest.mark.parametrize("missing_field", ["industry_code", "industry_name", "matching_basis"])
+def test_successful_result_requires_exact_three_business_fields(
+    missing_field: str,
+) -> None:
+    output = {
+        "no_match": False,
+        "industry_code": "0111",
+        "industry_name": "稻谷种植",
+        "matching_basis": "匹配定义",
+    }
+    del output[missing_field]
+
+    with _client(output) as client:
+        with pytest.raises(
+            NationalEconomyClassificationError,
+            match=rf"missing=\['{missing_field}'\]",
+        ):
+            classify_national_economy(
+                _evidence(),
+                (_candidate("0111", "稻谷种植", "定义"),),
+                _settings(),
+                client=client,
+            )
+
+
+def test_no_match_rejects_success_fields_and_keeps_review_branch() -> None:
+    output = {
+        "no_match": True,
+        "reason": "候选均不适用",
+        "industry_code": "0111",
+    }
+
+    with _client(output) as client:
+        with pytest.raises(
+            NationalEconomyClassificationError,
+            match="unexpected=\\['industry_code'\\]",
+        ):
+            classify_national_economy(
+                _evidence(),
+                (_candidate("0111", "稻谷种植", "定义"),),
                 _settings(),
                 client=client,
             )

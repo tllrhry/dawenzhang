@@ -169,7 +169,14 @@ def test_classification_objection_history_and_failure_responses(
     monkeypatch.setattr(route_module, "classify_case", fake_classify)
     response = client.post(f"/api/v1/national-economy/cases/{case_id}/classifications")
     assert response.status_code == 200
-    assert response.json()["version"] == 1
+    classification_payload = response.json()
+    assert classification_payload["version"] == 1
+    assert classification_payload["industry_code"] == "0111"
+    assert classification_payload["industry_name"] == "稻谷种植"
+    assert classification_payload["matching_basis"] == "主营业务与目录定义一致"
+    assert "confidence" not in classification_payload
+    assert "ai_summary" not in classification_payload
+    assert "rationale" not in classification_payload
 
     blank = client.post(
         f"/api/v1/national-economy/cases/{case_id}/objections",
@@ -183,12 +190,26 @@ def test_classification_objection_history_and_failure_responses(
         json={"objection_text": "主营收入主要来自小麦"},
     )
     assert objection.status_code == 200
-    assert objection.json()["version"] == 2
-    assert objection.json()["objection"]["description"] == "主营收入主要来自小麦"
+    objection_payload = objection.json()
+    assert objection_payload["version"] == 2
+    assert objection_payload["objection"]["description"] == "主营收入主要来自小麦"
+    assert "confidence" not in objection_payload
+    assert "ai_summary" not in objection_payload
 
     history = client.get(f"/api/v1/national-economy/cases/{case_id}/history")
     assert history.status_code == 200
-    assert [item["version"] for item in history.json()["items"]] == [1, 2]
+    history_items = history.json()["items"]
+    assert [item["version"] for item in history_items] == [1, 2]
+    assert all("matching_basis" in item for item in history_items)
+    assert all("confidence" not in item for item in history_items)
+    assert all("ai_summary" not in item for item in history_items)
+
+    case_payload = client.get(f"/api/v1/national-economy/cases/{case_id}").json()
+    assert case_payload["current_result"]["matching_basis"] == (
+        "主营业务与目录定义一致"
+    )
+    assert "confidence" not in case_payload["current_result"]
+    assert "ai_summary" not in case_payload["current_result"]
 
     def failing_classify(session: Session, case: NationalEconomyClassificationCase):
         raise RuntimeError("cloud unavailable")

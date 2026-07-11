@@ -48,10 +48,10 @@ def _write_case_input(sheet: Worksheet, case: NationalEconomyClassificationCase)
 def _write_current_result(
     sheet: Worksheet, case: NationalEconomyClassificationCase
 ) -> None:
-    sheet.append(("行业代码", "行业名称", "置信度", "匹配依据", "AI 总结"))
+    sheet.append(("行业代码", "行业名称", "匹配依据"))
     result = get_current_completed_result(case)
     if result is None:
-        sheet.append(("", "", "", f"暂无成功结论（案例状态：{case.status}）", ""))
+        sheet.append(("", "", f"暂无成功结论（案例状态：{case.status}）"))
         return
     sheet.append(_result_values(result))
 
@@ -65,9 +65,7 @@ def _write_result_history(
             "状态",
             "行业代码",
             "行业名称",
-            "置信度",
             "匹配依据",
-            "AI 总结",
             "关联异议",
         )
     )
@@ -84,13 +82,11 @@ def _write_result_history(
 
 def _result_values(
     result: NationalEconomyClassificationResult,
-) -> tuple[object, object, object, object, object]:
+) -> tuple[object, object, object]:
     return (
         _cell_value(result.industry_code),
         _cell_value(result.industry_name),
-        _cell_value(result.confidence),
         _cell_value(result.rationale),
-        _cell_value(result.ai_summary),
     )
 
 

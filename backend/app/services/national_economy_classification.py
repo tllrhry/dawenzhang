@@ -132,6 +132,8 @@ def _build_request_payload(
 
 def _serialize_candidate(candidate: EvidenceSnapshot) -> dict[str, object]:
     return {
+        "major_category_code": candidate.major_category_code,
+        "major_category_name": candidate.major_category_name,
         "industry_code": candidate.industry_code,
         "industry_name": candidate.industry_name,
         "definition_and_hits": [

@@ -18,9 +18,7 @@ export interface ClassificationResult {
   status: ClassificationStatus
   industry_code: string | null
   industry_name: string | null
-  confidence: number | null
-  rationale: string
-  ai_summary: string
+  matching_basis: string | null
   candidate_snapshot: unknown[]
   objection: ResultObjection | null
   created_at: string

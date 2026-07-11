@@ -214,13 +214,9 @@ def _build_result(
         status=classification.status,
         industry_code=classification.industry_code,
         industry_name=classification.industry_name,
-        confidence=(
-            round(classification.confidence)
-            if classification.confidence is not None
-            else None
-        ),
+        confidence=None,
         rationale=classification.matching_basis,
-        ai_summary=classification.summary,
+        ai_summary=None,
         candidate_snapshot=list(classification.candidate_snapshot),
         objection=dict(objection) if objection is not None else None,
         model_output=dict(classification.model_output),

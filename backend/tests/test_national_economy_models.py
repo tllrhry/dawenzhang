@@ -27,6 +27,8 @@ def test_model_metadata_contains_catalog_and_chunk_fields() -> None:
     assert {
         "id",
         "catalog_version_id",
+        "major_category_code",
+        "major_category_name",
         "industry_code",
         "industry_name",
         "source_row",
@@ -49,6 +51,8 @@ def test_migration_creates_tables_and_pgvector_column() -> None:
         for column in inspector.get_columns("national_economy_industry_chunks")
     }
     assert str(columns["embedding"]["type"]) == f"VECTOR({get_settings().embedding_dimension})"
+    assert columns["major_category_code"]["nullable"]
+    assert columns["major_category_name"]["nullable"]
 
 
 def test_model_metadata_contains_case_and_result_history_fields() -> None:

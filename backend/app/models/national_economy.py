@@ -57,6 +57,10 @@ class NationalEconomyIndustryChunk(Base):
         nullable=False,
         index=True,
     )
+    major_category_code: Mapped[str | None] = mapped_column(
+        String(16), nullable=True, index=True
+    )
+    major_category_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     industry_code: Mapped[str] = mapped_column(String(4), nullable=False, index=True)
     industry_name: Mapped[str] = mapped_column(String(255), nullable=False)
     source_row: Mapped[int] = mapped_column(Integer, nullable=False)

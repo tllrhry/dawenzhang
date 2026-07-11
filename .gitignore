@@ -15,8 +15,14 @@ data/
 .DS_Store
 .~*
 
+# 本地双 Agent 私有入口（Claude 本地覆盖，不入库）
+CLAUDE.local.md
+
 # Sensitive project data directories
 /五篇大文章映射/
 /国民经济/
 /模板文件/
 /副本五篇大文章需求书0710.docx
+
+# OpenSpec 业务规格为本地敏感文档，不入库（含手填的接口/密钥线索）
+/openspec/

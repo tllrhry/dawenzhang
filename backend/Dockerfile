@@ -6,4 +6,6 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 COPY backend /app
 ENV PYTHONPATH=/app
 EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--proxy-headers"]
+# Keep-alive kept above the 180s classification budget so the synchronous
+# embedding -> pgvector -> rerank -> DeepSeek chain is not cut mid-request.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--proxy-headers", "--timeout-keep-alive", "190"]

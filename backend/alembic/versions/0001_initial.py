@@ -1,10 +1,13 @@
-"""Initial empty schema for the application foundation.
+"""Initial schema foundation: enable the pgvector extension.
 
-Business tables will be introduced by later changes. Keeping this revision
-explicit gives deployments a stable Alembic starting point.
+Business tables are introduced by later changes. This revision only enables the
+`vector` extension so subsequent migrations can declare pgvector columns, and
+gives deployments a stable Alembic starting point on PostgreSQL.
 """
 
 from typing import Sequence, Union
+
+from alembic import op
 
 
 revision: str = "0001_initial"
@@ -14,9 +17,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    pass
+    op.execute("CREATE EXTENSION IF NOT EXISTS vector")
 
 
 def downgrade() -> None:
+    # Keep the extension in place on downgrade; other objects may depend on it.
     pass
-

@@ -1,4 +1,37 @@
 services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-dawenzhang}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dawenzhang}
+      POSTGRES_DB: ${POSTGRES_DB:-dawenzhang}
+    # Modest resources tuned for a 2C4G host.
+    command:
+      - "postgres"
+      - "-c"
+      - "max_connections=20"
+      - "-c"
+      - "shared_buffers=256MB"
+      - "-c"
+      - "effective_cache_size=1GB"
+      - "-c"
+      - "work_mem=16MB"
+      - "-c"
+      - "maintenance_work_mem=128MB"
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - ${DB_DATA_DIR:-./data/pgdata}:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dawenzhang} -d ${POSTGRES_DB:-dawenzhang}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 1536M
+
   backend:
     build:
       context: .
@@ -7,11 +40,17 @@ services:
       - ${ENV_FILE:-.env}
     environment:
       BACKEND_HOST: 0.0.0.0
-      DATABASE_URL: sqlite:////data/dawenzhang.db
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-dawenzhang}:${POSTGRES_PASSWORD:-dawenzhang}@db:5432/${POSTGRES_DB:-dawenzhang}
       UPLOAD_DIR: /data/uploads
       EXPORT_DIR: /data/exports
+      NATIONAL_ECONOMY_CATALOG_PATH: ${NATIONAL_ECONOMY_CATALOG_PATH:-/catalog/国民经济行业分类V1-0814.xlsx}
     volumes:
       - ${APP_DATA_DIR:-./data}:/data
+      # Raw catalog Excel is mounted read-only, never baked into the image.
+      - ${CATALOG_HOST_DIR:-./国民经济}:/catalog:ro
+    depends_on:
+      db:
+        condition: service_healthy
 
   frontend:
     build:

@@ -5,6 +5,10 @@ from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 
+# PostgreSQL is the only supported runtime database. pgvector stores the
+# national-economy retrieval fragments, so a SQLite fallback is not offered.
+_ALLOWED_DB_BACKENDS = {"postgresql", "postgres"}
+
 
 class Settings(BaseSettings):
     """Runtime configuration loaded from environment variables or .env."""
@@ -28,46 +32,108 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("CORS_ORIGINS"),
     )
 
+    # PostgreSQL + pgvector. Use the psycopg (v3) driver.
     database_url: str = Field(
-        default="sqlite:///./data/dawenzhang.db",
+        default="postgresql+psycopg://dawenzhang:dawenzhang@127.0.0.1:5432/dawenzhang",
         validation_alias=AliasChoices("DATABASE_URL"),
     )
+    db_pool_size: int = Field(default=5, validation_alias=AliasChoices("DB_POOL_SIZE"))
+    db_max_overflow: int = Field(default=5, validation_alias=AliasChoices("DB_MAX_OVERFLOW"))
+    db_pool_timeout_seconds: float = Field(
+        default=30.0, validation_alias=AliasChoices("DB_POOL_TIMEOUT_SECONDS")
+    )
+
     upload_dir: Path = Field(default=Path("./data/uploads"), validation_alias=AliasChoices("UPLOAD_DIR"))
     export_dir: Path = Field(default=Path("./data/exports"), validation_alias=AliasChoices("EXPORT_DIR"))
 
-    ai_base_url: str | None = Field(default=None, validation_alias=AliasChoices("AI_BASE_URL"))
-    ai_api_key: str | None = Field(default=None, validation_alias=AliasChoices("AI_API_KEY"))
-    ai_connect_timeout_seconds: float = Field(
-        default=10.0, validation_alias=AliasChoices("AI_CONNECT_TIMEOUT_SECONDS")
+    # Raw GB/T 4754-2017 catalog Excel. The file is the single source of truth
+    # for catalog synchronization and is mounted, never committed.
+    national_economy_catalog_path: Path | None = Field(
+        default=None, validation_alias=AliasChoices("NATIONAL_ECONOMY_CATALOG_PATH")
     )
-    ai_read_timeout_seconds: float = Field(
-        default=90.0, validation_alias=AliasChoices("AI_READ_TIMEOUT_SECONDS")
+
+    # Shared HTTP connect timeout for the cloud model clients.
+    http_connect_timeout_seconds: float = Field(
+        default=10.0, validation_alias=AliasChoices("HTTP_CONNECT_TIMEOUT_SECONDS")
+    )
+
+    # SiliconFlow: embedding + rerank.
+    siliconflow_base_url: str = Field(
+        default="https://api.siliconflow.cn/v1",
+        validation_alias=AliasChoices("SILICONFLOW_BASE_URL"),
+    )
+    siliconflow_api_key: str | None = Field(
+        default=None, validation_alias=AliasChoices("SILICONFLOW_API_KEY")
+    )
+    siliconflow_embedding_model: str = Field(
+        default="Qwen/Qwen3-Embedding-8B",
+        validation_alias=AliasChoices("SILICONFLOW_EMBEDDING_MODEL"),
+    )
+    siliconflow_rerank_model: str = Field(
+        default="Qwen/Qwen3-Reranker-8B",
+        validation_alias=AliasChoices("SILICONFLOW_RERANK_MODEL"),
+    )
+    embedding_dimension: int = Field(
+        default=4096, validation_alias=AliasChoices("EMBEDDING_DIMENSION")
+    )
+    siliconflow_timeout_seconds: float = Field(
+        default=30.0, validation_alias=AliasChoices("SILICONFLOW_TIMEOUT_SECONDS")
+    )
+    siliconflow_embedding_batch_size: int = Field(
+        default=32, validation_alias=AliasChoices("SILICONFLOW_EMBEDDING_BATCH_SIZE")
+    )
+
+    # DeepSeek: constrained single-result classification.
+    deepseek_base_url: str = Field(
+        default="https://api.deepseek.com/v1",
+        validation_alias=AliasChoices("DEEPSEEK_BASE_URL"),
+    )
+    deepseek_api_key: str | None = Field(
+        default=None, validation_alias=AliasChoices("DEEPSEEK_API_KEY")
+    )
+    deepseek_model: str = Field(
+        default="deepseek-v4-flash", validation_alias=AliasChoices("DEEPSEEK_MODEL")
+    )
+    deepseek_timeout_seconds: float = Field(
+        default=120.0, validation_alias=AliasChoices("DEEPSEEK_TIMEOUT_SECONDS")
+    )
+
+    # End-to-end synchronous classification budget (nginx/uvicorn must stay >= this).
+    classification_timeout_seconds: float = Field(
+        default=180.0, validation_alias=AliasChoices("CLASSIFICATION_TIMEOUT_SECONDS")
     )
 
     @field_validator("database_url")
     @classmethod
     def validate_database_url(cls, value: str) -> str:
-        if make_url(value).drivername != "sqlite":
-            raise ValueError("DATABASE_URL must use SQLite for the demonstration runtime")
+        backend = make_url(value).get_backend_name()
+        if backend not in _ALLOWED_DB_BACKENDS:
+            raise ValueError("DATABASE_URL must use PostgreSQL (pgvector) for this application")
         return value
 
-    @field_validator("ai_connect_timeout_seconds", "ai_read_timeout_seconds")
+    @field_validator(
+        "http_connect_timeout_seconds",
+        "siliconflow_timeout_seconds",
+        "deepseek_timeout_seconds",
+        "classification_timeout_seconds",
+        "db_pool_timeout_seconds",
+    )
     @classmethod
     def validate_positive_timeout(cls, value: float) -> float:
         if value <= 0:
-            raise ValueError("AI timeouts must be greater than zero")
+            raise ValueError("timeouts must be greater than zero")
+        return value
+
+    @field_validator("embedding_dimension")
+    @classmethod
+    def validate_embedding_dimension(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("EMBEDDING_DIMENSION must be greater than zero")
         return value
 
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
-
-    @property
-    def database_path(self) -> Path | None:
-        database = make_url(self.database_url).database
-        if database is None or database == ":memory:":
-            return None
-        return Path(database)
 
 
 @lru_cache

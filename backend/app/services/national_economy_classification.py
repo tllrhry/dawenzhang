@@ -11,10 +11,22 @@ from app.services.national_economy_retrieval import EvidenceSnapshot
 
 
 ClassificationStatus = Literal["completed", "needs_review"]
-_SUCCESS_OUTPUT_FIELDS = frozenset(
+LoanSpecificity = Literal["generic", "specific"]
+_ENTERPRISE_SUCCESS_OUTPUT_FIELDS = frozenset(
     {"no_match", "industry_code", "industry_name", "matching_basis"}
 )
-_NO_MATCH_OUTPUT_FIELDS = frozenset({"no_match", "reason"})
+_ENTERPRISE_NO_MATCH_OUTPUT_FIELDS = frozenset({"no_match", "reason"})
+_LOAN_SUCCESS_OUTPUT_FIELDS = frozenset(
+    {
+        "no_match",
+        "industry_code",
+        "industry_name",
+        "matching_basis",
+        "specificity",
+    }
+)
+_LOAN_NO_MATCH_OUTPUT_FIELDS = frozenset({"no_match", "reason", "specificity"})
+_DUAL_OUTPUT_FIELDS = frozenset({"enterprise", "loan_direction"})
 
 
 class NationalEconomyClassificationError(RuntimeError):
@@ -32,6 +44,11 @@ class ConstrainedClassificationResult:
     candidate_snapshot: tuple[dict[str, object], ...]
     objection: dict[str, object] | None
     model_output: dict[str, object]
+    loan_industry_code: str | None = None
+    loan_industry_name: str | None = None
+    loan_matching_basis: str | None = None
+    loan_specificity: LoanSpecificity | None = None
+    loan_matches_enterprise: bool | None = None
 
 
 def classify_national_economy(
@@ -40,6 +57,7 @@ def classify_national_economy(
     settings: Settings,
     objection: Mapping[str, object] | None = None,
     client: httpx.Client | None = None,
+    loan_direction_candidates: Sequence[EvidenceSnapshot] = (),
 ) -> ConstrainedClassificationResult:
     if not candidates:
         raise ValueError("at least one industry candidate is required")
@@ -49,9 +67,13 @@ def classify_national_economy(
         )
 
     candidate_snapshot = tuple(_serialize_candidate(candidate) for candidate in candidates)
+    loan_direction_candidate_snapshot = tuple(
+        _serialize_candidate(candidate) for candidate in loan_direction_candidates
+    )
     request_payload = _build_request_payload(
         evidence_layers,
         candidate_snapshot,
+        loan_direction_candidate_snapshot,
         settings.deepseek_model,
         objection,
     )
@@ -73,6 +95,7 @@ def classify_national_economy(
         return _validate_model_response(
             response.json(),
             candidates,
+            loan_direction_candidates,
             candidate_snapshot,
             objection,
         )
@@ -88,6 +111,7 @@ def classify_national_economy(
 def _build_request_payload(
     evidence_layers: Sequence[EvidenceLayer],
     candidate_snapshot: Sequence[dict[str, object]],
+    loan_direction_candidate_snapshot: Sequence[dict[str, object]],
     model: str,
     objection: Mapping[str, object] | None,
 ) -> dict[str, object]:
@@ -96,7 +120,8 @@ def _build_request_payload(
         "ordered_evidence": [
             _serialize_evidence_layer(layer) for layer in ordered_layers
         ],
-        "candidates": list(candidate_snapshot),
+        "enterprise_candidates": list(candidate_snapshot),
+        "loan_direction_candidates": list(loan_direction_candidate_snapshot),
     }
     if objection is not None:
         prompt_input["objection"] = dict(objection)
@@ -109,17 +134,28 @@ def _build_request_payload(
                 "role": "system",
                 "content": (
                     "你是 GB/T 4754-2017 国民经济行业分类器。只能依据企业输入、"
-                    "异议（如有）和给定候选的定义/命中片段作答，不得使用或声称使用"
+                    "异议（如有）和两组给定候选的定义/命中片段作答，不得使用或声称使用"
                     "候选外目录、企业清单、涉农规则或其他标签。企业证据已按 priority=1"
                     "到 4 排序：主营业务及营收、贸易合同及产业链、贷款用途、营业执照"
                     "经营范围。必须采用最高可用层；低层冲突不得推翻高层，只有高层不可用"
                     "才可降级，并须在 matching_basis 说明采用层级、字段标签、目录片段及"
                     "冲突或降级理由。异议已并入 ordered_evidence 的既有层，不是第五级。"
-                    "必须仅返回 JSON。若存在"
-                    "合适候选，返回 no_match=false、industry_code、industry_name、"
-                    "matching_basis，除这四个键外不得返回其他字段；代码和名称必须来自"
-                    "同一候选且只能选择一个，不得返回置信度或 AI 总结。若候选均不匹配，"
-                    "仅返回 no_match=true 和非空 reason，不得强选候选。"
+                    "贷款投向必须按以下决策树判定：一、贷款用途为空或仅为经营周转、"
+                    "流动资金、经营使用等未指向具体经营领域的笼统表述，返回"
+                    "specificity=generic，投向代码和名称必须回落为企业结论；二、具体用途"
+                    "命中主营，返回 specificity=specific，投向仍为企业结论；三、具体用途"
+                    "不在主营但在营业执照经营范围内，从给定候选中选择该实际投向；四、"
+                    "具体用途既不在主营也不在经营范围，贷款投向返回 no_match=true 及非空"
+                    "reason，不得臆造代码或名称。贷款投向 matching_basis 必须说明实际投向"
+                    "用途、匹配到的经营范围或主营条目及对应四级代码。企业代码/名称只能从"
+                    "enterprise_candidates 的同一记录选择；specific 的贷款投向代码/名称"
+                    "只能从 enterprise_candidates 或 loan_direction_candidates 的同一记录"
+                    "选择，generic 只能等于企业结论。必须仅返回 JSON，根对象只能包含"
+                    "enterprise 和 loan_direction。每个成功子结论返回 no_match=false、"
+                    "industry_code、industry_name、matching_basis，贷款投向还须返回"
+                    "specificity；每个无匹配子结论仅返回 no_match=true 和非空 reason，"
+                    "贷款投向还须返回 specificity。不得返回置信度、AI 总结或 matched；"
+                    "一致性由服务端复算。"
                 ),
             },
             {
@@ -192,6 +228,7 @@ def _serialize_evidence_layer(layer: EvidenceLayer) -> dict[str, object]:
 def _validate_model_response(
     response_payload: object,
     candidates: Sequence[EvidenceSnapshot],
+    loan_direction_candidates: Sequence[EvidenceSnapshot],
     candidate_snapshot: tuple[dict[str, object], ...],
     objection: Mapping[str, object] | None,
 ) -> ConstrainedClassificationResult:
@@ -211,56 +248,150 @@ def _validate_model_response(
         ) from exc
     if not isinstance(model_output, dict):
         raise NationalEconomyClassificationError("DeepSeek model output must be a JSON object")
-
-    no_match = model_output.get("no_match")
-    if not isinstance(no_match, bool):
-        raise NationalEconomyClassificationError("model output no_match must be a boolean")
+    _require_exact_output_fields(model_output, _DUAL_OUTPUT_FIELDS, branch="dual")
+    enterprise_output = _required_object(model_output, "enterprise")
+    loan_output = _required_object(model_output, "loan_direction")
+    enterprise_no_match = _required_boolean(enterprise_output, "no_match", "enterprise")
+    loan_no_match = _required_boolean(loan_output, "no_match", "loan_direction")
+    loan_specificity = _required_specificity(loan_output)
     objection_snapshot = dict(objection) if objection is not None else None
-    if no_match:
+
+    enterprise_code: str | None = None
+    enterprise_name: str | None = None
+    if enterprise_no_match:
         _require_exact_output_fields(
-            model_output,
-            _NO_MATCH_OUTPUT_FIELDS,
-            branch="no_match",
+            enterprise_output,
+            _ENTERPRISE_NO_MATCH_OUTPUT_FIELDS,
+            branch="enterprise no_match",
         )
-        reason = _required_text(model_output, "reason")
-        return ConstrainedClassificationResult(
-            status="needs_review",
-            industry_code=None,
-            industry_name=None,
-            confidence=None,
-            matching_basis=reason,
-            summary=None,
-            candidate_snapshot=candidate_snapshot,
-            objection=objection_snapshot,
-            model_output=model_output,
+        enterprise_basis = _required_text(enterprise_output, "reason")
+    else:
+        _require_exact_output_fields(
+            enterprise_output,
+            _ENTERPRISE_SUCCESS_OUTPUT_FIELDS,
+            branch="enterprise successful",
+        )
+        enterprise_code = _required_text(enterprise_output, "industry_code")
+        enterprise_name = _required_text(enterprise_output, "industry_name")
+        enterprise_basis = _required_text(enterprise_output, "matching_basis")
+        _require_candidate_pair(
+            enterprise_code,
+            enterprise_name,
+            candidates,
+            branch="enterprise",
         )
 
-    _require_exact_output_fields(
-        model_output,
-        _SUCCESS_OUTPUT_FIELDS,
-        branch="successful",
+    loan_code: str | None = None
+    loan_name: str | None = None
+    if loan_no_match:
+        _require_exact_output_fields(
+            loan_output,
+            _LOAN_NO_MATCH_OUTPUT_FIELDS,
+            branch="loan_direction no_match",
+        )
+        if loan_specificity != "specific":
+            raise NationalEconomyClassificationError(
+                "loan_direction no_match requires specificity=specific"
+            )
+        loan_basis = _required_text(loan_output, "reason")
+    else:
+        _require_exact_output_fields(
+            loan_output,
+            _LOAN_SUCCESS_OUTPUT_FIELDS,
+            branch="loan_direction successful",
+        )
+        loan_code = _required_text(loan_output, "industry_code")
+        loan_name = _required_text(loan_output, "industry_name")
+        loan_basis = _required_text(loan_output, "matching_basis")
+        _require_candidate_pair(
+            loan_code,
+            loan_name,
+            (*candidates, *loan_direction_candidates),
+            branch="loan_direction",
+        )
+
+    if loan_specificity == "generic":
+        if enterprise_code is None or loan_code is None:
+            raise NationalEconomyClassificationError(
+                "generic loan_direction requires successful enterprise and loan conclusions"
+            )
+        if (loan_code, loan_name) != (enterprise_code, enterprise_name):
+            raise NationalEconomyClassificationError(
+                "generic loan_direction must exactly match the enterprise conclusion"
+            )
+
+    loan_matches_enterprise = (
+        loan_code == enterprise_code
+        if loan_code is not None and enterprise_code is not None
+        else None
     )
-    industry_code = _required_text(model_output, "industry_code")
-    industry_name = _required_text(model_output, "industry_name")
-    matching_basis = _required_text(model_output, "matching_basis")
+    return ConstrainedClassificationResult(
+        status=(
+            "needs_review" if enterprise_no_match or loan_no_match else "completed"
+        ),
+        industry_code=enterprise_code,
+        industry_name=enterprise_name,
+        confidence=None,
+        matching_basis=enterprise_basis,
+        summary=None,
+        candidate_snapshot=candidate_snapshot,
+        objection=objection_snapshot,
+        model_output=model_output,
+        loan_industry_code=loan_code,
+        loan_industry_name=loan_name,
+        loan_matching_basis=loan_basis,
+        loan_specificity=loan_specificity,
+        loan_matches_enterprise=loan_matches_enterprise,
+    )
+
+
+def _required_object(
+    payload: Mapping[str, object], field: str
+) -> Mapping[str, object]:
+    value = payload.get(field)
+    if not isinstance(value, dict):
+        raise NationalEconomyClassificationError(
+            f"model output {field} must be a JSON object"
+        )
+    return value
+
+
+def _required_boolean(
+    payload: Mapping[str, object], field: str, branch: str
+) -> bool:
+    value = payload.get(field)
+    if not isinstance(value, bool):
+        raise NationalEconomyClassificationError(
+            f"{branch} model output {field} must be a boolean"
+        )
+    return value
+
+
+def _required_specificity(
+    loan_output: Mapping[str, object],
+) -> LoanSpecificity:
+    value = loan_output.get("specificity")
+    if value not in {"generic", "specific"}:
+        raise NationalEconomyClassificationError(
+            "loan_direction specificity must be generic or specific"
+        )
+    return value
+
+
+def _require_candidate_pair(
+    industry_code: str,
+    industry_name: str,
+    candidates: Sequence[EvidenceSnapshot],
+    *,
+    branch: str,
+) -> None:
     valid_pairs = {
         (candidate.industry_code, candidate.industry_name) for candidate in candidates
     }
     if (industry_code, industry_name) not in valid_pairs:
         raise NationalEconomyClassificationError(
-            "industry_code and industry_name must exactly match the same candidate"
+            f"{branch} industry_code and industry_name must exactly match the same candidate"
         )
-    return ConstrainedClassificationResult(
-        status="completed",
-        industry_code=industry_code,
-        industry_name=industry_name,
-        confidence=None,
-        matching_basis=matching_basis,
-        summary=None,
-        candidate_snapshot=candidate_snapshot,
-        objection=objection_snapshot,
-        model_output=model_output,
-    )
 
 
 def _require_exact_output_fields(

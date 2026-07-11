@@ -66,13 +66,46 @@ def _evidence(business: str = "水稻种植") -> tuple[EvidenceLayer, ...]:
         ),
         EvidenceLayer(
             EvidenceLevel.LOAN_PURPOSE,
-            unavailable_reason="未提供贷款用途",
+            (EvidenceFact("贷款用途详细描述", "采购汽车零部件", "采购汽车零部件"),),
         ),
         EvidenceLayer(
             EvidenceLevel.BUSINESS_SCOPE,
-            (EvidenceFact("营业执照经营范围（全文）", "谷物种植", "谷物种植"),),
+            (
+                EvidenceFact(
+                    "营业执照经营范围（全文）",
+                    "谷物种植；销售汽车零部件",
+                    "谷物种植；销售汽车零部件",
+                ),
+            ),
         ),
     )
+
+
+def _dual_success(
+    *,
+    enterprise_code: str = "0111",
+    enterprise_name: str = "稻谷种植",
+    loan_code: str = "0111",
+    loan_name: str = "稻谷种植",
+    specificity: str = "generic",
+) -> dict[str, object]:
+    return {
+        "enterprise": {
+            "no_match": False,
+            "industry_code": enterprise_code,
+            "industry_name": enterprise_name,
+            "matching_basis": "主营水稻种植，匹配四级代码 0111。",
+        },
+        "loan_direction": {
+            "no_match": False,
+            "industry_code": loan_code,
+            "industry_name": loan_name,
+            "matching_basis": (
+                f"实际投向采购相关产品，匹配经营范围条目，对应四级代码 {loan_code}。"
+            ),
+            "specificity": specificity,
+        },
+    }
 
 
 def _client(model_output: object, status_code: int = 200) -> httpx.Client:
@@ -90,19 +123,13 @@ def _client(model_output: object, status_code: int = 200) -> httpx.Client:
     )
 
 
-def test_classification_accepts_exact_candidate_pair_and_required_fields() -> None:
+def test_generic_dual_conclusion_falls_back_to_enterprise() -> None:
     candidates = (
         _candidate("0111", "稻谷种植", "稻谷种植的定义"),
         _candidate("0112", "小麦种植", "小麦种植的定义"),
     )
-    output = {
-        "no_match": False,
-        "industry_code": "0111",
-        "industry_name": "稻谷种植",
-        "matching_basis": "主营水稻种植，与候选定义一致。",
-    }
 
-    with _client(output) as client:
+    with _client(_dual_success()) as client:
         result = classify_national_economy(
             _evidence(),
             candidates,
@@ -112,18 +139,59 @@ def test_classification_accepts_exact_candidate_pair_and_required_fields() -> No
         )
 
     assert result.status == "completed"
-    assert result.industry_code == "0111"
-    assert result.industry_name == "稻谷种植"
+    assert (result.industry_code, result.industry_name) == ("0111", "稻谷种植")
+    assert (result.loan_industry_code, result.loan_industry_name) == (
+        "0111",
+        "稻谷种植",
+    )
+    assert result.loan_specificity == "generic"
+    assert result.loan_matches_enterprise is True
     assert result.confidence is None
-    assert result.matching_basis
     assert result.summary is None
     assert result.objection == {"补充说明": "收入主要来自水稻"}
     assert result.candidate_snapshot[0]["major_category_code"] == "A01"
-    assert result.candidate_snapshot[0]["major_category_name"] == "农、林、牧、渔业"
-    assert result.candidate_snapshot[0]["definition_and_hits"][0]["text"] == "稻谷种植的定义"
 
 
-def test_request_sends_ordered_evidence_and_traceable_candidate_fragments() -> None:
+def test_specific_loan_direction_can_select_loan_candidate_and_recomputes_false() -> None:
+    enterprise_candidates = (_candidate("3742", "航天器及运载火箭制造", "航天制造"),)
+    loan_candidates = (_candidate("5263", "汽车零配件零售", "汽车零配件零售"),)
+    output = _dual_success(
+        enterprise_code="3742",
+        enterprise_name="航天器及运载火箭制造",
+        loan_code="5263",
+        loan_name="汽车零配件零售",
+        specificity="specific",
+    )
+
+    with _client(output) as client:
+        result = classify_national_economy(
+            _evidence("航天器制造"),
+            enterprise_candidates,
+            _settings(),
+            client=client,
+            loan_direction_candidates=loan_candidates,
+        )
+
+    assert result.status == "completed"
+    assert result.loan_industry_code == "5263"
+    assert result.loan_specificity == "specific"
+    assert result.loan_matches_enterprise is False
+    assert "5263" in result.loan_matching_basis
+
+
+def test_specific_loan_direction_can_select_enterprise_candidate_and_recomputes_true() -> None:
+    candidates = (_candidate("0111", "稻谷种植", "稻谷种植"),)
+    output = _dual_success(specificity="specific")
+
+    with _client(output) as client:
+        result = classify_national_economy(
+            _evidence(), candidates, _settings(), client=client
+        )
+
+    assert result.loan_matches_enterprise is True
+
+
+def test_request_contains_two_candidate_pools_and_loan_decision_tree() -> None:
     captured = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -132,16 +200,7 @@ def test_request_sends_ordered_evidence_and_traceable_candidate_fragments() -> N
             200,
             json={
                 "choices": [
-                    {
-                        "message": {
-                            "content": json.dumps(
-                                {
-                                    "no_match": True,
-                                    "reason": "现有候选均未覆盖企业活动。",
-                                }
-                            )
-                        }
-                    }
+                    {"message": {"content": json.dumps(_dual_success())}}
                 ]
             },
         )
@@ -156,32 +215,68 @@ def test_request_sends_ordered_evidence_and_traceable_candidate_fragments() -> N
             settings,
             objection={"reason": "经营内容已变化"},
             client=client,
+            loan_direction_candidates=(
+                _candidate("5263", "汽车零配件零售", "投向目录片段"),
+            ),
         )
 
     user_content = json.loads(captured["messages"][1]["content"])
-    assert captured["model"] == settings.deepseek_model
+    system_prompt = captured["messages"][0]["content"]
+    assert captured["temperature"] == 0
     assert captured["response_format"] == {"type": "json_object"}
-    assert "enterprise_input" not in user_content
     assert [layer["priority"] for layer in user_content["ordered_evidence"]] == [
         1,
         2,
         3,
         4,
     ]
-    assert user_content["ordered_evidence"][0]["facts"][0]["field_label"] == "主营业务"
+    assert user_content["enterprise_candidates"][0]["industry_code"] == "0111"
+    assert user_content["loan_direction_candidates"][0]["industry_code"] == "5263"
     assert user_content["objection"] == {"reason": "经营内容已变化"}
-    assert user_content["candidates"][0]["industry_code"] == "0111"
-    trace = user_content["candidates"][0]["evidence_traces"][0]
-    assert trace["priority"] == 1
-    assert trace["facts"][0]["field_label"] == "主营业务及营收占比"
-    assert trace["matched_catalog_fragments"][0]["text"] == "目录命中片段"
-    assert "目录命中片段" in str(user_content["candidates"])
-    assert "低层冲突不得推翻高层" in captured["messages"][0]["content"]
-    assert "不得返回置信度或 AI 总结" in captured["messages"][0]["content"]
+    assert "笼统" in system_prompt
+    assert "不在主营但在营业执照经营范围内" in system_prompt
+    assert "既不在主营也不在经营范围" in system_prompt
+    assert "实际投向" in system_prompt
+    assert "不得返回置信度、AI 总结或 matched" in system_prompt
 
 
-def test_no_match_returns_needs_review_without_forced_conclusion() -> None:
-    output = {"no_match": True, "reason": "候选均不覆盖软件开发活动。"}
+def test_specific_loan_direction_no_match_returns_needs_review() -> None:
+    output = _dual_success()
+    output["loan_direction"] = {
+        "no_match": True,
+        "reason": "实际投向购买芯片，超出经营范围，需人工确认。",
+        "specificity": "specific",
+    }
+
+    with _client(output) as client:
+        result = classify_national_economy(
+            _evidence(),
+            (_candidate("0111", "稻谷种植", "农业定义"),),
+            _settings(),
+            client=client,
+        )
+
+    assert result.status == "needs_review"
+    assert result.industry_code == "0111"
+    assert result.loan_industry_code is None
+    assert result.loan_industry_name is None
+    assert result.loan_matching_basis == output["loan_direction"]["reason"]
+    assert result.loan_specificity == "specific"
+    assert result.loan_matches_enterprise is None
+
+
+def test_enterprise_no_match_returns_needs_review_without_forced_conclusion() -> None:
+    output = {
+        "enterprise": {
+            "no_match": True,
+            "reason": "企业候选均不覆盖软件开发活动。",
+        },
+        "loan_direction": {
+            "no_match": True,
+            "reason": "具体贷款用途也不在经营范围内。",
+            "specificity": "specific",
+        },
+    }
 
     with _client(output) as client:
         result = classify_national_economy(
@@ -194,60 +289,94 @@ def test_no_match_returns_needs_review_without_forced_conclusion() -> None:
     assert result.status == "needs_review"
     assert result.industry_code is None
     assert result.industry_name is None
-    assert result.confidence is None
-    assert result.matching_basis == output["reason"]
-    assert result.candidate_snapshot
-    assert result.model_output == output
+    assert result.matching_basis == output["enterprise"]["reason"]
+    assert result.loan_matching_basis == output["loan_direction"]["reason"]
+    assert result.loan_matches_enterprise is None
 
 
 @pytest.mark.parametrize(
-    ("overrides", "message"),
+    ("side", "code", "name", "message"),
     [
-        ({"industry_code": "9999"}, "exactly match"),
-        ({"industry_name": "小麦种植"}, "exactly match"),
-        ({"matching_basis": ""}, "matching_basis must be non-empty"),
-        ({"confidence": 90}, r"unexpected=\['confidence'\]"),
-        ({"summary": "分类总结"}, r"unexpected=\['summary'\]"),
+        ("enterprise", "9999", "未知行业", "enterprise.*same candidate"),
+        ("loan_direction", "9999", "未知行业", "loan_direction.*same candidate"),
+        ("loan_direction", "5263", "汽车零部件制造", "loan_direction.*same candidate"),
     ],
 )
-def test_invalid_selected_result_fails_without_conclusion(overrides, message) -> None:
-    output = {
-        "no_match": False,
-        "industry_code": "0111",
-        "industry_name": "稻谷种植",
-        "matching_basis": "匹配定义",
-    }
-    output.update(overrides)
+def test_each_success_side_requires_an_exact_candidate_pair(
+    side: str, code: str, name: str, message: str
+) -> None:
+    output = _dual_success(specificity="specific")
+    output[side]["industry_code"] = code
+    output[side]["industry_name"] = name
 
     with _client(output) as client:
         with pytest.raises(NationalEconomyClassificationError, match=message):
             classify_national_economy(
                 _evidence(),
-                (
-                    _candidate("0111", "稻谷种植", "定义"),
-                    _candidate("0112", "小麦种植", "定义"),
-                ),
+                (_candidate("0111", "稻谷种植", "定义"),),
                 _settings(),
                 client=client,
+                loan_direction_candidates=(
+                    _candidate("5263", "汽车零配件零售", "定义"),
+                ),
             )
 
 
-@pytest.mark.parametrize("missing_field", ["industry_code", "industry_name", "matching_basis"])
-def test_successful_result_requires_exact_three_business_fields(
-    missing_field: str,
-) -> None:
-    output = {
-        "no_match": False,
-        "industry_code": "0111",
-        "industry_name": "稻谷种植",
-        "matching_basis": "匹配定义",
-    }
-    del output[missing_field]
+def test_enterprise_cannot_select_from_loan_direction_candidate_pool() -> None:
+    output = _dual_success(
+        enterprise_code="5263",
+        enterprise_name="汽车零配件零售",
+        loan_code="5263",
+        loan_name="汽车零配件零售",
+        specificity="specific",
+    )
+
+    with _client(output) as client:
+        with pytest.raises(
+            NationalEconomyClassificationError, match="enterprise.*same candidate"
+        ):
+            classify_national_economy(
+                _evidence(),
+                (_candidate("0111", "稻谷种植", "定义"),),
+                _settings(),
+                client=client,
+                loan_direction_candidates=(
+                    _candidate("5263", "汽车零配件零售", "定义"),
+                ),
+            )
+
+
+def test_generic_loan_direction_must_equal_enterprise_conclusion() -> None:
+    output = _dual_success(
+        loan_code="5263",
+        loan_name="汽车零配件零售",
+        specificity="generic",
+    )
 
     with _client(output) as client:
         with pytest.raises(
             NationalEconomyClassificationError,
-            match=rf"missing=\['{missing_field}'\]",
+            match="generic loan_direction must exactly match",
+        ):
+            classify_national_economy(
+                _evidence(),
+                (_candidate("0111", "稻谷种植", "定义"),),
+                _settings(),
+                client=client,
+                loan_direction_candidates=(
+                    _candidate("5263", "汽车零配件零售", "定义"),
+                ),
+            )
+
+
+@pytest.mark.parametrize("specificity", ["vague", "", None, True])
+def test_loan_specificity_is_constrained(specificity: object) -> None:
+    output = _dual_success()
+    output["loan_direction"]["specificity"] = specificity
+
+    with _client(output) as client:
+        with pytest.raises(
+            NationalEconomyClassificationError, match="specificity must be generic or specific"
         ):
             classify_national_economy(
                 _evidence(),
@@ -257,17 +386,13 @@ def test_successful_result_requires_exact_three_business_fields(
             )
 
 
-def test_no_match_rejects_success_fields_and_keeps_review_branch() -> None:
-    output = {
-        "no_match": True,
-        "reason": "候选均不适用",
-        "industry_code": "0111",
-    }
+def test_model_reported_match_flag_is_rejected() -> None:
+    output = _dual_success()
+    output["loan_direction"]["matched"] = False
 
     with _client(output) as client:
         with pytest.raises(
-            NationalEconomyClassificationError,
-            match="unexpected=\\['industry_code'\\]",
+            NationalEconomyClassificationError, match=r"unexpected=\['matched'\]"
         ):
             classify_national_economy(
                 _evidence(),
@@ -281,8 +406,8 @@ def test_no_match_rejects_success_fields_and_keeps_review_branch() -> None:
     "response_content",
     [
         "not-json",
-        json.dumps({"reason": "missing no_match"}),
-        json.dumps({"no_match": True, "reason": ""}),
+        json.dumps({"enterprise": {}, "loan_direction": {}}),
+        json.dumps({"enterprise": {"no_match": True, "reason": ""}, "loan_direction": {}}),
     ],
 )
 def test_malformed_model_output_fails(response_content: str) -> None:

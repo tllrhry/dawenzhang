@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **dawenzhang** (273 symbols, 331 relationships, 4 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **dawenzhang** (768 symbols, 1425 relationships, 33 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
@@ -41,3 +41,21 @@ This project is indexed by GitNexus as **dawenzhang** (273 symbols, 331 relation
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+
+# 双 Agent 工作方式
+
+本项目采用 Claude/Codex 双 Agent 工作方式。共享的当前进展与渐进检索入口在：
+
+- `.dual-agent/state.md`
+- `.dual-agent/index.md`
+
+现行协议为 `.dual-agent/core.md` + `.dual-agent/loop.md`。派单走 `/dispatch` skill（`.claude/skills/dispatch/`）+ Codex `codex-pro` MCP。统一 runner 为 `scripts/run-gates.sh`。
+
+## 最小常驻事实
+
+- 后端：FastAPI + SQLAlchemy 2.x + Alembic，Python 3.12，端口 8000，API 前缀 `/api/v1`，DB 仅 SQLite
+- 前端：React 19 + Vite 6 + TypeScript 5.7，dev 端口 5173
+- 配置只经 `backend/app/core/config.py`（pydantic-settings，环境变量/`.env` 优先）
+- 常用命令：后端 `PYTHONPATH=backend python backend/run.py`；测试 `PYTHONPATH=backend python -m pytest backend/tests`；前端 `npm run dev`/`npm run build`/`npm run test`
+
+详细模块、架构与运行手册不要常驻加载；按 `.dual-agent/index.md` 命中后读取。

@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **dawenzhang** (273 symbols, 331 relationships, 4 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **dawenzhang** (768 symbols, 1425 relationships, 33 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
@@ -41,3 +41,17 @@ This project is indexed by GitNexus as **dawenzhang** (273 symbols, 331 relation
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+
+# 双 Agent 工作方式（Codex 侧）
+
+本项目采用 Claude/Codex 双 Agent 工作方式。收到派单后：
+
+1. 先读 `.dual-agent/state.md` 与 `.dual-agent/index.md`，按需读当前 `openspec/changes/<change>/`。当前 OpenSpec 是范围事实源，先指出规格缺口再动手。
+2. 修改符号前做上游影响分析；配置/SQL/迁移等盲区文件直接核对；严守范围，保留无关改动。命中 `.dual-agent/contracts.md` 契约时报告，“靠人”即交回。
+3. 交付前自跑：增量自检 + 统一 runner `scripts/run-gates.sh` + task 验证命令。结构化交付文件说明、影响、契约、验证摘要、人工判断与下一步；不伪造模型或 token。
+
+## 最小常驻事实
+
+- 后端：FastAPI + SQLAlchemy 2.x + Alembic，Python 3.12，端口 8000，API 前缀 `/api/v1`，DB 仅 SQLite；配置只经 `backend/app/core/config.py`（pydantic-settings）
+- 前端：React 19 + Vite 6 + TypeScript 5.7，dev 端口 5173
+- 命令：后端测试 `PYTHONPATH=backend python -m pytest backend/tests`；前端 `npm run test`（`tsc --noEmit`）；迁移 `bash backend/scripts/migrate.sh`

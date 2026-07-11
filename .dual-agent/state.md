@@ -8,9 +8,10 @@
 - 更新 Agent：Claude
 - 当前协议：`.dual-agent/core.md` + `.dual-agent/loop.md`
 - Codex入口：`codex-pro` MCP（Pro套餐，CODEX_HOME=`~/.codex-pro`），默认`model: gpt-5.6-sol`；默认`codex` MCP=Plus仅备用
-- 当前 change：`implement-national-economy-classification-mvp`（大型业务模块，分点推进）
-- 当前阶段：`implement-national-economy-classification-mvp` 第1–5点全部完成，OpenSpec 进度 **19/19**
-- 当前任务：等待用户验收 UI、表格化 Word 模板与真实闭环结果；用户确认后再决定是否归档 change
+- 上一个 change：`implement-national-economy-classification-mvp`（第1–5点全部完成，OpenSpec 19/19，尚未归档，等待用户验收）
+- 当前 change：`align-national-economy-classification-rules-and-result-layout`（纠偏判定规则契约与结果页分栏，用户已多轮评审通过，指示直接开始实现）
+- 当前阶段：第1点任务1.1已完成；tasks.md 原缺`域:`/`验证:`元数据，已由 Claude 按既往格式补齐后开始派单
+- 当前任务：继续派单 1.2（检索/重排/候选快照/DeepSeek prompt 显式传递有序证据层）
 - 📌 更正：此前 state 误记「4.2 已 commit」，实际 4.2 前端场景页与 antd/router 依赖一直是未提交 WIP，直到本圈 `12ae434` 才与 4.3/4.4 接通一并提交
 
 > ⚠️ MCP 提醒：`codex-pro` 已通过 `claude mcp add codex-pro -e CODEX_HOME=/Users/tllrhry/.codex-pro -- codex mcp-server` 注册（local scope，`claude mcp list` 显示 ✔ Connected），但 MCP 工具在会话启动时加载，需**重启 Claude Code** 后新会话才能拿到 `mcp__codex-pro__*`。
@@ -27,6 +28,7 @@
 
 ## 最近完成
 
+- 2026-07-11：开始 `align-national-economy-classification-rules-and-result-layout`，完成**第1点 1.1**：新增 `national_economy_decision_policy.py`——四级证据层（`EvidenceLevel`：主营营收>贸易合同/产业链>贷款用途>营业执照经营范围）、`EvidenceFact`/`EvidenceLayer` 可用性判定（`is_usable`/`is_available`）、`decide_primary_business` 逐级降级取最高可用层且记录低层冲突（`EvidenceConflict`，不反转已采纳结论）、`supplement_layer_with_objection` 将异议并入既有层而非新增第五级。测试 `test_national_economy_decision_policy.py` 7 项覆盖主营营收优先/三级逐级降级(parametrize)/冲突不反转/异议补充非第五级/全不可用兜底，7 passed。**特殊情况**：该实现在本次会话开始前即以未提交状态存在（非本圈由 Codex 现场派单产出），Claude 独立复核代码与测试、确认未被其他模块引用（不与 1.2/1.3 范围冲突）、跑通测试后按常规终审流程勾选任务、更新 state。tasks.md 本身此前缺少 `域:`/`验证:` 元数据（对照 mvp change 格式补齐 10 条任务的元数据后才能走 `/dispatch`）。
 - 2026-07-11：完成 national-economy-mvp **第5点 5.1–5.4**：修复首页 hero 背景剪影误占文档流导致的 155px 留白；将 Word 模板改为 13 字段三列表格并保持旧段落模板兼容；真实模型探针全部通过；真实目录同步 1 版本/3117 片段，修复 TLS 瞬时超时（连接复用+3次重试）与 Excel `A0111`→业务四位码 `0111` 规范化；最终保留案例 35，首次分类/异议重判均为 `0111 稻谷种植`、置信度 95%，历史 `[1,2]`，Excel 三工作表验证通过；README、docs 验收材料、runner、前端 build、OpenSpec strict validate 均完成。
 - 2026-07-11：完成 national-economy-mvp **第4点 4.2/4.3/4.4**（前端 MVP，Codex 合并单次实现 + 1 次同 phase 打回 + Claude 独立终审，`12ae434`）：在并行会话未提交的 antd5+router UI mock 上接通真实 4.1 API——新增 `frontend/src/api.ts`（严格类型 API client：`VITE_API_BASE_URL` baseUrl、`ApiError` 统一错误解析、createCase/getCase/classifyCase/submitObjection/getHistory/template+export URL）；`App.tsx` 接通端到端流程（选 .docx→`POST cases` 建案例[422 展示 missing/duplicate/unrecognized 可操作错误并可重选重试]→"分类中"等待态禁用重复提交→`POST classifications` 长调用[502 可重试]→真实结果详情：代码/名称/百分比置信度/依据/AI 总结/13 输入字段/版本/`needs_review` 待人工复核态；异议重判追加版本、历史版本升序、Excel 导出下载；sessionStorage 会话恢复）；`vite.config.ts` 加 `/api/v1`→`127.0.0.1:8000` dev proxy。**终审抓 1 bug 打回**：后端 `objection` 是对象 `{"description":...}` 而 api.ts 误型为 string、App.tsx 直接插值会渲染 `[object Object]`——Codex 同线程修为 `ResultObjection` 类型 + `objection?.description` 渲染。Claude 独立复跑 `run-gates.sh` OVERALL PASS + `npm run build` 通过。规格缺口：后端无全局案例列表端点，历史页仅展示当前会话案例版本历史（MVP 可接受）。只 commit 前端 6 文件，未触碰后端/`.dual-agent`/AGENTS/CLAUDE/openspec。
 - 2026-07-11：完成 national-economy-mvp **第4点 4.1**（Codex 一次实现 + Claude 独立终审，一次通过）：新增后端 REST API——`national_economy.py` 路由 8 端点 + `schemas/national_economy.py` + 挂载到 `settings.api_v1_prefix`（`23cb2df`）。端点：场景查询（国民经济 available；涉农 + 五篇大文章四子类 technology/green/pension/digital coming_soon，四子类带 parent_id）、模板下载（原始 .docx，路径严格 `/scenarios/national-economy/template` 对齐前端写死值，DOCX MIME+attachment）、单文件上传（`UploadFile`，`.docx` 校验；解析失败捕获 `NationalEconomyTemplateError` 返结构化 422 含 missing/duplicate/unrecognized 且不建案例）、案例查询（13 输入字段用 `FIELD_LABELS`/场景/状态/当前结论 `get_current_completed_result`）、分类（复用 `classify_case`，云端异常映射 502）、异议重判（`reclassify_case`，空/纯空白异议 422，云端异常 502）、历史（`result_versions` 按 version 升序）、Excel 导出（`export_case_workbook` 字节，XLSX MIME+attachment）。测试 `test_national_economy_api.py` 用 `TestClient`+`dependency_overrides[get_db]` 连真实 db 容器（`dawenzhang-db-1` healthy），云端分类 monkeypatch 桩含失败分支，openpyxl 读回三工作表名。Claude 独立复跑 runner OVERALL PASS，后端 pytest 累计 **66 passed**（新增 8）。只 commit 本点 5 个后端文件（routes/schemas ×2/main.py/tests），未触碰并行前端改动与 AGENTS/CLAUDE/.dual-agent。

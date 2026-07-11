@@ -113,7 +113,7 @@ def decide_loan_direction(
     matches_main_business: bool,
     within_business_scope: bool,
 ) -> LoanDirectionDecision:
-    if _is_generic_loan_purpose(loan_purpose):
+    if is_generic_loan_purpose(loan_purpose):
         return LoanDirectionDecision(
             route=LoanDirectionRoute.USE_ENTERPRISE_CONCLUSION,
             specificity=LoanPurposeSpecificity.GENERIC,
@@ -198,6 +198,6 @@ def _validate_unique_levels(layers: tuple[EvidenceLayer, ...]) -> None:
         raise ValueError("evidence levels must be unique")
 
 
-def _is_generic_loan_purpose(loan_purpose: str) -> bool:
+def is_generic_loan_purpose(loan_purpose: str) -> bool:
     normalized = "".join(loan_purpose.split()).strip("，。；;、")
     return not normalized or normalized in _GENERIC_LOAN_PURPOSE_PHRASES

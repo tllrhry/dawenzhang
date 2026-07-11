@@ -19,6 +19,7 @@ from app.services.national_economy_retrieval import (
     recall_industry_chunks,
     rerank_candidates,
     retrieve_industry_evidence,
+    retrieve_loan_direction_evidence,
 )
 
 
@@ -163,6 +164,107 @@ def test_retrieve_propagates_embedding_timeout() -> None:
         retrieve_industry_evidence(
             Mock(), _evidence_layers(), _settings(), embedding_request=timeout
         )
+
+
+def test_retrieve_loan_direction_uses_only_specific_loan_purpose_for_rerank() -> None:
+    settings = _settings()
+    session = Mock()
+    session.execute.return_value.all.return_value = [
+        SimpleNamespace(
+            industry_code="3742",
+            industry_name="航天器及运载火箭制造",
+            text="航天器制造",
+            chunk_type="definition",
+            source_row=2,
+            distance=0.1,
+        ),
+        SimpleNamespace(
+            industry_code="3670",
+            industry_name="汽车零部件及配件制造",
+            text="汽车零部件制造",
+            chunk_type="definition",
+            source_row=3,
+            distance=0.2,
+        ),
+    ]
+    layers = (
+        EvidenceLayer(
+            EvidenceLevel.MAIN_BUSINESS_REVENUE,
+            (EvidenceFact("主营业务及营收占比", "导弹武器系统 90%", "导弹武器系统"),),
+        ),
+        EvidenceLayer(
+            EvidenceLevel.LOAN_PURPOSE,
+            (EvidenceFact("贷款用途详细描述", "采购汽车及零部件", "汽车及零部件采购"),),
+        ),
+        EvidenceLayer(
+            EvidenceLevel.BUSINESS_SCOPE,
+            (EvidenceFact("营业执照经营范围（全文）", "销售汽车及零部件", "销售汽车及零部件"),),
+        ),
+    )
+    embedding_requests = []
+    rerank_payload = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        rerank_payload.update(__import__("json").loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {"index": 1, "relevance_score": 0.96},
+                    {"index": 0, "relevance_score": 0.21},
+                ]
+            },
+        )
+
+    with httpx.Client(
+        transport=httpx.MockTransport(handler),
+        base_url=settings.siliconflow_base_url,
+    ) as client:
+        snapshots = retrieve_loan_direction_evidence(
+            session,
+            layers,
+            settings,
+            embedding_request=lambda texts: embedding_requests.append(tuple(texts))
+            or [[0.1, 0.2, 0.3]],
+            rerank_client=client,
+        )
+
+    assert len(embedding_requests) == 1
+    assert len(embedding_requests[0]) == 1
+    assert "priority=3" in embedding_requests[0][0]
+    assert "贷款用途详细描述" in embedding_requests[0][0]
+    assert "主营业务及营收占比" not in embedding_requests[0][0]
+    assert rerank_payload["query"] == embedding_requests[0][0]
+    assert "营业执照经营范围" not in rerank_payload["query"]
+    assert [snapshot.industry_code for snapshot in snapshots] == ["3670", "3742"]
+    assert snapshots[0].evidence_traces[0].level is EvidenceLevel.LOAN_PURPOSE
+
+
+@pytest.mark.parametrize("loan_purpose", ["经营周转", "补充流动资金"])
+def test_retrieve_loan_direction_skips_cloud_calls_for_generic_purpose(
+    loan_purpose: str,
+) -> None:
+    embedding_request = Mock()
+    rerank_client = Mock()
+    layers = (
+        *_evidence_layers(),
+        EvidenceLayer(
+            EvidenceLevel.LOAN_PURPOSE,
+            (EvidenceFact("贷款用途详细描述", loan_purpose, loan_purpose),),
+        ),
+    )
+
+    snapshots = retrieve_loan_direction_evidence(
+        Mock(),
+        layers,
+        _settings(),
+        embedding_request=embedding_request,
+        rerank_client=rerank_client,
+    )
+
+    assert snapshots == ()
+    embedding_request.assert_not_called()
+    rerank_client.post.assert_not_called()
 
 
 def test_rerank_propagates_non_success_response() -> None:

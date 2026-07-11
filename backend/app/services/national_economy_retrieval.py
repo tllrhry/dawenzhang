@@ -12,6 +12,7 @@ from app.services.national_economy_decision_policy import (
     EvidenceFact,
     EvidenceLayer,
     EvidenceLevel,
+    is_generic_loan_purpose,
 )
 
 
@@ -281,6 +282,49 @@ def retrieve_industry_evidence(
     candidates = aggregate_layer_recall_hits(layer_hits)
     return rerank_candidates(
         ordered_evidence,
+        candidates,
+        settings,
+        top_n=top_n,
+        client=rerank_client,
+    )
+
+
+def retrieve_loan_direction_evidence(
+    session: Session,
+    evidence_layers: Sequence[EvidenceLayer],
+    settings: Settings,
+    top_n: int = MAX_RERANK_RESULTS,
+    embedding_request: EmbeddingRequest | None = None,
+    rerank_client: httpx.Client | None = None,
+) -> tuple[EvidenceSnapshot, ...]:
+    ordered_evidence = _ordered_available_layers(evidence_layers)
+    loan_purpose_layer = next(
+        (
+            layer
+            for layer in ordered_evidence
+            if layer.level is EvidenceLevel.LOAN_PURPOSE
+        ),
+        None,
+    )
+    if loan_purpose_layer is None or all(
+        is_generic_loan_purpose(fact.raw_text)
+        for fact in loan_purpose_layer.usable_facts
+    ):
+        return ()
+
+    query = serialize_evidence_layer(loan_purpose_layer)
+    request = embedding_request or (lambda texts: embed_texts(texts, settings))
+    embeddings = tuple(request((query,)))
+    if len(embeddings) != 1:
+        raise ValueError("query embedding response must match loan purpose layer")
+    embedding = embeddings[0]
+    if len(embedding) != settings.embedding_dimension:
+        raise ValueError("query embedding dimension does not match configuration")
+
+    hits = recall_industry_chunks(session, embedding)
+    candidates = aggregate_layer_recall_hits(((loan_purpose_layer, hits),))
+    return rerank_candidates(
+        (loan_purpose_layer,),
         candidates,
         settings,
         top_n=top_n,

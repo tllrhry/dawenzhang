@@ -1,7 +1,9 @@
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from docx import Document
 
 from app.core.config import Settings
 from app.services.national_economy_case_ingestion import (
@@ -46,6 +48,29 @@ def test_unfilled_fields_are_saved_as_empty_strings() -> None:
     assert len(payload) == 13
     assert payload["enterprise_name"] == "南京示例科技有限公司"
     assert payload["loan_purpose"] == ""
+    assert payload["credit_approval_opinion"] == ""
+
+
+def test_table_template_is_parsed_and_ignores_title_and_instructions() -> None:
+    document = Document()
+    document.add_heading("国民经济行业分类企业信息采集表", level=1)
+    document.add_paragraph("请在第二列填写企业真实经营信息，第三列为填写提示。")
+    table = document.add_table(rows=1, cols=3)
+    table.rows[0].cells[0].text = "字段名称"
+    table.rows[0].cells[1].text = "填写内容"
+    table.rows[0].cells[2].text = "填写提示"
+    for field, label in FIELD_LABELS.items():
+        cells = table.add_row().cells
+        cells[0].text = label
+        cells[1].text = "测试企业" if field == "enterprise_name" else ""
+        cells[2].text = "请按实际情况填写"
+    output = BytesIO()
+    document.save(output)
+
+    payload = parse_template(output.getvalue())
+
+    assert list(payload) == list(FIELD_LABELS)
+    assert payload["enterprise_name"] == "测试企业"
     assert payload["credit_approval_opinion"] == ""
 
 

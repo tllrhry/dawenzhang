@@ -68,23 +68,41 @@ def parse_template(document_bytes: bytes) -> dict[str, str]:
     duplicate_labels: list[str] = []
     unrecognized_labels: list[str] = []
 
-    for paragraph in document.paragraphs:
-        text = paragraph.text.strip()
-        if not text:
-            continue
-        label, separator, value = text.partition("：")
-        if not separator:
-            unrecognized_labels.append(text)
-            continue
-        label = label.strip()
-        field = _LABEL_TO_FIELD.get(label)
+    def add_value(label: str, value: str) -> None:
+        normalized_label = label.strip()
+        field = _LABEL_TO_FIELD.get(normalized_label)
         if field is None:
-            unrecognized_labels.append(label)
-            continue
+            unrecognized_labels.append(normalized_label)
+            return
         if field in values:
-            duplicate_labels.append(label)
-            continue
+            duplicate_labels.append(normalized_label)
+            return
         values[field] = value.strip()
+
+    table_rows_found = False
+    for table in document.tables:
+        for row in table.rows:
+            if len(row.cells) < 2:
+                continue
+            label = row.cells[0].text.strip()
+            if not label or label == "字段名称":
+                continue
+            table_rows_found = True
+            add_value(label, row.cells[1].text)
+
+    # Keep accepting the original paragraph-based template. New table-based
+    # documents may contain titles and instructions, so their paragraphs are
+    # intentionally ignored once labeled table rows are present.
+    if not table_rows_found:
+        for paragraph in document.paragraphs:
+            text = paragraph.text.strip()
+            if not text:
+                continue
+            label, separator, value = text.partition("：")
+            if not separator:
+                unrecognized_labels.append(text)
+                continue
+            add_value(label, value)
 
     missing_labels = [
         label for field, label in FIELD_LABELS.items() if field not in values

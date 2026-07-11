@@ -50,16 +50,19 @@ def _case() -> NationalEconomyClassificationCase:
     )
 
 
-def _candidate() -> EvidenceSnapshot:
+def _candidate(
+    industry_code: str = "0111",
+    industry_name: str = "稻谷种植",
+) -> EvidenceSnapshot:
     return EvidenceSnapshot(
-        industry_code="0111",
-        industry_name="稻谷种植",
+        industry_code=industry_code,
+        industry_name=industry_name,
         vector_score=0.91,
         rerank_score=0.97,
         hits=(
             RecallHit(
-                industry_code="0111",
-                industry_name="稻谷种植",
+                industry_code=industry_code,
+                industry_name=industry_name,
                 source_row=2,
                 chunk_type="definition",
                 text="指水稻的种植活动",
@@ -74,6 +77,10 @@ def _classification(
     status: str = "completed",
     confidence: float | None = 91.6,
     objection: dict[str, object] | None = None,
+    loan_industry_code: str | None = "0111",
+    loan_industry_name: str | None = "稻谷种植",
+    loan_matching_basis: str | None = "贷款用途与企业主营一致",
+    loan_matches_enterprise: bool | None = True,
 ) -> ConstrainedClassificationResult:
     selected = status == "completed"
     return ConstrainedClassificationResult(
@@ -86,6 +93,10 @@ def _classification(
         candidate_snapshot=({"industry_code": "0111"},),
         objection=objection,
         model_output={"no_match": not selected},
+        loan_industry_code=loan_industry_code if selected else None,
+        loan_industry_name=loan_industry_name if selected else None,
+        loan_matching_basis=loan_matching_basis,
+        loan_matches_enterprise=loan_matches_enterprise if selected else None,
     )
 
 
@@ -138,7 +149,10 @@ def test_build_query_marks_empty_layers_unavailable_without_stringifying_none() 
 def test_initial_classification_saves_first_completed_version() -> None:
     session = MagicMock()
     case = _case()
+    case.input_payload["loan_purpose"] = "流动资金"
+    case.input_payload["credit_approval_opinion"] = "支持经营周转"
     retrieval = MagicMock(return_value=(_candidate(),))
+    loan_retrieval = MagicMock(return_value=())
     classifier = MagicMock(return_value=_classification())
 
     result = classify_case(
@@ -146,6 +160,7 @@ def test_initial_classification_saves_first_completed_version() -> None:
         case,
         _settings(),
         retrieval=retrieval,
+        loan_retrieval=loan_retrieval,
         classifier=classifier,
     )
 
@@ -154,12 +169,21 @@ def test_initial_classification_saves_first_completed_version() -> None:
     assert result.confidence is None
     assert result.rationale == "主营业务和目录定义一致"
     assert result.ai_summary is None
+    assert result.loan_industry_code == "0111"
+    assert result.loan_industry_name == "稻谷种植"
+    assert result.loan_matching_basis == "贷款用途与企业主营一致"
+    assert result.loan_matches_enterprise is True
     assert case.status == "completed"
     evidence_layers = retrieval.call_args.args[1]
     assert evidence_layers[0].level is EvidenceLevel.MAIN_BUSINESS_REVENUE
     assert evidence_layers[0].facts[0].field_label == "主营业务"
+    loan_retrieval.assert_called_once_with(session, evidence_layers, _settings())
     classifier.assert_called_once_with(
-        evidence_layers, (_candidate(),), _settings(), None
+        evidence_layers,
+        (_candidate(),),
+        _settings(),
+        None,
+        loan_direction_candidates=(),
     )
     session.add.assert_called_once_with(result)
     session.commit.assert_called_once_with()
@@ -183,6 +207,8 @@ def test_objection_reclassification_appends_version_and_preserves_history() -> N
     )
     objection = {"description": "主营收入主要来自水稻"}
     classifier = MagicMock(return_value=_classification(objection=objection))
+    loan_candidate = _candidate("5263", "汽车零配件零售")
+    loan_retrieval = MagicMock(return_value=(loan_candidate,))
 
     result = reclassify_case(
         session,
@@ -190,6 +216,7 @@ def test_objection_reclassification_appends_version_and_preserves_history() -> N
         "  主营收入主要来自水稻  ",
         _settings(),
         retrieval=MagicMock(return_value=(_candidate(),)),
+        loan_retrieval=loan_retrieval,
         classifier=classifier,
     )
 
@@ -203,13 +230,61 @@ def test_objection_reclassification_appends_version_and_preserves_history() -> N
     assert tuple(item.version for item in case.result_versions) == (1, 2)
     assert classifier.call_args.args[3] == objection
     evidence_layers = classifier.call_args.args[0]
+    loan_retrieval.assert_called_once_with(session, evidence_layers, _settings())
+    assert classifier.call_args.kwargs["loan_direction_candidates"] == (
+        loan_candidate,
+    )
     assert evidence_layers[0].facts[-1].source == "objection"
     assert evidence_layers[0].facts[-1].field_label == "异议说明"
+
+
+def test_specific_loan_direction_candidates_and_result_are_persisted() -> None:
+    session = MagicMock()
+    case = _case()
+    enterprise_candidate = _candidate()
+    loan_candidate = _candidate("5263", "汽车零配件零售")
+    retrieval = MagicMock(return_value=(enterprise_candidate,))
+    loan_retrieval = MagicMock(return_value=(loan_candidate,))
+    classifier = MagicMock(
+        return_value=_classification(
+            loan_industry_code="5263",
+            loan_industry_name="汽车零配件零售",
+            loan_matching_basis=(
+                "实际投向为汽车零部件采购，匹配经营范围内汽车零部件销售项，"
+                "对应 5263"
+            ),
+            loan_matches_enterprise=False,
+        )
+    )
+
+    result = classify_case(
+        session,
+        case,
+        _settings(),
+        retrieval=retrieval,
+        loan_retrieval=loan_retrieval,
+        classifier=classifier,
+    )
+
+    evidence_layers = retrieval.call_args.args[1]
+    loan_retrieval.assert_called_once_with(session, evidence_layers, _settings())
+    classifier.assert_called_once_with(
+        evidence_layers,
+        (enterprise_candidate,),
+        _settings(),
+        None,
+        loan_direction_candidates=(loan_candidate,),
+    )
+    assert result.loan_industry_code == "5263"
+    assert result.loan_industry_name == "汽车零配件零售"
+    assert "汽车零部件采购" in result.loan_matching_basis
+    assert result.loan_matches_enterprise is False
 
 
 def test_blank_objection_is_rejected_without_reclassification() -> None:
     session = MagicMock()
     retrieval = MagicMock()
+    loan_retrieval = MagicMock()
     classifier = MagicMock()
 
     with pytest.raises(ValueError, match="must not be blank"):
@@ -219,10 +294,12 @@ def test_blank_objection_is_rejected_without_reclassification() -> None:
             "  \n  ",
             _settings(),
             retrieval=retrieval,
+            loan_retrieval=loan_retrieval,
             classifier=classifier,
         )
 
     retrieval.assert_not_called()
+    loan_retrieval.assert_not_called()
     classifier.assert_not_called()
     session.commit.assert_not_called()
 
@@ -244,6 +321,7 @@ def test_failed_reclassification_does_not_overwrite_latest_completed_result() ->
         model_output={"no_match": False},
     )
     classifier = MagicMock(side_effect=RuntimeError("DeepSeek unavailable"))
+    loan_retrieval = MagicMock(return_value=(_candidate(),))
 
     with pytest.raises(RuntimeError, match="DeepSeek unavailable"):
         reclassify_case(
@@ -252,6 +330,7 @@ def test_failed_reclassification_does_not_overwrite_latest_completed_result() ->
             "需要重判",
             _settings(),
             retrieval=MagicMock(return_value=(_candidate(),)),
+            loan_retrieval=loan_retrieval,
             classifier=classifier,
         )
 
@@ -260,6 +339,7 @@ def test_failed_reclassification_does_not_overwrite_latest_completed_result() ->
     assert get_current_completed_result(case) is original
     session.rollback.assert_called_once_with()
     assert session.commit.call_count == 1
+    loan_retrieval.assert_called_once()
 
 
 def test_current_result_is_latest_completed_version_not_latest_attempt() -> None:

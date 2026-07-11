@@ -1,4 +1,5 @@
 from collections.abc import Callable, Mapping, Sequence
+from typing import Protocol
 
 from sqlalchemy.orm import Session
 
@@ -21,6 +22,7 @@ from app.services.national_economy_decision_policy import (
 from app.services.national_economy_retrieval import (
     EvidenceSnapshot,
     retrieve_industry_evidence,
+    retrieve_loan_direction_evidence,
 )
 
 
@@ -52,15 +54,18 @@ _EVIDENCE_FIELDS = (
 RetrievalCallable = Callable[
     [Session, Sequence[EvidenceLayer], Settings], Sequence[EvidenceSnapshot]
 ]
-ClassificationCallable = Callable[
-    [
-        Sequence[EvidenceLayer],
-        Sequence[EvidenceSnapshot],
-        Settings,
-        Mapping[str, object] | None,
-    ],
-    ConstrainedClassificationResult,
-]
+
+
+class ClassificationCallable(Protocol):
+    def __call__(
+        self,
+        evidence_layers: Sequence[EvidenceLayer],
+        candidates: Sequence[EvidenceSnapshot],
+        settings: Settings,
+        objection: Mapping[str, object] | None = None,
+        *,
+        loan_direction_candidates: Sequence[EvidenceSnapshot] = (),
+    ) -> ConstrainedClassificationResult: ...
 
 
 def build_classification_query(
@@ -124,6 +129,7 @@ def classify_case(
     settings: Settings | None = None,
     *,
     retrieval: RetrievalCallable = retrieve_industry_evidence,
+    loan_retrieval: RetrievalCallable = retrieve_loan_direction_evidence,
     classifier: ClassificationCallable = classify_national_economy,
 ) -> NationalEconomyClassificationResult:
     return _run_classification(
@@ -132,6 +138,7 @@ def classify_case(
         settings or get_settings(),
         objection=None,
         retrieval=retrieval,
+        loan_retrieval=loan_retrieval,
         classifier=classifier,
     )
 
@@ -143,6 +150,7 @@ def reclassify_case(
     settings: Settings | None = None,
     *,
     retrieval: RetrievalCallable = retrieve_industry_evidence,
+    loan_retrieval: RetrievalCallable = retrieve_loan_direction_evidence,
     classifier: ClassificationCallable = classify_national_economy,
 ) -> NationalEconomyClassificationResult:
     normalized_objection = objection_text.strip()
@@ -154,6 +162,7 @@ def reclassify_case(
         settings or get_settings(),
         objection={"description": normalized_objection},
         retrieval=retrieval,
+        loan_retrieval=loan_retrieval,
         classifier=classifier,
     )
 
@@ -174,13 +183,23 @@ def _run_classification(
     *,
     objection: Mapping[str, object] | None,
     retrieval: RetrievalCallable,
+    loan_retrieval: RetrievalCallable,
     classifier: ClassificationCallable,
 ) -> NationalEconomyClassificationResult:
     objection_text = None if objection is None else str(objection["description"])
     evidence_layers = build_classification_query(case.input_payload, objection_text)
     try:
         candidates = tuple(retrieval(session, evidence_layers, settings))
-        classification = classifier(evidence_layers, candidates, settings, objection)
+        loan_direction_candidates = tuple(
+            loan_retrieval(session, evidence_layers, settings)
+        )
+        classification = classifier(
+            evidence_layers,
+            candidates,
+            settings,
+            objection,
+            loan_direction_candidates=loan_direction_candidates,
+        )
         result = _build_result(case, classification, objection)
         session.add(result)
         case.status = (
@@ -214,6 +233,10 @@ def _build_result(
         status=classification.status,
         industry_code=classification.industry_code,
         industry_name=classification.industry_name,
+        loan_industry_code=classification.loan_industry_code,
+        loan_industry_name=classification.loan_industry_name,
+        loan_matching_basis=classification.loan_matching_basis,
+        loan_matches_enterprise=classification.loan_matches_enterprise,
         confidence=None,
         rationale=classification.matching_basis,
         ai_summary=None,

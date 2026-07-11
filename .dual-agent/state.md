@@ -4,14 +4,15 @@
 
 ## 快照
 
-- 更新时间：2026-07-11
+- 更新时间：2026-07-12
 - 更新 Agent：Claude
 - 当前协议：`.dual-agent/core.md` + `.dual-agent/loop.md`
-- Codex入口：`codex-pro` MCP（Pro套餐，CODEX_HOME=`~/.codex-pro`），默认`model: gpt-5.6-sol`；默认`codex` MCP=Plus仅备用
-- 上一个 change：`implement-national-economy-classification-mvp`（第1–5点全部完成，OpenSpec 19/19，尚未归档，等待用户验收）
-- 当前 change：`align-national-economy-classification-rules-and-result-layout`（纠偏判定规则契约与结果页分栏，用户已多轮评审通过，指示直接开始实现）
-- 当前阶段：第1点任务1.1已完成；tasks.md 原缺`域:`/`验证:`元数据，已由 Claude 按既往格式补齐后开始派单
-- 当前任务：继续派单 1.2（检索/重排/候选快照/DeepSeek prompt 显式传递有序证据层）
+- Codex入口：`codex-pro` MCP（Pro套餐，CODEX_HOME=`~/.codex-pro`），默认`model: gpt-5.6-sol`；默认`codex` MCP=Plus仅备用。本圈用户将 MCP 命令改为 `~/Applications/codex-pro.app/Contents/Resources/codex -m gpt-5.6-sol -c model_reasoning_effort=medium mcp-server` 后，`codex()` 与 `codex-reply()` 均稳定连通（前两次 -32000 后此改动生效）
+- 上一个 change：`align-national-economy-classification-rules-and-result-layout`（三字段结论契约 + 双列结果页，tasks 除 3.4 e2e 外均已落地在库）
+- 当前 change：`add-national-economy-loan-direction-classification`（在企业结论外新增贷款投向双分类，**9/9 实现完成，全 gates + openspec strict + 真实闭环通过，尚未归档，等待用户验收**）
+- 当前阶段：全部任务完成并逐单 commit（1bbe37f→5906976，见 loop-log）
+- 当前任务：无进行中；等待用户验收后可归档 change
+- 📌 codex-pro MCP 已知问题：本机网络对 `codex`/`Codex` 进程的出站 443 连接存在间歇性 TCP RST（`log show` 实测，so_error=54，连接建立后 ~0.1-0.2s 即被重置，几秒到十几秒重试一次），会导致 codex-pro 会话在无任何提示的情况下卡死/中断，MCP 工具调用侧表现为「等待很久后报 -32000 Connection closed」——但底层 codex-pro 会话（同一本机 app，非纯 stdio 子进程）可能仍在继续跑，等重连后不确认代码是否已写入前不能假定失败。已将 `MCP_TOOL_TIMEOUT` 设为全局 `~/.claude/settings.json` 的 3600000（1 小时），仅作为「给它更多时间完成」的保险，不解决根因（网络/RST 问题本身超出 Claude Code 配置范围）。**每次收到 -32000 后必须先 `git status`/`git diff` 核实是否已实际落盘，不能默认重派单**，本圈已实测复现（1.2 的第二次派单即在「已报错」后其实已完整写完并通过全部测试）。
 - 📌 更正：此前 state 误记「4.2 已 commit」，实际 4.2 前端场景页与 antd/router 依赖一直是未提交 WIP，直到本圈 `12ae434` 才与 4.3/4.4 接通一并提交
 
 > ⚠️ MCP 提醒：`codex-pro` 已通过 `claude mcp add codex-pro -e CODEX_HOME=/Users/tllrhry/.codex-pro -- codex mcp-server` 注册（local scope，`claude mcp list` 显示 ✔ Connected），但 MCP 工具在会话启动时加载，需**重启 Claude Code** 后新会话才能拿到 `mcp__codex-pro__*`。
@@ -28,6 +29,8 @@
 
 ## 最近完成
 
+- 2026-07-12：完成 `add-national-economy-loan-direction-classification` **全 9 任务**（Claude 起草 OpenSpec + 逐单派 Codex/终审，用户手动派单 1.1）：在企业结论外新增「贷款投向」双分类。链路——1.1 `decision_policy.decide_loan_direction` 四分支路由（笼统/命中主营→回落企业；经营范围内非主营→单独判；超范围→复核）+ `is_generic_loan_purpose`（`1bbe37f`）；1.2 `retrieve_loan_direction_evidence` 仅贷款用途层单独召回+单独 rerank 产出按投向排序的候选（**首版做成"并入主池统一重排"的空操作被 Claude 终审打回重做**，`1b90d2a`）；1.3 `classify_national_economy` 单次 DeepSeek 产出双结论 `{enterprise, loan_direction{...,specificity}}`，服务端校验候选池归属/generic 强一致/matched 以「投向码==企业码」复算不信模型自报（`6fd0076`）；1.4 workflow 注入 `loan_retrieval` 编排双候选+落库（`fad6c13`）；2.1 结果模型+迁移 0005 加 4 可空列（`cf92e56`）；2.2 结果 API 透出贷款投向+三分支旧版本兼容（**Claude 终审抓出"新贷款投向 no_match 被误报 matched=true"打回修正**，`be604d4`）；2.3 Excel 导出加贷款投向 4 列同款三分支（`34e048e`）；3.1 前端结果卡「贷款投向结论」分组 + 历史行 + 一致性 Tag（`5906976`）；3.2 真实闭环：航天集团 docx→企业 `3742 航天器及运载火箭制造`、贷款投向 `5263 汽车零配件零售`、matched=false、依据含用途与经营范围匹配条目；笼统贷款用途→投向回落 3742、matched=true；API/Excel 出口均带贷款投向；全 gates + 前端 build + openspec strict 通过。**边界**：本 change 只算国民经济，养老基建回落养老金融留待五篇大文章。dev db 遗留验证案例 103/255/256（未清）。
+- 2026-07-11：完成 `align-national-economy-classification-rules-and-result-layout` **第1点 1.2**（Codex 实现 + Claude 独立终审，`d781d9d`）：改造 `national_economy_retrieval.py`（按证据层分别 embedding/召回，`aggregate_layer_recall_hits` 聚合并携带 `evidence_traces` 使候选可追溯到证据层，`serialize_ordered_evidence` 按 priority 显式排序供 rerank query 使用）、`national_economy_classification.py`（`_build_request_payload` 改用 `ordered_evidence` 而非无权重 `enterprise_input`，system prompt 显式声明四级优先顺序/低层冲突不得推翻高层/异议并入既有层非第五级）、`national_economy_classification_workflow.py`（`_EVIDENCE_FIELDS` 将 13 个输入字段中的 10 个映射进四级证据层，身份类 3 字段——企业名称/统一社会信用代码/交易对手名称——不进入证据，复用 1.1 的 `EvidenceLevel`/`supplement_layer_with_objection`）。**特殊情况**：本任务经历 3 次 codex-pro MCP 调度（首次规划到一半连接断、`codex-reply` 续接报 thread not found、第三次全新 `codex()` 调用同样收到 `-32000 Connection closed`），但 Claude 排查 `git status`/diff 发现第三次调用实际已完整写完 3 个服务文件+3 个测试文件；核对 `/usr/bin/log show` 系统日志锁定根因为本机对 `codex`/`Codex` 进程出站 443 连接的间歇性 TCP RST（非 MCP 超时配置问题）。31 项相关测试 + 全量 77 项后端测试全绿。
 - 2026-07-11：开始 `align-national-economy-classification-rules-and-result-layout`，完成**第1点 1.1**：新增 `national_economy_decision_policy.py`——四级证据层（`EvidenceLevel`：主营营收>贸易合同/产业链>贷款用途>营业执照经营范围）、`EvidenceFact`/`EvidenceLayer` 可用性判定（`is_usable`/`is_available`）、`decide_primary_business` 逐级降级取最高可用层且记录低层冲突（`EvidenceConflict`，不反转已采纳结论）、`supplement_layer_with_objection` 将异议并入既有层而非新增第五级。测试 `test_national_economy_decision_policy.py` 7 项覆盖主营营收优先/三级逐级降级(parametrize)/冲突不反转/异议补充非第五级/全不可用兜底，7 passed。**特殊情况**：该实现在本次会话开始前即以未提交状态存在（非本圈由 Codex 现场派单产出），Claude 独立复核代码与测试、确认未被其他模块引用（不与 1.2/1.3 范围冲突）、跑通测试后按常规终审流程勾选任务、更新 state。tasks.md 本身此前缺少 `域:`/`验证:` 元数据（对照 mvp change 格式补齐 10 条任务的元数据后才能走 `/dispatch`）。
 - 2026-07-11：完成 national-economy-mvp **第5点 5.1–5.4**：修复首页 hero 背景剪影误占文档流导致的 155px 留白；将 Word 模板改为 13 字段三列表格并保持旧段落模板兼容；真实模型探针全部通过；真实目录同步 1 版本/3117 片段，修复 TLS 瞬时超时（连接复用+3次重试）与 Excel `A0111`→业务四位码 `0111` 规范化；最终保留案例 35，首次分类/异议重判均为 `0111 稻谷种植`、置信度 95%，历史 `[1,2]`，Excel 三工作表验证通过；README、docs 验收材料、runner、前端 build、OpenSpec strict validate 均完成。
 - 2026-07-11：完成 national-economy-mvp **第4点 4.2/4.3/4.4**（前端 MVP，Codex 合并单次实现 + 1 次同 phase 打回 + Claude 独立终审，`12ae434`）：在并行会话未提交的 antd5+router UI mock 上接通真实 4.1 API——新增 `frontend/src/api.ts`（严格类型 API client：`VITE_API_BASE_URL` baseUrl、`ApiError` 统一错误解析、createCase/getCase/classifyCase/submitObjection/getHistory/template+export URL）；`App.tsx` 接通端到端流程（选 .docx→`POST cases` 建案例[422 展示 missing/duplicate/unrecognized 可操作错误并可重选重试]→"分类中"等待态禁用重复提交→`POST classifications` 长调用[502 可重试]→真实结果详情：代码/名称/百分比置信度/依据/AI 总结/13 输入字段/版本/`needs_review` 待人工复核态；异议重判追加版本、历史版本升序、Excel 导出下载；sessionStorage 会话恢复）；`vite.config.ts` 加 `/api/v1`→`127.0.0.1:8000` dev proxy。**终审抓 1 bug 打回**：后端 `objection` 是对象 `{"description":...}` 而 api.ts 误型为 string、App.tsx 直接插值会渲染 `[object Object]`——Codex 同线程修为 `ResultObjection` 类型 + `objection?.description` 渲染。Claude 独立复跑 `run-gates.sh` OVERALL PASS + `npm run build` 通过。规格缺口：后端无全局案例列表端点，历史页仅展示当前会话案例版本历史（MVP 可接受）。只 commit 前端 6 文件，未触碰后端/`.dual-agent`/AGENTS/CLAUDE/openspec。

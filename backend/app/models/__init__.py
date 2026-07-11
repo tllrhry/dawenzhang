@@ -1,2 +1,6 @@
-"""SQLAlchemy models will be added by later business changes."""
+from app.models.national_economy import (
+    NationalEconomyCatalogVersion,
+    NationalEconomyIndustryChunk,
+)
 
+__all__ = ["NationalEconomyCatalogVersion", "NationalEconomyIndustryChunk"]

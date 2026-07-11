@@ -11,6 +11,13 @@ from app.services.national_economy_classification import (
     ConstrainedClassificationResult,
     classify_national_economy,
 )
+from app.services.national_economy_case_ingestion import FIELD_LABELS
+from app.services.national_economy_decision_policy import (
+    EvidenceFact,
+    EvidenceLayer,
+    EvidenceLevel,
+    supplement_layer_with_objection,
+)
 from app.services.national_economy_retrieval import (
     EvidenceSnapshot,
     retrieve_industry_evidence,
@@ -21,19 +28,33 @@ COMPLETED_CASE_STATUS = "completed"
 NEEDS_REVIEW_CASE_STATUS = "needs_review"
 FAILED_CASE_STATUS = "classification_failed"
 
-_QUERY_FIELDS = (
-    ("主营业务", "main_business"),
-    ("核心产品 / 服务", "core_products_services"),
-    ("营业执照经营范围", "business_scope"),
-    ("贷款用途", "loan_purpose"),
+_EVIDENCE_FIELDS = (
+    (
+        EvidenceLevel.MAIN_BUSINESS_REVENUE,
+        ("main_business", "main_business_revenue_share", "core_products_services"),
+    ),
+    (
+        EvidenceLevel.TRADE_AND_INDUSTRY_CHAIN,
+        (
+            "trade_goods_services",
+            "counterparty_business_industry",
+            "industry_chain_position",
+            "industry_position_competitiveness",
+        ),
+    ),
+    (
+        EvidenceLevel.LOAN_PURPOSE,
+        ("loan_purpose", "credit_approval_opinion"),
+    ),
+    (EvidenceLevel.BUSINESS_SCOPE, ("business_scope",)),
 )
 
 RetrievalCallable = Callable[
-    [Session, str, Settings], Sequence[EvidenceSnapshot]
+    [Session, Sequence[EvidenceLayer], Settings], Sequence[EvidenceSnapshot]
 ]
 ClassificationCallable = Callable[
     [
-        Mapping[str, object],
+        Sequence[EvidenceLayer],
         Sequence[EvidenceSnapshot],
         Settings,
         Mapping[str, object] | None,
@@ -45,19 +66,56 @@ ClassificationCallable = Callable[
 def build_classification_query(
     input_payload: Mapping[str, object],
     objection_text: str | None = None,
-) -> str:
-    parts = []
-    for label, field in _QUERY_FIELDS:
-        value = str(input_payload.get(field, "")).strip()
-        if value:
-            parts.append(f"{label}：{value}")
-    if objection_text is not None:
-        normalized_objection = objection_text.strip()
-        if normalized_objection:
-            parts.append(f"异议说明：{normalized_objection}")
-    if not parts:
+) -> tuple[EvidenceLayer, ...]:
+    layers = tuple(
+        _build_evidence_layer(input_payload, level, fields)
+        for level, fields in _EVIDENCE_FIELDS
+    )
+    normalized_objection = (objection_text or "").strip()
+    if normalized_objection:
+        target_index = next(
+            (index for index, layer in enumerate(layers) if layer.is_available),
+            0,
+        )
+        layers = tuple(
+            supplement_layer_with_objection(
+                layer,
+                field_label="异议说明",
+                raw_text=normalized_objection,
+                indicated_business=normalized_objection,
+            )
+            if index == target_index
+            else layer
+            for index, layer in enumerate(layers)
+        )
+    if not any(layer.is_available for layer in layers):
         raise ValueError("classification query has no usable enterprise information")
-    return "\n".join(parts)
+    return layers
+
+
+def _build_evidence_layer(
+    input_payload: Mapping[str, object],
+    level: EvidenceLevel,
+    fields: Sequence[str],
+) -> EvidenceLayer:
+    facts = tuple(
+        EvidenceFact(
+            field_label=FIELD_LABELS[field],
+            raw_text=value,
+            indicated_business=value,
+        )
+        for field in fields
+        if (value := _field_text(input_payload.get(field)))
+    )
+    return EvidenceLayer(
+        level=level,
+        facts=facts,
+        unavailable_reason=None if facts else "该证据层没有可用输入字段",
+    )
+
+
+def _field_text(value: object) -> str:
+    return "" if value is None else str(value).strip()
 
 
 def classify_case(
@@ -119,10 +177,10 @@ def _run_classification(
     classifier: ClassificationCallable,
 ) -> NationalEconomyClassificationResult:
     objection_text = None if objection is None else str(objection["description"])
-    query = build_classification_query(case.input_payload, objection_text)
+    evidence_layers = build_classification_query(case.input_payload, objection_text)
     try:
-        candidates = tuple(retrieval(session, query, settings))
-        classification = classifier(case.input_payload, candidates, settings, objection)
+        candidates = tuple(retrieval(session, evidence_layers, settings))
+        classification = classifier(evidence_layers, candidates, settings, objection)
         result = _build_result(case, classification, objection)
         session.add(result)
         case.status = (

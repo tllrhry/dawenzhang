@@ -8,7 +8,16 @@ from app.services.national_economy_classification import (
     NationalEconomyClassificationError,
     classify_national_economy,
 )
-from app.services.national_economy_retrieval import EvidenceSnapshot, RecallHit
+from app.services.national_economy_decision_policy import (
+    EvidenceFact,
+    EvidenceLayer,
+    EvidenceLevel,
+)
+from app.services.national_economy_retrieval import (
+    CandidateEvidenceTrace,
+    EvidenceSnapshot,
+    RecallHit,
+)
 
 
 def _settings() -> Settings:
@@ -19,20 +28,47 @@ def _settings() -> Settings:
 
 
 def _candidate(code: str, name: str, text: str) -> EvidenceSnapshot:
+    hit = RecallHit(
+        industry_code=code,
+        industry_name=name,
+        text=text,
+        chunk_type="definition",
+        source_row=2,
+        distance=0.2,
+    )
     return EvidenceSnapshot(
         industry_code=code,
         industry_name=name,
         vector_score=0.8,
         rerank_score=0.9,
-        hits=(
-            RecallHit(
-                industry_code=code,
-                industry_name=name,
-                text=text,
-                chunk_type="definition",
-                source_row=2,
-                distance=0.2,
+        hits=(hit,),
+        evidence_traces=(
+            CandidateEvidenceTrace(
+                EvidenceLevel.MAIN_BUSINESS_REVENUE,
+                (EvidenceFact("主营业务及营收占比", "水稻 90%", "水稻 90%"),),
+                (hit,),
             ),
+        ),
+    )
+
+
+def _evidence(business: str = "水稻种植") -> tuple[EvidenceLayer, ...]:
+    return (
+        EvidenceLayer(
+            EvidenceLevel.MAIN_BUSINESS_REVENUE,
+            (EvidenceFact("主营业务", business, business),),
+        ),
+        EvidenceLayer(
+            EvidenceLevel.TRADE_AND_INDUSTRY_CHAIN,
+            unavailable_reason="未提供贸易合同或产业链信息",
+        ),
+        EvidenceLayer(
+            EvidenceLevel.LOAN_PURPOSE,
+            unavailable_reason="未提供贷款用途",
+        ),
+        EvidenceLayer(
+            EvidenceLevel.BUSINESS_SCOPE,
+            (EvidenceFact("营业执照经营范围（全文）", "谷物种植", "谷物种植"),),
         ),
     )
 
@@ -68,7 +104,7 @@ def test_classification_accepts_exact_candidate_pair_and_required_fields() -> No
 
     with _client(output) as client:
         result = classify_national_economy(
-            {"主营产品/服务": "水稻种植"},
+            _evidence(),
             candidates,
             _settings(),
             objection={"补充说明": "收入主要来自水稻"},
@@ -85,7 +121,7 @@ def test_classification_accepts_exact_candidate_pair_and_required_fields() -> No
     assert result.candidate_snapshot[0]["definition_and_hits"][0]["text"] == "稻谷种植的定义"
 
 
-def test_request_only_sends_enterprise_objection_and_candidate_evidence() -> None:
+def test_request_sends_ordered_evidence_and_traceable_candidate_fragments() -> None:
     captured = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -113,7 +149,7 @@ def test_request_only_sends_enterprise_objection_and_candidate_evidence() -> Non
         transport=httpx.MockTransport(handler), base_url=settings.deepseek_base_url
     ) as client:
         classify_national_economy(
-            {"企业名称": "测试企业"},
+            _evidence(),
             (_candidate("0111", "稻谷种植", "目录命中片段"),),
             settings,
             objection={"reason": "经营内容已变化"},
@@ -123,10 +159,22 @@ def test_request_only_sends_enterprise_objection_and_candidate_evidence() -> Non
     user_content = json.loads(captured["messages"][1]["content"])
     assert captured["model"] == settings.deepseek_model
     assert captured["response_format"] == {"type": "json_object"}
-    assert user_content["enterprise_input"] == {"企业名称": "测试企业"}
+    assert "enterprise_input" not in user_content
+    assert [layer["priority"] for layer in user_content["ordered_evidence"]] == [
+        1,
+        2,
+        3,
+        4,
+    ]
+    assert user_content["ordered_evidence"][0]["facts"][0]["field_label"] == "主营业务"
     assert user_content["objection"] == {"reason": "经营内容已变化"}
     assert user_content["candidates"][0]["industry_code"] == "0111"
+    trace = user_content["candidates"][0]["evidence_traces"][0]
+    assert trace["priority"] == 1
+    assert trace["facts"][0]["field_label"] == "主营业务及营收占比"
+    assert trace["matched_catalog_fragments"][0]["text"] == "目录命中片段"
     assert "目录命中片段" in str(user_content["candidates"])
+    assert "低层冲突不得推翻高层" in captured["messages"][0]["content"]
 
 
 def test_no_match_returns_needs_review_without_forced_conclusion() -> None:
@@ -134,7 +182,7 @@ def test_no_match_returns_needs_review_without_forced_conclusion() -> None:
 
     with _client(output) as client:
         result = classify_national_economy(
-            {"主营产品/服务": "软件开发"},
+            _evidence("软件开发"),
             (_candidate("0111", "稻谷种植", "农业定义"),),
             _settings(),
             client=client,
@@ -175,7 +223,7 @@ def test_invalid_selected_result_fails_without_conclusion(overrides, message) ->
     with _client(output) as client:
         with pytest.raises(NationalEconomyClassificationError, match=message):
             classify_national_economy(
-                {"主营产品/服务": "水稻"},
+                _evidence(),
                 (
                     _candidate("0111", "稻谷种植", "定义"),
                     _candidate("0112", "小麦种植", "定义"),
@@ -204,7 +252,7 @@ def test_malformed_model_output_fails(response_content: str) -> None:
     ) as client:
         with pytest.raises(NationalEconomyClassificationError):
             classify_national_economy(
-                {"主营产品/服务": "水稻"},
+                _evidence(),
                 (_candidate("0111", "稻谷种植", "定义"),),
                 _settings(),
                 client=client,
@@ -215,7 +263,7 @@ def test_http_failure_is_reported_as_classification_failure() -> None:
     with _client({}, status_code=503) as client:
         with pytest.raises(NationalEconomyClassificationError, match="503"):
             classify_national_economy(
-                {"主营产品/服务": "水稻"},
+                _evidence(),
                 (_candidate("0111", "稻谷种植", "定义"),),
                 _settings(),
                 client=client,
@@ -231,7 +279,7 @@ def test_timeout_is_reported_as_classification_failure() -> None:
     ) as client:
         with pytest.raises(NationalEconomyClassificationError, match="timed out"):
             classify_national_economy(
-                {"主营产品/服务": "水稻"},
+                _evidence(),
                 (_candidate("0111", "稻谷种植", "定义"),),
                 _settings(),
                 client=client,

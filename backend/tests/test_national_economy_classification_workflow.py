@@ -14,6 +14,7 @@ from app.services.national_economy_classification_workflow import (
     get_current_completed_result,
     reclassify_case,
 )
+from app.services.national_economy_decision_policy import EvidenceLevel
 from app.services.national_economy_retrieval import EvidenceSnapshot, RecallHit
 
 
@@ -31,10 +32,19 @@ def _case() -> NationalEconomyClassificationCase:
         id=1,
         scenario="national_economy_classification",
         input_payload={
+            "enterprise_name": "示例企业",
+            "unified_social_credit_code": "91320000TEST",
             "main_business": "水稻种植与销售",
+            "main_business_revenue_share": "水稻种植收入占 90%",
             "core_products_services": "稻谷",
+            "counterparty_name": "示例采购方",
+            "counterparty_business_industry": "粮食加工",
+            "trade_goods_services": "稻谷销售",
+            "industry_chain_position": "水稻种植上游",
+            "industry_position_competitiveness": "本地水稻主产企业",
             "business_scope": "谷物种植",
             "loan_purpose": "购买种子和农机",
+            "credit_approval_opinion": "支持种植经营周转",
         },
         status="pending_classification",
     )
@@ -79,14 +89,50 @@ def _classification(
     )
 
 
-def test_build_query_uses_labeled_enterprise_fields_and_objection() -> None:
-    query = build_classification_query(_case().input_payload, "补充：自产水稻占比 90%")
+def test_build_query_maps_labeled_fields_to_ordered_evidence_layers() -> None:
+    layers = build_classification_query(
+        _case().input_payload, "补充：自产水稻占比 90%"
+    )
 
-    assert "主营业务：水稻种植与销售" in query
-    assert "核心产品 / 服务：稻谷" in query
-    assert "营业执照经营范围：谷物种植" in query
-    assert "贷款用途：购买种子和农机" in query
-    assert "异议说明：补充：自产水稻占比 90%" in query
+    assert [layer.level for layer in layers] == list(EvidenceLevel)
+    labels_by_level = {
+        layer.level: [fact.field_label for fact in layer.facts] for layer in layers
+    }
+    assert labels_by_level[EvidenceLevel.MAIN_BUSINESS_REVENUE] == [
+        "主营业务",
+        "主营业务及营收占比",
+        "核心产品 / 服务名称",
+        "异议说明",
+    ]
+    assert labels_by_level[EvidenceLevel.TRADE_AND_INDUSTRY_CHAIN] == [
+        "贸易合同核心交易品类 / 服务内容",
+        "交易对手主营业务 / 所属行业",
+        "企业产业链定位",
+        "企业行业定位与核心竞争力",
+    ]
+    assert labels_by_level[EvidenceLevel.LOAN_PURPOSE] == [
+        "贷款用途详细描述",
+        "授信审批意见",
+    ]
+    assert labels_by_level[EvidenceLevel.BUSINESS_SCOPE] == [
+        "营业执照经营范围（全文）"
+    ]
+    all_labels = {label for labels in labels_by_level.values() for label in labels}
+    assert "企业名称" not in all_labels
+    assert "统一社会信用代码" not in all_labels
+    assert "贸易合同本次交易对手名称" not in all_labels
+    assert layers[0].facts[-1].source == "objection"
+
+
+def test_build_query_marks_empty_layers_unavailable_without_stringifying_none() -> None:
+    layers = build_classification_query(
+        {"main_business": None, "business_scope": "软件开发"}
+    )
+
+    assert not layers[0].is_available
+    assert layers[0].facts == ()
+    assert layers[3].is_available
+    assert layers[3].facts[0].raw_text == "软件开发"
 
 
 def test_initial_classification_saves_first_completed_version() -> None:
@@ -109,8 +155,12 @@ def test_initial_classification_saves_first_completed_version() -> None:
     assert result.rationale == "主营业务和目录定义一致"
     assert result.ai_summary == "企业主要从事稻谷种植"
     assert case.status == "completed"
-    assert "主营业务：水稻种植与销售" in retrieval.call_args.args[1]
-    classifier.assert_called_once_with(case.input_payload, (_candidate(),), _settings(), None)
+    evidence_layers = retrieval.call_args.args[1]
+    assert evidence_layers[0].level is EvidenceLevel.MAIN_BUSINESS_REVENUE
+    assert evidence_layers[0].facts[0].field_label == "主营业务"
+    classifier.assert_called_once_with(
+        evidence_layers, (_candidate(),), _settings(), None
+    )
     session.add.assert_called_once_with(result)
     session.commit.assert_called_once_with()
 
@@ -150,6 +200,9 @@ def test_objection_reclassification_appends_version_and_preserves_history() -> N
     assert original.objection is None
     assert tuple(item.version for item in case.result_versions) == (1, 2)
     assert classifier.call_args.args[3] == objection
+    evidence_layers = classifier.call_args.args[0]
+    assert evidence_layers[0].facts[-1].source == "objection"
+    assert evidence_layers[0].facts[-1].field_label == "异议说明"
 
 
 def test_blank_objection_is_rejected_without_reclassification() -> None:

@@ -6,6 +6,11 @@ import pytest
 from sqlalchemy.dialects import postgresql
 
 from app.core.config import Settings
+from app.services.national_economy_decision_policy import (
+    EvidenceFact,
+    EvidenceLayer,
+    EvidenceLevel,
+)
 from app.services.national_economy_retrieval import (
     RECALL_LIMIT,
     IndustryCandidate,
@@ -23,6 +28,19 @@ def _settings() -> Settings:
 
 def _hit(code: str, name: str, text: str, distance: float) -> RecallHit:
     return RecallHit(code, name, text, "definition", 2, distance)
+
+
+def _evidence_layers() -> tuple[EvidenceLayer, ...]:
+    return (
+        EvidenceLayer(
+            EvidenceLevel.MAIN_BUSINESS_REVENUE,
+            (EvidenceFact("主营业务及营收占比", "水稻 90%", "水稻 90%"),),
+        ),
+        EvidenceLayer(
+            EvidenceLevel.BUSINESS_SCOPE,
+            (EvidenceFact("营业执照经营范围（全文）", "谷物种植", "谷物种植"),),
+        ),
+    )
 
 
 def test_recall_uses_pgvector_cosine_distance_and_top_30() -> None:
@@ -77,10 +95,15 @@ def test_rerank_returns_top_evidence_snapshots_with_configured_model() -> None:
         )
 
     with httpx.Client(transport=httpx.MockTransport(handler), base_url=settings.siliconflow_base_url) as client:
-        snapshots = rerank_candidates("企业经营描述", candidates, settings, client=client)
+        snapshots = rerank_candidates(
+            _evidence_layers(), candidates, settings, client=client
+        )
 
     assert captured_payload["model"] == settings.siliconflow_rerank_model
     assert captured_payload["top_n"] == 8
+    assert "priority=1" in captured_payload["query"]
+    assert "主营业务及营收占比" in captured_payload["query"]
+    assert captured_payload["query"].index("priority=1") < captured_payload["query"].index("priority=4")
     assert len(snapshots) == 8
     assert snapshots[0].hits[0].text == "证据0"
 
@@ -88,7 +111,7 @@ def test_rerank_returns_top_evidence_snapshots_with_configured_model() -> None:
 @pytest.mark.parametrize("top_n", [4, 9])
 def test_rerank_rejects_result_count_outside_five_to_eight(top_n: int) -> None:
     with pytest.raises(ValueError, match="between 5 and 8"):
-        rerank_candidates("query", (), _settings(), top_n=top_n)
+        rerank_candidates((), (), _settings(), top_n=top_n)
 
 
 def test_retrieve_vectorizes_query_then_reranks_aggregated_candidates() -> None:
@@ -108,16 +131,24 @@ def test_retrieve_vectorizes_query_then_reranks_aggregated_candidates() -> None:
     with httpx.Client(transport=httpx.MockTransport(handler), base_url=settings.siliconflow_base_url) as client:
         snapshots = retrieve_industry_evidence(
             session,
-            "  水稻种植企业  ",
+            _evidence_layers(),
             settings,
-            embedding_request=lambda texts: requested.append(tuple(texts)) or [[0.1, 0.2, 0.3]],
+            embedding_request=lambda texts: requested.append(tuple(texts))
+            or [[0.1, 0.2, 0.3], [0.3, 0.2, 0.1]],
             rerank_client=client,
         )
 
-    assert requested == [("水稻种植企业",)]
+    assert len(requested) == 1
+    assert "priority=1" in requested[0][0]
+    assert "priority=4" in requested[0][1]
     assert len(snapshots) == 1
     assert snapshots[0].industry_code == "0111"
     assert len(snapshots[0].hits) == 2
+    assert [trace.level for trace in snapshots[0].evidence_traces] == [
+        EvidenceLevel.MAIN_BUSINESS_REVENUE,
+        EvidenceLevel.BUSINESS_SCOPE,
+    ]
+    assert snapshots[0].evidence_traces[0].facts[0].field_label == "主营业务及营收占比"
 
 
 def test_retrieve_propagates_embedding_timeout() -> None:
@@ -125,7 +156,9 @@ def test_retrieve_propagates_embedding_timeout() -> None:
         raise httpx.ReadTimeout("embedding timeout")
 
     with pytest.raises(httpx.ReadTimeout, match="embedding timeout"):
-        retrieve_industry_evidence(Mock(), "query", _settings(), embedding_request=timeout)
+        retrieve_industry_evidence(
+            Mock(), _evidence_layers(), _settings(), embedding_request=timeout
+        )
 
 
 def test_rerank_propagates_non_success_response() -> None:
@@ -136,7 +169,9 @@ def test_rerank_propagates_non_success_response() -> None:
 
     with httpx.Client(transport=httpx.MockTransport(handler), base_url=_settings().siliconflow_base_url) as client:
         with pytest.raises(httpx.HTTPStatusError):
-            rerank_candidates("query", (candidate,), _settings(), client=client)
+            rerank_candidates(
+                _evidence_layers(), (candidate,), _settings(), client=client
+            )
 
 
 def test_rerank_rejects_malformed_response() -> None:
@@ -147,4 +182,6 @@ def test_rerank_rejects_malformed_response() -> None:
 
     with httpx.Client(transport=httpx.MockTransport(handler), base_url=_settings().siliconflow_base_url) as client:
         with pytest.raises(ValueError, match="missing index or relevance_score"):
-            rerank_candidates("query", (candidate,), _settings(), client=client)
+            rerank_candidates(
+                _evidence_layers(), (candidate,), _settings(), client=client
+            )

@@ -8,6 +8,11 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings
 from app.models import NationalEconomyIndustryChunk
 from app.services.national_economy_catalog_chunks import embed_texts
+from app.services.national_economy_decision_policy import (
+    EvidenceFact,
+    EvidenceLayer,
+    EvidenceLevel,
+)
 
 
 RECALL_LIMIT = 30
@@ -31,12 +36,22 @@ class IndustryCandidate:
     industry_name: str
     distance: float
     hits: tuple[RecallHit, ...]
+    evidence_traces: tuple["CandidateEvidenceTrace", ...] = ()
 
     @property
     def rerank_document(self) -> str:
-        evidence = "\n".join(
-            f"[{hit.chunk_type}] {hit.text}" for hit in self.hits
-        )
+        if self.evidence_traces:
+            evidence = "\n".join(
+                f"priority={int(trace.level)} level={trace.level.name} "
+                f"evidence_fields={','.join(fact.field_label for fact in trace.facts)} "
+                f"catalog_fragment=[{hit.chunk_type}] {hit.text}"
+                for trace in self.evidence_traces
+                for hit in trace.hits
+            )
+        else:
+            evidence = "\n".join(
+                f"[{hit.chunk_type}] {hit.text}" for hit in self.hits
+            )
         return f"{self.industry_code} {self.industry_name}\n{evidence}"
 
 
@@ -46,6 +61,14 @@ class EvidenceSnapshot:
     industry_name: str
     vector_score: float
     rerank_score: float
+    hits: tuple[RecallHit, ...]
+    evidence_traces: tuple["CandidateEvidenceTrace", ...] = ()
+
+
+@dataclass(frozen=True)
+class CandidateEvidenceTrace:
+    level: EvidenceLevel
+    facts: tuple[EvidenceFact, ...]
     hits: tuple[RecallHit, ...]
 
 
@@ -99,8 +122,59 @@ def aggregate_recall_hits(hits: Sequence[RecallHit]) -> tuple[IndustryCandidate,
     return tuple(sorted(candidates, key=lambda candidate: candidate.distance))
 
 
+def aggregate_layer_recall_hits(
+    layer_hits: Sequence[tuple[EvidenceLayer, Sequence[RecallHit]]],
+) -> tuple[IndustryCandidate, ...]:
+    grouped: dict[str, list[tuple[EvidenceLayer, RecallHit]]] = {}
+    for layer, hits in layer_hits:
+        for hit in hits:
+            grouped.setdefault(hit.industry_code, []).append((layer, hit))
+
+    candidates = []
+    for matches in grouped.values():
+        first_hit = matches[0][1]
+        traces = tuple(
+            CandidateEvidenceTrace(
+                level=layer.level,
+                facts=layer.usable_facts,
+                hits=tuple(
+                    sorted(
+                        (
+                            hit
+                            for matched_layer, hit in matches
+                            if matched_layer.level == layer.level
+                        ),
+                        key=lambda hit: hit.distance,
+                    )
+                ),
+            )
+            for layer, _ in layer_hits
+            if any(matched_layer.level == layer.level for matched_layer, _ in matches)
+        )
+        unique_hits = {
+            (
+                hit.industry_code,
+                hit.industry_name,
+                hit.text,
+                hit.chunk_type,
+                hit.source_row,
+            ): hit
+            for _, hit in matches
+        }
+        candidates.append(
+            IndustryCandidate(
+                industry_code=first_hit.industry_code,
+                industry_name=first_hit.industry_name,
+                distance=min(hit.distance for _, hit in matches),
+                hits=tuple(sorted(unique_hits.values(), key=lambda hit: hit.distance)),
+                evidence_traces=traces,
+            )
+        )
+    return tuple(sorted(candidates, key=lambda candidate: candidate.distance))
+
+
 def rerank_candidates(
-    query: str,
+    evidence_layers: Sequence[EvidenceLayer],
     candidates: Sequence[IndustryCandidate],
     settings: Settings,
     top_n: int = MAX_RERANK_RESULTS,
@@ -110,6 +184,9 @@ def rerank_candidates(
         raise ValueError("top_n must be between 5 and 8")
     if not candidates:
         return ()
+    ordered_evidence = _ordered_available_layers(evidence_layers)
+    if not ordered_evidence:
+        raise ValueError("at least one usable evidence layer is required")
     if not settings.siliconflow_api_key:
         raise RuntimeError("SILICONFLOW_API_KEY is required for reranking")
 
@@ -127,7 +204,7 @@ def rerank_candidates(
             headers={"Authorization": f"Bearer {settings.siliconflow_api_key}"},
             json={
                 "model": settings.siliconflow_rerank_model,
-                "query": query,
+                "query": serialize_ordered_evidence(ordered_evidence),
                 "documents": [candidate.rerank_document for candidate in candidates],
                 "top_n": min(top_n, len(candidates)),
                 "return_documents": False,
@@ -154,6 +231,7 @@ def rerank_candidates(
                     vector_score=1.0 - candidate.distance,
                     rerank_score=float(result["relevance_score"]),
                     hits=candidate.hits,
+                    evidence_traces=candidate.evidence_traces,
                 )
             )
         return tuple(snapshots[:top_n])
@@ -164,27 +242,56 @@ def rerank_candidates(
 
 def retrieve_industry_evidence(
     session: Session,
-    query: str,
+    evidence_layers: Sequence[EvidenceLayer],
     settings: Settings,
     top_n: int = MAX_RERANK_RESULTS,
     embedding_request: EmbeddingRequest | None = None,
     rerank_client: httpx.Client | None = None,
 ) -> tuple[EvidenceSnapshot, ...]:
-    normalized_query = query.strip()
-    if not normalized_query:
-        raise ValueError("query must not be blank")
+    ordered_evidence = _ordered_available_layers(evidence_layers)
+    if not ordered_evidence:
+        raise ValueError("at least one usable evidence layer is required")
+    layer_queries = tuple(serialize_evidence_layer(layer) for layer in ordered_evidence)
     request = embedding_request or (lambda texts: embed_texts(texts, settings))
-    embeddings = tuple(request((normalized_query,)))
-    if len(embeddings) != 1:
-        raise ValueError("query embedding response must contain exactly one vector")
-    if len(embeddings[0]) != settings.embedding_dimension:
+    embeddings = tuple(request(layer_queries))
+    if len(embeddings) != len(layer_queries):
+        raise ValueError("query embedding response must match usable evidence layers")
+    if any(len(embedding) != settings.embedding_dimension for embedding in embeddings):
         raise ValueError("query embedding dimension does not match configuration")
-    hits = recall_industry_chunks(session, embeddings[0])
-    candidates = aggregate_recall_hits(hits)
+    layer_hits = tuple(
+        (layer, recall_industry_chunks(session, embedding))
+        for layer, embedding in zip(ordered_evidence, embeddings, strict=True)
+    )
+    candidates = aggregate_layer_recall_hits(layer_hits)
     return rerank_candidates(
-        normalized_query,
+        ordered_evidence,
         candidates,
         settings,
         top_n=top_n,
         client=rerank_client,
     )
+
+
+def serialize_evidence_layer(layer: EvidenceLayer) -> str:
+    facts = "\n".join(
+        f"- [{fact.field_label}] {fact.raw_text.strip()} (source={fact.source})"
+        for fact in layer.usable_facts
+    )
+    return f"priority={int(layer.level)} level={layer.level.name}\n{facts}"
+
+
+def serialize_ordered_evidence(evidence_layers: Sequence[EvidenceLayer]) -> str:
+    return "\n\n".join(
+        serialize_evidence_layer(layer)
+        for layer in _ordered_available_layers(evidence_layers)
+    )
+
+
+def _ordered_available_layers(
+    evidence_layers: Sequence[EvidenceLayer],
+) -> tuple[EvidenceLayer, ...]:
+    ordered = tuple(sorted(evidence_layers, key=lambda layer: layer.level))
+    levels = tuple(layer.level for layer in ordered)
+    if len(levels) != len(set(levels)):
+        raise ValueError("evidence levels must be unique")
+    return tuple(layer for layer in ordered if layer.is_available)

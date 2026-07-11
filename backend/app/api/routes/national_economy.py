@@ -1,0 +1,229 @@
+from io import BytesIO
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import StreamingResponse
+from sqlalchemy import select
+from sqlalchemy.orm import Session, selectinload
+
+from app.db.session import get_db
+from app.models import NationalEconomyClassificationCase
+from app.schemas.national_economy import (
+    CaseCreatedResponse,
+    CaseInputField,
+    CaseResponse,
+    ClassificationResultResponse,
+    ObjectionRequest,
+    ResultHistoryResponse,
+    ScenarioListResponse,
+)
+from app.services.national_economy_case_export import export_case_workbook
+from app.services.national_economy_case_ingestion import (
+    FIELD_LABELS,
+    SCENARIO,
+    NationalEconomyTemplateError,
+    create_case_from_template,
+    read_template_bytes,
+)
+from app.services.national_economy_classification_workflow import (
+    classify_case,
+    get_current_completed_result,
+    reclassify_case,
+)
+
+
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+router = APIRouter(tags=["national-economy"])
+
+
+@router.get("/scenarios", response_model=ScenarioListResponse)
+def list_scenarios() -> dict[str, object]:
+    return {
+        "items": [
+            {
+                "id": SCENARIO,
+                "name": "国民经济行业分类",
+                "status": "available",
+                "description": "上传单企业 Word 模板并生成四级行业分类结论",
+            },
+            {
+                "id": "agriculture_related",
+                "name": "涉农业务",
+                "status": "coming_soon",
+                "description": "暂未开放",
+            },
+            {
+                "id": "five_major_articles",
+                "name": "五篇大文章",
+                "status": "coming_soon",
+                "description": "暂未开放",
+            },
+            *[
+                {
+                    "id": scenario_id,
+                    "name": name,
+                    "status": "coming_soon",
+                    "description": "暂未开放",
+                    "parent_id": "five_major_articles",
+                }
+                for scenario_id, name in (
+                    ("technology_finance", "科技金融"),
+                    ("green_finance", "绿色金融"),
+                    ("pension_finance", "养老金融"),
+                    ("digital_finance", "数字金融"),
+                )
+            ],
+        ]
+    }
+
+
+@router.get("/scenarios/national-economy/template")
+def download_template() -> StreamingResponse:
+    return _download_response(
+        read_template_bytes(),
+        DOCX_MIME,
+        "national-economy-template.docx",
+    )
+
+
+@router.post(
+    "/national-economy/cases",
+    response_model=CaseCreatedResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_case(
+    file: UploadFile = File(...),
+    session: Session = Depends(get_db),
+) -> CaseCreatedResponse:
+    filename = Path(file.filename or "").name
+    if not filename.lower().endswith(".docx"):
+        raise HTTPException(status_code=422, detail="请上传单个 .docx 文件")
+    document_bytes = await file.read()
+    try:
+        case = create_case_from_template(session, document_bytes, filename)
+    except NationalEconomyTemplateError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": str(exc),
+                "missing": list(exc.issues.missing),
+                "duplicate": list(exc.issues.duplicate),
+                "unrecognized": list(exc.issues.unrecognized),
+            },
+        ) from exc
+    return CaseCreatedResponse.model_validate(case, from_attributes=True)
+
+
+@router.get("/national-economy/cases/{case_id}", response_model=CaseResponse)
+def get_case(case_id: int, session: Session = Depends(get_db)) -> CaseResponse:
+    return _case_response(_get_case(session, case_id))
+
+
+@router.post(
+    "/national-economy/cases/{case_id}/classifications",
+    response_model=ClassificationResultResponse,
+)
+def classify(case_id: int, session: Session = Depends(get_db)) -> object:
+    case = _get_case(session, case_id)
+    try:
+        return classify_case(session, case)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"message": "分类服务暂时不可用，请稍后重试", "error": str(exc)},
+        ) from exc
+
+
+@router.post(
+    "/national-economy/cases/{case_id}/objections",
+    response_model=ClassificationResultResponse,
+)
+def object_to_classification(
+    case_id: int,
+    payload: ObjectionRequest,
+    session: Session = Depends(get_db),
+) -> object:
+    objection_text = payload.objection_text.strip()
+    if not objection_text:
+        raise HTTPException(status_code=422, detail="异议说明不能为空")
+    case = _get_case(session, case_id)
+    try:
+        return reclassify_case(session, case, objection_text)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"message": "异议重判暂时不可用，请稍后重试", "error": str(exc)},
+        ) from exc
+
+
+@router.get(
+    "/national-economy/cases/{case_id}/history",
+    response_model=ResultHistoryResponse,
+)
+def get_history(
+    case_id: int,
+    session: Session = Depends(get_db),
+) -> ResultHistoryResponse:
+    case = _get_case(session, case_id)
+    return ResultHistoryResponse(
+        items=[
+            ClassificationResultResponse.model_validate(result)
+            for result in sorted(case.result_versions, key=lambda item: item.version)
+        ]
+    )
+
+
+@router.get("/national-economy/cases/{case_id}/export")
+def export_case(case_id: int, session: Session = Depends(get_db)) -> StreamingResponse:
+    case = _get_case(session, case_id)
+    return _download_response(
+        export_case_workbook(case),
+        XLSX_MIME,
+        f"national-economy-case-{case.id}.xlsx",
+    )
+
+
+def _get_case(session: Session, case_id: int) -> NationalEconomyClassificationCase:
+    case = session.scalar(
+        select(NationalEconomyClassificationCase)
+        .where(NationalEconomyClassificationCase.id == case_id)
+        .options(selectinload(NationalEconomyClassificationCase.result_versions))
+    )
+    if case is None:
+        raise HTTPException(status_code=404, detail="案例不存在")
+    return case
+
+
+def _case_response(case: NationalEconomyClassificationCase) -> CaseResponse:
+    current_result = get_current_completed_result(case)
+    return CaseResponse(
+        id=case.id,
+        scenario=case.scenario,
+        status=case.status,
+        original_filename=case.original_filename,
+        input_fields=[
+            CaseInputField(
+                field=field,
+                label=label,
+                value=case.input_payload.get(field, ""),
+            )
+            for field, label in FIELD_LABELS.items()
+        ],
+        current_result=(
+            ClassificationResultResponse.model_validate(current_result)
+            if current_result is not None
+            else None
+        ),
+        created_at=case.created_at,
+        updated_at=case.updated_at,
+    )
+
+
+def _download_response(content: bytes, media_type: str, filename: str) -> StreamingResponse:
+    return StreamingResponse(
+        BytesIO(content),
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

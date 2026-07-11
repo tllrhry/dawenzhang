@@ -1,20 +1,7 @@
-from collections.abc import Sequence
-from typing import Any
-
-from sqlalchemy.orm import Session
-
 from app.core.config import get_settings
 from app.db.session import get_sessionmaker
-from app.models import NationalEconomyCatalogVersion
+from app.services.national_economy_catalog_chunks import full_resync_catalog
 from app.services.national_economy_catalog_sync import read_catalog_source, synchronize_catalog
-
-
-def full_resync_skeleton(
-    session: Session,
-    version: NationalEconomyCatalogVersion,
-    rows: Sequence[tuple[Any, ...]],
-) -> None:
-    del session, version, rows
 
 
 def main() -> int:
@@ -24,12 +11,15 @@ def main() -> int:
 
     source = read_catalog_source(settings.national_economy_catalog_path)
     with get_sessionmaker()() as session:
+        def full_resync(session, version, rows) -> None:
+            full_resync_catalog(session, version, rows, settings)
+
         result = synchronize_catalog(
             session=session,
             source=source,
             embedding_model=settings.siliconflow_embedding_model,
             embedding_dimension=settings.embedding_dimension,
-            full_resync=full_resync_skeleton,
+            full_resync=full_resync,
         )
         if result.created:
             session.commit()

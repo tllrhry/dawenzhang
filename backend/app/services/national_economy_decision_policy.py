@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from enum import IntEnum
+from enum import Enum, IntEnum
 from typing import Literal
 
 
@@ -11,6 +11,46 @@ class EvidenceLevel(IntEnum):
 
 
 EvidenceSource = Literal["original", "objection"]
+
+
+class LoanPurposeSpecificity(str, Enum):
+    GENERIC = "generic"
+    SPECIFIC = "specific"
+
+
+class LoanDirectionRoute(str, Enum):
+    USE_ENTERPRISE_CONCLUSION = "use_enterprise_conclusion"
+    CLASSIFY_ACTUAL_DIRECTION = "classify_actual_direction"
+    NEEDS_MANUAL_REVIEW = "needs_manual_review"
+
+
+@dataclass(frozen=True)
+class LoanDirectionDecision:
+    route: LoanDirectionRoute
+    specificity: LoanPurposeSpecificity
+    matches_enterprise: bool | None
+
+    def __post_init__(self) -> None:
+        if (
+            self.specificity is LoanPurposeSpecificity.GENERIC
+            and (
+                self.route is not LoanDirectionRoute.USE_ENTERPRISE_CONCLUSION
+                or self.matches_enterprise is not True
+            )
+        ):
+            raise ValueError("generic loan purpose must use the enterprise conclusion")
+
+
+_GENERIC_LOAN_PURPOSE_PHRASES = frozenset(
+    {
+        "经营用",
+        "经营使用",
+        "经营周转",
+        "日常经营周转",
+        "流动资金",
+        "补充流动资金",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -65,6 +105,37 @@ class EvidenceDecision:
 
 class NoUsableEvidenceError(ValueError):
     pass
+
+
+def decide_loan_direction(
+    *,
+    loan_purpose: str,
+    matches_main_business: bool,
+    within_business_scope: bool,
+) -> LoanDirectionDecision:
+    if _is_generic_loan_purpose(loan_purpose):
+        return LoanDirectionDecision(
+            route=LoanDirectionRoute.USE_ENTERPRISE_CONCLUSION,
+            specificity=LoanPurposeSpecificity.GENERIC,
+            matches_enterprise=True,
+        )
+    if matches_main_business:
+        return LoanDirectionDecision(
+            route=LoanDirectionRoute.USE_ENTERPRISE_CONCLUSION,
+            specificity=LoanPurposeSpecificity.SPECIFIC,
+            matches_enterprise=True,
+        )
+    if within_business_scope:
+        return LoanDirectionDecision(
+            route=LoanDirectionRoute.CLASSIFY_ACTUAL_DIRECTION,
+            specificity=LoanPurposeSpecificity.SPECIFIC,
+            matches_enterprise=False,
+        )
+    return LoanDirectionDecision(
+        route=LoanDirectionRoute.NEEDS_MANUAL_REVIEW,
+        specificity=LoanPurposeSpecificity.SPECIFIC,
+        matches_enterprise=None,
+    )
 
 
 def decide_primary_business(
@@ -125,3 +196,8 @@ def _validate_unique_levels(layers: tuple[EvidenceLayer, ...]) -> None:
     levels = tuple(layer.level for layer in layers)
     if len(levels) != len(set(levels)):
         raise ValueError("evidence levels must be unique")
+
+
+def _is_generic_loan_purpose(loan_purpose: str) -> bool:
+    normalized = "".join(loan_purpose.split()).strip("，。；;、")
+    return not normalized or normalized in _GENERIC_LOAN_PURPOSE_PHRASES

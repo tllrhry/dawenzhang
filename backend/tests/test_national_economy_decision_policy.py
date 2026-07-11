@@ -4,10 +4,77 @@ from app.services.national_economy_decision_policy import (
     EvidenceFact,
     EvidenceLayer,
     EvidenceLevel,
+    LoanDirectionDecision,
+    LoanDirectionRoute,
+    LoanPurposeSpecificity,
     NoUsableEvidenceError,
+    decide_loan_direction,
     decide_primary_business,
     supplement_layer_with_objection,
 )
+
+
+@pytest.mark.parametrize("loan_purpose", ["", "  ", "经营周转", "流动资金"])
+def test_generic_loan_purpose_falls_back_to_enterprise_conclusion(
+    loan_purpose: str,
+) -> None:
+    decision = decide_loan_direction(
+        loan_purpose=loan_purpose,
+        matches_main_business=False,
+        within_business_scope=False,
+    )
+
+    assert decision.route is LoanDirectionRoute.USE_ENTERPRISE_CONCLUSION
+    assert decision.specificity is LoanPurposeSpecificity.GENERIC
+    assert decision.matches_enterprise is True
+
+
+def test_specific_loan_purpose_matching_main_business_stays_consistent() -> None:
+    decision = decide_loan_direction(
+        loan_purpose="采购水稻种子用于种植",
+        matches_main_business=True,
+        within_business_scope=True,
+    )
+
+    assert decision.route is LoanDirectionRoute.USE_ENTERPRISE_CONCLUSION
+    assert decision.specificity is LoanPurposeSpecificity.SPECIFIC
+    assert decision.matches_enterprise is True
+
+
+def test_specific_minor_business_within_scope_is_classified_separately() -> None:
+    decision = decide_loan_direction(
+        loan_purpose="采购汽车及零部件",
+        matches_main_business=False,
+        within_business_scope=True,
+    )
+
+    assert decision.route is LoanDirectionRoute.CLASSIFY_ACTUAL_DIRECTION
+    assert decision.specificity is LoanPurposeSpecificity.SPECIFIC
+    assert decision.matches_enterprise is False
+
+
+def test_specific_loan_purpose_beyond_scope_needs_manual_review() -> None:
+    decision = decide_loan_direction(
+        loan_purpose="采购经营范围外的医疗器械",
+        matches_main_business=False,
+        within_business_scope=False,
+    )
+
+    assert decision.route is LoanDirectionRoute.NEEDS_MANUAL_REVIEW
+    assert decision.specificity is LoanPurposeSpecificity.SPECIFIC
+    assert decision.matches_enterprise is None
+
+
+def test_generic_decision_cannot_be_inconsistent() -> None:
+    with pytest.raises(
+        ValueError,
+        match="generic loan purpose must use the enterprise conclusion",
+    ):
+        LoanDirectionDecision(
+            route=LoanDirectionRoute.CLASSIFY_ACTUAL_DIRECTION,
+            specificity=LoanPurposeSpecificity.GENERIC,
+            matches_enterprise=False,
+        )
 
 
 def _layer(

@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 
 import httpx
 import pytest
@@ -199,6 +200,76 @@ def test_specific_loan_direction_can_select_enterprise_candidate_and_recomputes_
         )
 
     assert result.loan_matches_enterprise is True
+
+
+def test_matched_candidate_major_codes_are_captured_from_the_correct_pools() -> None:
+    enterprise_candidate = replace(
+        _candidate("3742", "航天器及运载火箭制造", "航天制造"),
+        major_category_code="C37",
+    )
+    loan_candidate = replace(
+        _candidate("5263", "汽车零配件零售", "汽车零配件零售"),
+        major_category_code="F52",
+    )
+    output = _dual_success(
+        enterprise_code="3742",
+        enterprise_name="航天器及运载火箭制造",
+        loan_code="5263",
+        loan_name="汽车零配件零售",
+        specificity="specific",
+    )
+
+    with _client(output) as client:
+        result = classify_national_economy(
+            _evidence(),
+            (enterprise_candidate,),
+            _settings(),
+            client=client,
+            loan_direction_candidates=(loan_candidate,),
+        )
+
+    assert result.industry_major_code == "C37"
+    assert result.loan_industry_major_code == "F52"
+
+
+def test_generic_loan_direction_inherits_enterprise_major_code() -> None:
+    enterprise_candidate = replace(
+        _candidate("0111", "稻谷种植", "稻谷种植"),
+        major_category_code="A01",
+    )
+
+    with _client(_dual_success()) as client:
+        result = classify_national_economy(
+            _evidence(),
+            (enterprise_candidate,),
+            _settings(),
+            client=client,
+        )
+
+    assert result.industry_major_code == "A01"
+    assert result.loan_industry_major_code == result.industry_major_code
+
+
+def test_no_match_branches_leave_major_codes_empty() -> None:
+    output = {
+        "enterprise": {"no_match": True, "reason": "企业候选均不匹配。"},
+        "loan_direction": {
+            "no_match": True,
+            "reason": "贷款用途候选均不匹配。",
+            "specificity": "specific",
+        },
+    }
+
+    with _client(output) as client:
+        result = classify_national_economy(
+            _evidence(),
+            (_candidate("0111", "稻谷种植", "农业定义"),),
+            _settings(),
+            client=client,
+        )
+
+    assert result.industry_major_code is None
+    assert result.loan_industry_major_code is None
 
 
 def test_request_contains_two_candidate_pools_and_loan_decision_tree() -> None:

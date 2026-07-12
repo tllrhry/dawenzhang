@@ -130,8 +130,12 @@ class NationalEconomyClassificationResult(Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     industry_code: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    industry_major_code: Mapped[str | None] = mapped_column(String(16), nullable=True)
     industry_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     loan_industry_code: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    loan_industry_major_code: Mapped[str | None] = mapped_column(
+        String(16), nullable=True
+    )
     loan_industry_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     loan_matching_basis: Mapped[str | None] = mapped_column(Text, nullable=True)
     loan_matches_enterprise: Mapped[bool | None] = mapped_column(Boolean, nullable=True)

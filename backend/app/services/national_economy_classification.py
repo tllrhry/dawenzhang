@@ -44,7 +44,9 @@ class ConstrainedClassificationResult:
     candidate_snapshot: tuple[dict[str, object], ...]
     objection: dict[str, object] | None
     model_output: dict[str, object]
+    industry_major_code: str | None = None
     loan_industry_code: str | None = None
+    loan_industry_major_code: str | None = None
     loan_industry_name: str | None = None
     loan_matching_basis: str | None = None
     loan_specificity: LoanSpecificity | None = None
@@ -278,6 +280,7 @@ def _validate_model_response(
 
     enterprise_code: str | None = None
     enterprise_name: str | None = None
+    enterprise_candidate: EvidenceSnapshot | None = None
     if enterprise_no_match:
         _require_exact_output_fields(
             enterprise_output,
@@ -294,7 +297,7 @@ def _validate_model_response(
         enterprise_code = _required_text(enterprise_output, "industry_code")
         enterprise_name = _required_text(enterprise_output, "industry_name")
         enterprise_basis = _required_text(enterprise_output, "matching_basis")
-        _require_candidate_pair(
+        enterprise_candidate = _require_candidate_pair(
             enterprise_code,
             enterprise_name,
             candidates,
@@ -303,6 +306,7 @@ def _validate_model_response(
 
     loan_code: str | None = None
     loan_name: str | None = None
+    loan_candidate: EvidenceSnapshot | None = None
     if loan_no_match:
         _require_exact_output_fields(
             loan_output,
@@ -323,7 +327,7 @@ def _validate_model_response(
         loan_code = _required_text(loan_output, "industry_code")
         loan_name = _required_text(loan_output, "industry_name")
         loan_basis = _required_text(loan_output, "matching_basis")
-        _require_candidate_pair(
+        loan_candidate = _require_candidate_pair(
             loan_code,
             loan_name,
             (*candidates, *loan_direction_candidates),
@@ -339,6 +343,17 @@ def _validate_model_response(
             raise NationalEconomyClassificationError(
                 "generic loan_direction must exactly match the enterprise conclusion"
             )
+
+    enterprise_major_code = (
+        enterprise_candidate.major_category_code
+        if enterprise_candidate is not None
+        else None
+    )
+    loan_major_code = (
+        loan_candidate.major_category_code if loan_candidate is not None else None
+    )
+    if loan_specificity == "generic":
+        loan_major_code = enterprise_major_code
 
     loan_matches_enterprise = (
         loan_code == enterprise_code
@@ -357,7 +372,9 @@ def _validate_model_response(
         candidate_snapshot=candidate_snapshot,
         objection=objection_snapshot,
         model_output=model_output,
+        industry_major_code=enterprise_major_code,
         loan_industry_code=loan_code,
+        loan_industry_major_code=loan_major_code,
         loan_industry_name=loan_name,
         loan_matching_basis=loan_basis,
         loan_specificity=loan_specificity,
@@ -404,14 +421,21 @@ def _require_candidate_pair(
     candidates: Sequence[EvidenceSnapshot],
     *,
     branch: str,
-) -> None:
-    valid_pairs = {
-        (candidate.industry_code, candidate.industry_name) for candidate in candidates
-    }
-    if (industry_code, industry_name) not in valid_pairs:
+) -> EvidenceSnapshot:
+    matched_candidate = next(
+        (
+            candidate
+            for candidate in candidates
+            if (candidate.industry_code, candidate.industry_name)
+            == (industry_code, industry_name)
+        ),
+        None,
+    )
+    if matched_candidate is None:
         raise NationalEconomyClassificationError(
             f"{branch} industry_code and industry_name must exactly match the same candidate"
         )
+    return matched_candidate
 
 
 def _require_exact_output_fields(

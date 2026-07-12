@@ -187,3 +187,64 @@ def test_pre_loan_direction_result_remains_readable_without_overwriting_enterpri
             session.delete(persisted_case)
             session.commit()
         session.close()
+
+
+def test_result_major_code_columns_are_nullable_varchar_16() -> None:
+    model_columns = NationalEconomyClassificationResult.__table__.columns
+    inspector = inspect(get_engine())
+    database_columns = {
+        column["name"]: column
+        for column in inspector.get_columns("national_economy_classification_results")
+    }
+
+    for column_name in ("industry_major_code", "loan_industry_major_code"):
+        assert column_name in model_columns
+        assert model_columns[column_name].nullable
+        assert str(model_columns[column_name].type) == "VARCHAR(16)"
+        assert database_columns[column_name]["nullable"]
+        assert str(database_columns[column_name]["type"]) == "VARCHAR(16)"
+
+
+def test_pre_major_code_result_remains_readable_without_rewriting_existing_fields() -> None:
+    session = get_sessionmaker()()
+    case = NationalEconomyClassificationCase(
+        scenario="pre-major-code-result",
+        input_payload={"enterprise_name": "大类编码迁移前企业"},
+        original_filename=None,
+        status="completed",
+    )
+    result = NationalEconomyClassificationResult(
+        case=case,
+        version=1,
+        status="completed",
+        industry_code="3742",
+        industry_name="航天器及运载火箭制造",
+        loan_industry_code="3742",
+        loan_industry_name="航天器及运载火箭制造",
+        loan_matches_enterprise=True,
+        confidence=91,
+        rationale="迁移前匹配依据",
+        candidate_snapshot=[],
+        model_output={"legacy": True},
+    )
+
+    try:
+        session.add(result)
+        session.commit()
+        result_id = result.id
+        session.expire_all()
+
+        loaded = session.get(NationalEconomyClassificationResult, result_id)
+        assert loaded is not None
+        assert loaded.industry_code == "3742"
+        assert loaded.loan_industry_code == "3742"
+        assert loaded.rationale == "迁移前匹配依据"
+        assert loaded.industry_major_code is None
+        assert loaded.loan_industry_major_code is None
+    finally:
+        session.rollback()
+        persisted_case = session.get(NationalEconomyClassificationCase, case.id)
+        if persisted_case is not None:
+            session.delete(persisted_case)
+            session.commit()
+        session.close()

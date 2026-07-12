@@ -1,3 +1,4 @@
+from dataclasses import replace
 from unittest.mock import MagicMock
 
 import pytest
@@ -316,6 +317,37 @@ def test_specific_loan_direction_candidates_and_result_are_persisted() -> None:
     assert result.loan_industry_name == "汽车零配件零售"
     assert "汽车零部件采购" in result.loan_matching_basis
     assert result.loan_matches_enterprise is False
+
+
+def test_enterprise_and_loan_major_codes_are_persisted_by_workflow() -> None:
+    session = MagicMock()
+    case = _case()
+    enterprise_candidate = replace(_candidate(), major_category_code="A01")
+    loan_candidate = replace(
+        _candidate("5263", "汽车零配件零售"),
+        major_category_code="F52",
+    )
+    classification = replace(
+        _classification(
+            loan_industry_code="5263",
+            loan_industry_name="汽车零配件零售",
+            loan_matches_enterprise=False,
+        ),
+        industry_major_code="A01",
+        loan_industry_major_code="F52",
+    )
+
+    result = classify_case(
+        session,
+        case,
+        _settings(),
+        retrieval=MagicMock(return_value=(enterprise_candidate,)),
+        loan_retrieval=MagicMock(return_value=(loan_candidate,)),
+        classifier=MagicMock(return_value=classification),
+    )
+
+    assert result.industry_major_code == "A01"
+    assert result.loan_industry_major_code == "F52"
 
 
 def test_blank_objection_is_rejected_without_reclassification() -> None:

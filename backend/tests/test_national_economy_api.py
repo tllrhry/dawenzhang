@@ -163,6 +163,7 @@ def test_classification_objection_history_and_failure_responses(
 
     def fake_classify(session: Session, case: NationalEconomyClassificationCase):
         result = _completed_result(case)
+        result.industry_major_code = "A01"
         session.add(result)
         case.status = "completed"
         session.commit()
@@ -176,6 +177,7 @@ def test_classification_objection_history_and_failure_responses(
     ):
         result = _completed_result(case, version=2)
         result.industry_code = "0112"
+        result.industry_major_code = "A01"
         result.industry_name = "小麦种植"
         result.objection = {"description": objection_text}
         session.add(result)
@@ -189,6 +191,8 @@ def test_classification_objection_history_and_failure_responses(
     classification_payload = response.json()
     assert classification_payload["version"] == 1
     assert classification_payload["industry_code"] == "0111"
+    assert classification_payload["industry_display_code"] == "A01-A0111"
+    assert classification_payload["loan_industry_display_code"] == "A01-A0111"
     assert classification_payload["industry_name"] == "稻谷种植"
     assert classification_payload["matching_basis"] == "主营业务与目录定义一致"
     assert "confidence" not in classification_payload
@@ -209,6 +213,8 @@ def test_classification_objection_history_and_failure_responses(
     assert objection.status_code == 200
     objection_payload = objection.json()
     assert objection_payload["version"] == 2
+    assert objection_payload["industry_display_code"] == "A01-A0112"
+    assert objection_payload["loan_industry_display_code"] == "A01-A0112"
     assert objection_payload["objection"]["description"] == "主营收入主要来自小麦"
     assert "confidence" not in objection_payload
     assert "ai_summary" not in objection_payload
@@ -217,6 +223,10 @@ def test_classification_objection_history_and_failure_responses(
     assert history.status_code == 200
     history_items = history.json()["items"]
     assert [item["version"] for item in history_items] == [1, 2]
+    assert [item["industry_display_code"] for item in history_items] == [
+        "A01-A0111",
+        "A01-A0112",
+    ]
     assert all("matching_basis" in item for item in history_items)
     assert all("confidence" not in item for item in history_items)
     assert all("ai_summary" not in item for item in history_items)
@@ -225,6 +235,7 @@ def test_classification_objection_history_and_failure_responses(
     assert case_payload["current_result"]["matching_basis"] == (
         "主营业务与目录定义一致"
     )
+    assert case_payload["current_result"]["industry_display_code"] == "A01-A0112"
     assert "confidence" not in case_payload["current_result"]
     assert "ai_summary" not in case_payload["current_result"]
 
@@ -254,6 +265,8 @@ def test_specific_loan_direction_is_returned_by_classification_endpoint(
             ),
             loan_matches_enterprise=False,
         )
+        result.industry_major_code = "A01"
+        result.loan_industry_major_code = "F52"
         session.add(result)
         case.status = "completed"
         session.commit()
@@ -269,6 +282,8 @@ def test_specific_loan_direction_is_returned_by_classification_endpoint(
     assert response.status_code == 200
     payload = response.json()
     assert payload["loan_industry_code"] == "5263"
+    assert payload["industry_display_code"] == "A01-A0111"
+    assert payload["loan_industry_display_code"] == "F52-F5263"
     assert payload["loan_industry_name"] == "汽车零配件零售"
     assert "汽车零部件采购" in payload["loan_matching_basis"]
     assert payload["loan_matches_enterprise"] is False
@@ -301,6 +316,8 @@ def test_loan_no_match_is_returned_as_needs_review_not_as_enterprise_match(
     payload = response.json()
     assert payload["status"] == "needs_review"
     assert payload["loan_industry_code"] is None
+    assert payload["industry_display_code"] == "0111"
+    assert payload["loan_industry_display_code"] is None
     assert payload["loan_industry_name"] is None
     assert payload["loan_matching_basis"] == review_reason
     assert payload["loan_matches_enterprise"] is False
@@ -323,6 +340,8 @@ def test_matching_loan_direction_is_returned_by_case_and_objection_endpoints(
             loan_matches_enterprise=True,
         )
     )
+    case.result_versions[0].industry_major_code = "A01"
+    case.result_versions[0].loan_industry_major_code = "A01"
     case.status = "completed"
     db_session.commit()
 
@@ -331,6 +350,8 @@ def test_matching_loan_direction_is_returned_by_case_and_objection_endpoints(
     assert case_response.status_code == 200
     current_result = case_response.json()["current_result"]
     assert current_result["loan_industry_code"] == current_result["industry_code"]
+    assert current_result["industry_display_code"] == "A01-A0111"
+    assert current_result["loan_industry_display_code"] == "A01-A0111"
     assert current_result["loan_industry_name"] == current_result["industry_name"]
     assert current_result["loan_matching_basis"] == (
         "贷款用途笼统，按企业主营业务判定"
@@ -350,6 +371,8 @@ def test_matching_loan_direction_is_returned_by_case_and_objection_endpoints(
             loan_matching_basis="具体贷款用途命中企业主营业务",
             loan_matches_enterprise=True,
         )
+        result.industry_major_code = "A01"
+        result.loan_industry_major_code = "A01"
         result.objection = {"description": objection_text}
         session.add(result)
         session.commit()
@@ -365,6 +388,7 @@ def test_matching_loan_direction_is_returned_by_case_and_objection_endpoints(
     assert objection_response.status_code == 200
     objection_payload = objection_response.json()
     assert objection_payload["loan_industry_code"] == "0111"
+    assert objection_payload["loan_industry_display_code"] == "A01-A0111"
     assert objection_payload["loan_matches_enterprise"] is True
 
 
@@ -376,6 +400,7 @@ def test_legacy_result_is_backfilled_by_case_and_history_endpoints(
     case = db_session.get(NationalEconomyClassificationCase, case_id)
     assert case is not None
     legacy_result = _completed_result(case)
+    legacy_result.industry_major_code = "A01"
     assert legacy_result.loan_industry_code is None
     assert legacy_result.loan_industry_name is None
     assert legacy_result.loan_matching_basis is None
@@ -396,6 +421,8 @@ def test_legacy_result_is_backfilled_by_case_and_history_endpoints(
         "loan_industry_name": "稻谷种植",
         "loan_matching_basis": "贷款投向未单独评估，与企业主营一致",
         "loan_matches_enterprise": True,
+        "industry_display_code": "A01-A0111",
+        "loan_industry_display_code": "A01-A0111",
     }
     assert {
         key: case_response.json()["current_result"][key] for key in expected

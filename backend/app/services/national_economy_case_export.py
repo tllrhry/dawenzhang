@@ -12,6 +12,9 @@ from app.services.national_economy_case_ingestion import FIELD_LABELS
 from app.services.national_economy_classification_workflow import (
     get_current_completed_result,
 )
+from app.services.national_economy_result_presentation import (
+    format_industry_display_code,
+)
 
 
 CASE_INPUT_SHEET = "案例输入"
@@ -101,25 +104,33 @@ def _result_values(
 ) -> tuple[object, object, object, object, object, object, object]:
     if result.loan_industry_code is None and result.loan_matching_basis is None:
         loan_code = result.industry_code
+        loan_major_code = result.industry_major_code
         loan_name = result.industry_name if result.industry_code is not None else None
         loan_basis = "贷款投向未单独评估，与企业主营一致"
         loan_matches = "一致"
     elif result.loan_industry_code is None:
         loan_code = None
+        loan_major_code = None
         loan_name = None
         loan_basis = result.loan_matching_basis
         loan_matches = "不一致"
     else:
         loan_code = result.loan_industry_code
+        loan_major_code = result.loan_industry_major_code
         loan_name = result.loan_industry_name
         loan_basis = result.loan_matching_basis
         loan_matches = "一致" if result.loan_matches_enterprise is True else "不一致"
 
     return (
-        _cell_value(result.industry_code),
+        _cell_value(
+            format_industry_display_code(
+                result.industry_major_code,
+                result.industry_code,
+            )
+        ),
         _cell_value(result.industry_name),
         _cell_value(result.rationale),
-        _cell_value(loan_code),
+        _cell_value(format_industry_display_code(loan_major_code, loan_code)),
         _cell_value(loan_name),
         _cell_value(loan_basis),
         loan_matches,

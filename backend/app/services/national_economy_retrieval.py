@@ -19,6 +19,15 @@ from app.services.national_economy_decision_policy import (
 RECALL_LIMIT = 30
 MIN_RERANK_RESULTS = 5
 MAX_RERANK_RESULTS = 8
+CHUNK_TYPE_LABELS = {
+    "definition": "定义",
+    "include": "包括",
+    "exclude": "不包括",
+}
+
+
+def display_chunk_type(chunk_type: str) -> str:
+    return CHUNK_TYPE_LABELS.get(chunk_type, chunk_type)
 
 
 @dataclass(frozen=True)
@@ -49,13 +58,13 @@ class IndustryCandidate:
             evidence = "\n".join(
                 f"priority={int(trace.level)} level={trace.level.name} "
                 f"evidence_fields={','.join(fact.field_label for fact in trace.facts)} "
-                f"catalog_fragment=[{hit.chunk_type}] {hit.text}"
+                f"catalog_fragment=[{display_chunk_type(hit.chunk_type)}] {hit.text}"
                 for trace in self.evidence_traces
                 for hit in trace.hits
             )
         else:
             evidence = "\n".join(
-                f"[{hit.chunk_type}] {hit.text}" for hit in self.hits
+                f"[{display_chunk_type(hit.chunk_type)}] {hit.text}" for hit in self.hits
             )
         return f"{self.industry_code} {self.industry_name}\n{evidence}"
 

@@ -242,12 +242,31 @@ def test_request_contains_two_candidate_pools_and_loan_decision_tree() -> None:
     ]
     assert user_content["enterprise_candidates"][0]["industry_code"] == "0111"
     assert user_content["loan_direction_candidates"][0]["industry_code"] == "5263"
+    candidate_payload = json.dumps(
+        {
+            "enterprise_candidates": user_content["enterprise_candidates"],
+            "loan_direction_candidates": user_content["loan_direction_candidates"],
+        },
+        ensure_ascii=False,
+    )
+    assert '"chunk_type": "定义"' in candidate_payload
+    assert not any(
+        f'"chunk_type": "{label}"' in candidate_payload
+        for label in ("definition", "include", "exclude")
+    )
     assert user_content["dominant_main_business"] is None
     assert user_content["objection"] == {"reason": "经营内容已变化"}
     assert "笼统" in system_prompt
     assert "不在主营但在营业执照经营范围内" in system_prompt
     assert "既不在主营也不在经营范围" in system_prompt
     assert "实际投向" in system_prompt
+    assert "matching_basis 与 reason 的内容必须全中文" in system_prompt
+    assert "不得出现任何英文词元" in system_prompt
+    assert "英文单词、字母缩写或英文片段类型标签" in system_prompt
+    assert "直接用业务语言陈述结论与支撑事实" in system_prompt
+    assert "不得写采用了哪个优先级、字段或证据层" in system_prompt
+    assert "说明采用层级" not in system_prompt
+    assert "字段标签" not in system_prompt
     assert "不得返回置信度、AI 总结或 matched" in system_prompt
 
 

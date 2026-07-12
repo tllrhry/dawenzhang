@@ -17,6 +17,7 @@ from app.services.national_economy_retrieval import (
     IndustryCandidate,
     RecallHit,
     aggregate_recall_hits,
+    display_chunk_type,
     recall_industry_chunks,
     rerank_candidates,
     retrieve_industry_evidence,
@@ -83,6 +84,39 @@ def test_aggregate_recall_hits_groups_by_four_digit_industry_code() -> None:
     assert [candidate.industry_code for candidate in candidates] == ["0111", "0112"]
     assert candidates[0].distance == 0.1
     assert [hit.text for hit in candidates[0].hits] == ["稻谷定义", "包括水稻"]
+
+
+@pytest.mark.parametrize(
+    ("chunk_type", "expected"),
+    [
+        ("definition", "定义"),
+        ("include", "包括"),
+        ("exclude", "不包括"),
+        ("unknown", "unknown"),
+    ],
+)
+def test_display_chunk_type_uses_chinese_labels_with_safe_fallback(
+    chunk_type: str, expected: str
+) -> None:
+    assert display_chunk_type(chunk_type) == expected
+
+
+def test_rerank_document_uses_chinese_chunk_type_labels() -> None:
+    hits = tuple(
+        RecallHit("0111", "稻谷种植", label, chunk_type, 2, 0.1)
+        for chunk_type, label in (
+            ("definition", "行业定义"),
+            ("include", "包括水稻"),
+            ("exclude", "不包括其他谷物"),
+        )
+    )
+
+    document = IndustryCandidate("0111", "稻谷种植", 0.1, hits).rerank_document
+
+    assert "[定义] 行业定义" in document
+    assert "[包括] 包括水稻" in document
+    assert "[不包括] 不包括其他谷物" in document
+    assert not any(label in document for label in ("definition", "include", "exclude"))
 
 
 def test_rerank_returns_top_evidence_snapshots_with_configured_model() -> None:

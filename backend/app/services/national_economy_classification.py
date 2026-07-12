@@ -7,7 +7,7 @@ import httpx
 
 from app.core.config import Settings
 from app.services.national_economy_decision_policy import EvidenceLayer, EvidenceLevel
-from app.services.national_economy_retrieval import EvidenceSnapshot
+from app.services.national_economy_retrieval import EvidenceSnapshot, display_chunk_type
 
 
 ClassificationStatus = Literal["completed", "needs_review"]
@@ -149,8 +149,7 @@ def _build_request_payload(
                     "候选外目录、企业清单、涉农规则或其他标签。企业证据已按 priority=1"
                     "到 4 排序：主营业务及营收、贸易合同及产业链、贷款用途、营业执照"
                     "经营范围。必须采用最高可用层；低层冲突不得推翻高层，只有高层不可用"
-                    "才可降级，并须在 matching_basis 说明采用层级、字段标签、目录片段及"
-                    "冲突或降级理由。异议已并入 ordered_evidence 的既有层，不是第五级。"
+                    "才可降级。异议已并入 ordered_evidence 的既有层，不是第五级。"
                     "当 dominant_main_business 非空时，表示原文存在单项占比不低于50%的"
                     "唯一主导主营：企业结论必须落在该主导主营对应的四级行业，绝对不得因"
                     "核心产品/服务中的其他条目或更低占比业务线改判；该锁定只约束企业结论。"
@@ -162,8 +161,13 @@ def _build_request_payload(
                     "命中主营，返回 specificity=specific，投向仍为企业结论；三、具体用途"
                     "不在主营但在营业执照经营范围内，从给定候选中选择该实际投向；四、"
                     "具体用途既不在主营也不在经营范围，贷款投向返回 no_match=true 及非空"
-                    "reason，不得臆造代码或名称。贷款投向 matching_basis 必须说明实际投向"
-                    "用途、匹配到的经营范围或主营条目及对应四级代码。企业代码/名称只能从"
+                    "reason，不得臆造代码或名称。matching_basis 与 reason 的内容必须全中文，"
+                    "不得出现任何英文词元，包括英文单词、字母缩写或英文片段类型标签。依据"
+                    "必须直接用业务语言陈述结论与支撑事实，引用主营、营收占比、贸易、贷款"
+                    "用途等具体内容以及"
+                    "命中的目录片段；不得写采用了哪个优先级、字段或证据层，也不得描述内部"
+                    "降级和字段调度过程。贷款投向依据须写明实际用途、匹配到的经营范围或"
+                    "主营事实及对应四级代码。企业代码/名称只能从"
                     "enterprise_candidates 的同一记录选择；specific 的贷款投向代码/名称"
                     "只能从 enterprise_candidates 或 loan_direction_candidates 的同一记录"
                     "选择，generic 只能等于企业结论。必须仅返回 JSON，根对象只能包含"
@@ -190,7 +194,7 @@ def _serialize_candidate(candidate: EvidenceSnapshot) -> dict[str, object]:
         "industry_name": candidate.industry_name,
         "definition_and_hits": [
             {
-                "chunk_type": hit.chunk_type,
+                "chunk_type": display_chunk_type(hit.chunk_type),
                 "text": hit.text,
                 "source_row": hit.source_row,
             }
@@ -210,7 +214,7 @@ def _serialize_candidate(candidate: EvidenceSnapshot) -> dict[str, object]:
                 ],
                 "matched_catalog_fragments": [
                     {
-                        "chunk_type": hit.chunk_type,
+                        "chunk_type": display_chunk_type(hit.chunk_type),
                         "text": hit.text,
                         "source_row": hit.source_row,
                     }

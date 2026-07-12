@@ -157,10 +157,19 @@ def _build_request_payload(
                     "核心产品/服务中的其他条目或更低占比业务线改判；该锁定只约束企业结论。"
                     "当 dominant_main_business 为空时，不存在主导主营锁定，企业结论继续按"
                     "上述四级证据优先级综合判定，既有行为不变。"
+                    "企业结论与贷款投向结论都必须以各自候选携带的完整目录定义、包括和"
+                    "不包括逐条校验：所选行业必须有业务证据命中其包括中的至少一条，且"
+                    "业务证据不得命中其不包括；业务证据与候选定义相斥，或命中候选不包括"
+                    "时，必须排除该候选，不得仅因候选重排靠前而选中。matching_basis 必须"
+                    "明确指出业务证据命中了所选行业包括中的哪一条。门类级结构性判别原则"
+                    "数量有限，不得逐项业务枚举关键词：批发与零售按客户对象区分，面向经营"
+                    "单位、经销商或集团等客户的销售属于批发，面向最终消费者的销售属于零售。"
                     "贷款投向必须按以下决策树判定：一、贷款用途为空或仅为经营周转、"
                     "流动资金、经营使用等未指向具体经营领域的笼统表述，返回"
                     "specificity=generic，投向代码和名称必须回落为企业结论；二、具体用途"
-                    "命中主营，返回 specificity=specific，投向仍为企业结论；三、具体用途"
+                    "写明具体经营项时，必须先判断该经营项是否属于已识别的主营；命中主营"
+                    "则返回 specificity=specific，投向仍回落为企业结论；只有确认不属于主营"
+                    "时才可独立判断。三、具体用途"
                     "不在主营但在营业执照经营范围内，从给定候选中选择该实际投向；四、"
                     "具体用途既不在主营也不在经营范围，贷款投向返回 no_match=true 及非空"
                     "reason，不得臆造代码或名称。matching_basis 与 reason 的内容必须全中文，"
@@ -194,7 +203,7 @@ def _serialize_candidate(candidate: EvidenceSnapshot) -> dict[str, object]:
         "major_category_name": candidate.major_category_name,
         "industry_code": candidate.industry_code,
         "industry_name": candidate.industry_name,
-        "definition_and_hits": [
+        "complete_catalog_fragments": [
             {
                 "chunk_type": display_chunk_type(hit.chunk_type),
                 "text": hit.text,

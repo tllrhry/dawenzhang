@@ -56,6 +56,40 @@ def _candidate(code: str, name: str, text: str) -> EvidenceSnapshot:
     )
 
 
+def _candidate_with_complete_catalog(code: str, name: str) -> EvidenceSnapshot:
+    hits = tuple(
+        RecallHit(
+            industry_code=code,
+            industry_name=name,
+            text=text,
+            chunk_type=chunk_type,
+            source_row=source_row,
+            distance=0.2,
+        )
+        for chunk_type, text, source_row in (
+            ("definition", "面向经营单位销售粮食的活动。", 2),
+            ("include", "包括谷物批发。", 3),
+            ("exclude", "不包括面向最终消费者的粮油零售。", 4),
+        )
+    )
+    return EvidenceSnapshot(
+        industry_code=code,
+        industry_name=name,
+        vector_score=0.8,
+        rerank_score=0.9,
+        hits=hits,
+        evidence_traces=(
+            CandidateEvidenceTrace(
+                EvidenceLevel.MAIN_BUSINESS_REVENUE,
+                (EvidenceFact("主营业务及营收占比", "粮食批发 60%", "粮食批发 60%"),),
+                (hits[1],),
+            ),
+        ),
+        major_category_code="F51",
+        major_category_name="批发和零售业",
+    )
+
+
 def _evidence(business: str = "水稻种植") -> tuple[EvidenceLayer, ...]:
     return (
         EvidenceLayer(
@@ -372,6 +406,70 @@ def test_request_hard_locks_enterprise_to_dominant_main_business() -> None:
     assert "绝对不得因核心产品/服务中的其他条目或更低占比业务线改判" in system_prompt
     assert "该锁定只约束企业结论" in system_prompt
     assert "为空时" in system_prompt and "既有行为不变" in system_prompt
+
+
+def test_request_carries_complete_catalog_and_definition_grounded_constraints() -> None:
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": json.dumps(_dual_success())}}]},
+        )
+
+    settings = _settings()
+    candidate = _candidate_with_complete_catalog("0111", "稻谷种植")
+    with httpx.Client(
+        transport=httpx.MockTransport(handler), base_url=settings.deepseek_base_url
+    ) as client:
+        classify_national_economy(
+            _dominant_evidence(),
+            (candidate,),
+            settings,
+            client=client,
+            loan_direction_candidates=(candidate,),
+        )
+
+    user_content = json.loads(captured["messages"][1]["content"])
+    system_prompt = captured["messages"][0]["content"]
+    expected_fragments = [
+        {
+            "chunk_type": "定义",
+            "text": "面向经营单位销售粮食的活动。",
+            "source_row": 2,
+        },
+        {"chunk_type": "包括", "text": "包括谷物批发。", "source_row": 3},
+        {
+            "chunk_type": "不包括",
+            "text": "不包括面向最终消费者的粮油零售。",
+            "source_row": 4,
+        },
+    ]
+    assert user_content["enterprise_candidates"][0]["complete_catalog_fragments"] == (
+        expected_fragments
+    )
+    assert user_content["loan_direction_candidates"][0]["complete_catalog_fragments"] == (
+        expected_fragments
+    )
+    assert "所选行业必须有业务证据命中其包括中的至少一条" in system_prompt
+    assert "业务证据不得命中其不包括" in system_prompt
+    assert "业务证据与候选定义相斥" in system_prompt
+    assert "不得仅因候选重排靠前而选中" in system_prompt
+    assert "matching_basis 必须明确指出业务证据命中了所选行业包括中的哪一条" in system_prompt
+    assert "门类级结构性判别原则数量有限" in system_prompt
+    assert "不得逐项业务枚举关键词" in system_prompt
+    assert "批发与零售按客户对象区分" in system_prompt
+    assert "面向经营单位、经销商或集团等客户的销售属于批发" in system_prompt
+    assert "面向最终消费者的销售属于零售" in system_prompt
+    assert "必须先判断该经营项是否属于已识别的主营" in system_prompt
+    assert "投向仍回落为企业结论" in system_prompt
+    assert "只有确认不属于主营时才可独立判断" in system_prompt
+    assert "matching_basis 与 reason 的内容必须全中文" in system_prompt
+    assert "直接用业务语言陈述结论与支撑事实" in system_prompt
+    assert "不得写采用了哪个优先级、字段或证据层" in system_prompt
+    assert "企业结论必须落在该主导主营对应的四级行业" in system_prompt
+    assert "贷款投向必须按以下决策树判定" in system_prompt
 
 
 def test_specific_loan_direction_no_match_returns_needs_review() -> None:

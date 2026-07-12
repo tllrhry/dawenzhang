@@ -337,6 +337,87 @@ def test_retrieve_uses_only_dominant_business_text_for_locked_enterprise_query()
     assert "计算机销售" in requested[0][1]
 
 
+def test_enterprise_candidates_keep_full_trade_layer_and_their_own_ranking() -> None:
+    settings = _settings()
+    session = Mock()
+    session.execute.return_value.all.return_value = [
+        SimpleNamespace(
+            industry_code="3742",
+            industry_name="航天器及运载火箭制造",
+            text="航天器制造",
+            chunk_type="definition",
+            source_row=2,
+            distance=0.1,
+        ),
+        SimpleNamespace(
+            industry_code="5263",
+            industry_name="汽车零配件零售",
+            text="汽车零配件零售",
+            chunk_type="definition",
+            source_row=3,
+            distance=0.2,
+        ),
+    ]
+    layers = (
+        EvidenceLayer(
+            EvidenceLevel.MAIN_BUSINESS_REVENUE,
+            (EvidenceFact("主营业务及营收占比", "航天器制造 90%", "航天器制造"),),
+        ),
+        EvidenceLayer(
+            EvidenceLevel.TRADE_AND_INDUSTRY_CHAIN,
+            (
+                EvidenceFact(
+                    "贸易合同核心交易品类 / 服务内容",
+                    "汽车零配件",
+                    "汽车零配件",
+                ),
+                EvidenceFact("交易对手主营行业", "汽车零售", "汽车零售"),
+                EvidenceFact("产业链定位", "下游销售", "下游销售"),
+            ),
+        ),
+        EvidenceLayer(
+            EvidenceLevel.LOAN_PURPOSE,
+            (EvidenceFact("贷款用途详细描述", "采购零配件", "采购零配件"),),
+        ),
+        EvidenceLayer(
+            EvidenceLevel.BUSINESS_SCOPE,
+            (EvidenceFact("营业执照经营范围（全文）", "航天器制造；汽车销售", "航天器制造；汽车销售"),),
+        ),
+    )
+    embedding_requests = []
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {"index": 0, "relevance_score": 0.99},
+                    {"index": 1, "relevance_score": 0.4},
+                ]
+            },
+        )
+
+    with httpx.Client(
+        transport=httpx.MockTransport(handler),
+        base_url=settings.siliconflow_base_url,
+    ) as client:
+        snapshots = retrieve_industry_evidence(
+            session,
+            layers,
+            settings,
+            embedding_request=lambda texts: embedding_requests.append(tuple(texts))
+            or [[0.1, 0.2, 0.3]] * 4,
+            rerank_client=client,
+        )
+
+    assert len(embedding_requests[0]) == 4
+    enterprise_trade_query = embedding_requests[0][1]
+    assert "贸易合同核心交易品类 / 服务内容" in enterprise_trade_query
+    assert "交易对手主营行业" in enterprise_trade_query
+    assert "产业链定位" in enterprise_trade_query
+    assert [snapshot.industry_code for snapshot in snapshots] == ["3742", "5263"]
+
+
 def test_retrieve_propagates_embedding_timeout() -> None:
     def timeout(_texts):
         raise httpx.ReadTimeout("embedding timeout")
@@ -419,6 +500,246 @@ def test_retrieve_loan_direction_uses_only_specific_loan_purpose_for_rerank() ->
     assert "营业执照经营范围" not in rerank_payload["query"]
     assert [snapshot.industry_code for snapshot in snapshots] == ["3670", "3742"]
     assert snapshots[0].evidence_traces[0].level is EvidenceLevel.LOAN_PURPOSE
+
+
+def test_retrieve_loan_direction_merges_trade_hits_and_reranks_once() -> None:
+    settings = _settings()
+    session = Mock()
+    loan_hits = Mock()
+    loan_hits.all.return_value = [
+        SimpleNamespace(
+            industry_code="3742",
+            industry_name="航天器及运载火箭制造",
+            text="航天器制造",
+            chunk_type="definition",
+            source_row=2,
+            distance=0.2,
+        ),
+        SimpleNamespace(
+            industry_code="5173",
+            industry_name="汽车及零配件批发",
+            text="汽车及零配件批发",
+            chunk_type="definition",
+            source_row=3,
+            distance=0.3,
+        ),
+    ]
+    trade_hits = Mock()
+    trade_hits.all.return_value = [
+        SimpleNamespace(
+            industry_code="5173",
+            industry_name="汽车及零配件批发",
+            text="汽车及零配件批发",
+            chunk_type="definition",
+            source_row=3,
+            distance=0.05,
+        ),
+        SimpleNamespace(
+            industry_code="5263",
+            industry_name="汽车零配件零售",
+            text="汽车零配件零售",
+            chunk_type="definition",
+            source_row=4,
+            distance=0.1,
+        ),
+    ]
+    completed_hits = Mock()
+    completed_hits.all.return_value = []
+    session.execute.side_effect = [loan_hits, trade_hits, completed_hits]
+    layers = (
+        EvidenceLayer(
+            EvidenceLevel.TRADE_AND_INDUSTRY_CHAIN,
+            (
+                EvidenceFact(
+                    "贸易合同核心交易品类 / 服务内容",
+                    "汽车零配件",
+                    "汽车零配件",
+                ),
+                EvidenceFact("交易对手主营行业", "钢铁制造", "钢铁制造"),
+                EvidenceFact("产业链定位", "上游供应商", "上游供应商"),
+            ),
+        ),
+        EvidenceLayer(
+            EvidenceLevel.LOAN_PURPOSE,
+            (
+                EvidenceFact(
+                    "贷款用途详细描述",
+                    "航天器生产线建设",
+                    "航天器生产线建设",
+                ),
+            ),
+        ),
+    )
+    embedding_requests = []
+    rerank_payloads = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = __import__("json").loads(request.content)
+        rerank_payloads.append(payload)
+        assert len(payload["documents"]) == 3
+        assert sum("5173 汽车及零配件批发" in item for item in payload["documents"]) == 1
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {"index": 1, "relevance_score": 0.98},
+                    {"index": 0, "relevance_score": 0.91},
+                    {"index": 2, "relevance_score": 0.25},
+                ]
+            },
+        )
+
+    with httpx.Client(
+        transport=httpx.MockTransport(handler),
+        base_url=settings.siliconflow_base_url,
+    ) as client:
+        snapshots = retrieve_loan_direction_evidence(
+            session,
+            layers,
+            settings,
+            embedding_request=lambda texts: embedding_requests.append(tuple(texts))
+            or [[0.1, 0.2, 0.3], [0.3, 0.2, 0.1]],
+            rerank_client=client,
+        )
+
+    assert len(embedding_requests) == 1
+    assert len(embedding_requests[0]) == 2
+    trade_query, loan_query = embedding_requests[0]
+    assert "贸易合同核心交易品类 / 服务内容" in trade_query
+    assert "汽车零配件" in trade_query
+    assert "交易对手主营行业" not in trade_query
+    assert "产业链定位" not in trade_query
+    assert "贷款用途详细描述" in loan_query
+    assert len(rerank_payloads) == 1
+    assert rerank_payloads[0]["query"] == f"{trade_query}\n\n{loan_query}"
+    assert [snapshot.industry_code for snapshot in snapshots] == [
+        "5263",
+        "5173",
+        "3742",
+    ]
+    assert [trace.level for trace in snapshots[1].evidence_traces] == [
+        EvidenceLevel.TRADE_AND_INDUSTRY_CHAIN,
+        EvidenceLevel.LOAN_PURPOSE,
+    ]
+
+
+def test_retrieve_loan_direction_runs_for_generic_purpose_with_specific_trade() -> None:
+    settings = _settings()
+    session = Mock()
+    loan_hits = Mock()
+    loan_hits.all.return_value = []
+    trade_hits = Mock()
+    trade_hits.all.return_value = [
+        SimpleNamespace(
+            industry_code="5263",
+            industry_name="汽车零配件零售",
+            text="汽车零配件零售",
+            chunk_type="definition",
+            source_row=4,
+            distance=0.1,
+        )
+    ]
+    completed_hits = Mock()
+    completed_hits.all.return_value = []
+    session.execute.side_effect = [loan_hits, trade_hits, completed_hits]
+    layers = (
+        EvidenceLayer(
+            EvidenceLevel.TRADE_AND_INDUSTRY_CHAIN,
+            (
+                EvidenceFact(
+                    "贸易合同核心交易品类 / 服务内容",
+                    "汽车零配件",
+                    "汽车零配件",
+                ),
+            ),
+        ),
+        EvidenceLayer(
+            EvidenceLevel.LOAN_PURPOSE,
+            (EvidenceFact("贷款用途详细描述", "补充流动资金", "补充流动资金"),),
+        ),
+    )
+    requested = []
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"results": [{"index": 0, "relevance_score": 0.97}]},
+        )
+
+    with httpx.Client(
+        transport=httpx.MockTransport(handler),
+        base_url=settings.siliconflow_base_url,
+    ) as client:
+        snapshots = retrieve_loan_direction_evidence(
+            session,
+            layers,
+            settings,
+            embedding_request=lambda texts: requested.append(tuple(texts))
+            or [[0.1, 0.2, 0.3], [0.3, 0.2, 0.1]],
+            rerank_client=client,
+        )
+
+    assert len(requested[0]) == 2
+    assert snapshots[0].industry_code == "5263"
+
+
+def test_retrieve_loan_direction_runs_for_specific_credit_approval() -> None:
+    settings = _settings()
+    session = Mock()
+    recall_result = Mock()
+    recall_result.all.return_value = [
+        SimpleNamespace(
+            industry_code="3562",
+            industry_name="半导体器件专用设备制造",
+            text="半导体器件专用设备制造",
+            chunk_type="definition",
+            source_row=4,
+            distance=0.1,
+        )
+    ]
+    completed_result = Mock()
+    completed_result.all.return_value = []
+    session.execute.side_effect = [recall_result, completed_result]
+    layers = (
+        EvidenceLayer(
+            EvidenceLevel.LOAN_PURPOSE,
+            (
+                EvidenceFact("贷款用途详细描述", "补充流动资金", "补充流动资金"),
+                EvidenceFact(
+                    "授信审批意见",
+                    "本笔贷款只可用于购买半导体生产设备",
+                    "购买半导体生产设备",
+                ),
+            ),
+        ),
+    )
+    requested = []
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"results": [{"index": 0, "relevance_score": 0.98}]},
+        )
+
+    with httpx.Client(
+        transport=httpx.MockTransport(handler),
+        base_url=settings.siliconflow_base_url,
+    ) as client:
+        snapshots = retrieve_loan_direction_evidence(
+            session,
+            layers,
+            settings,
+            embedding_request=lambda texts: requested.append(tuple(texts))
+            or [[0.1, 0.2, 0.3]],
+            rerank_client=client,
+        )
+
+    assert len(requested[0]) == 1
+    assert "补充流动资金" in requested[0][0]
+    assert "授信审批意见" in requested[0][0]
+    assert "本笔贷款只可用于购买半导体生产设备" in requested[0][0]
+    assert snapshots[0].industry_code == "3562"
+    assert snapshots[0].evidence_traces[0].facts == layers[0].usable_facts
 
 
 @pytest.mark.parametrize("loan_purpose", ["经营周转", "补充流动资金"])

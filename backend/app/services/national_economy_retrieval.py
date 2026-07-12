@@ -25,6 +25,9 @@ CHUNK_TYPE_LABELS = {
     "exclude": "不包括",
 }
 CHUNK_TYPE_ORDER = {chunk_type: index for index, chunk_type in enumerate(CHUNK_TYPE_LABELS)}
+LOAN_PURPOSE_FIELD_LABEL = "贷款用途详细描述"
+CREDIT_APPROVAL_FIELD_LABEL = "授信审批意见"
+TRADE_GOODS_SERVICES_FIELD_LABEL = "贸易合同核心交易品类 / 服务内容"
 
 
 def display_chunk_type(chunk_type: str) -> str:
@@ -390,27 +393,86 @@ def retrieve_loan_direction_evidence(
         ),
         None,
     )
-    if loan_purpose_layer is None or all(
-        is_generic_loan_purpose(fact.raw_text)
-        for fact in loan_purpose_layer.usable_facts
+    loan_purpose_facts = (
+        tuple(
+            fact
+            for fact in loan_purpose_layer.usable_facts
+            if fact.field_label == LOAN_PURPOSE_FIELD_LABEL
+        )
+        if loan_purpose_layer is not None
+        else ()
+    )
+    credit_approval_facts = (
+        tuple(
+            fact
+            for fact in loan_purpose_layer.usable_facts
+            if fact.field_label == CREDIT_APPROVAL_FIELD_LABEL
+        )
+        if loan_purpose_layer is not None
+        else ()
+    )
+    trade_layer = next(
+        (
+            layer
+            for layer in ordered_evidence
+            if layer.level is EvidenceLevel.TRADE_AND_INDUSTRY_CHAIN
+        ),
+        None,
+    )
+    trade_goods_facts = (
+        tuple(
+            fact
+            for fact in trade_layer.usable_facts
+            if fact.field_label == TRADE_GOODS_SERVICES_FIELD_LABEL
+        )
+        if trade_layer is not None
+        else ()
+    )
+    loan_purpose_is_generic = not loan_purpose_facts or all(
+        is_generic_loan_purpose(fact.raw_text) for fact in loan_purpose_facts
+    )
+    credit_approval_is_specific = any(
+        not is_generic_loan_purpose(fact.raw_text) for fact in credit_approval_facts
+    )
+    if (
+        loan_purpose_is_generic
+        and not trade_goods_facts
+        and not credit_approval_is_specific
     ):
         return ()
 
-    query = serialize_evidence_layer(loan_purpose_layer)
+    query_layers = _ordered_available_layers(
+        tuple(
+            layer
+            for layer in (
+                loan_purpose_layer,
+                EvidenceLayer(
+                    level=EvidenceLevel.TRADE_AND_INDUSTRY_CHAIN,
+                    facts=trade_goods_facts,
+                )
+                if trade_goods_facts
+                else None,
+            )
+            if layer is not None
+        )
+    )
+    queries = tuple(serialize_evidence_layer(layer) for layer in query_layers)
     request = embedding_request or (lambda texts: embed_texts(texts, settings))
-    embeddings = tuple(request((query,)))
-    if len(embeddings) != 1:
-        raise ValueError("query embedding response must match loan purpose layer")
-    embedding = embeddings[0]
-    if len(embedding) != settings.embedding_dimension:
+    embeddings = tuple(request(queries))
+    if len(embeddings) != len(queries):
+        raise ValueError("query embedding response must match loan direction queries")
+    if any(len(embedding) != settings.embedding_dimension for embedding in embeddings):
         raise ValueError("query embedding dimension does not match configuration")
 
-    hits = recall_industry_chunks(session, embedding)
-    candidates = aggregate_layer_recall_hits(((loan_purpose_layer, hits),))
+    layer_hits = tuple(
+        (layer, recall_industry_chunks(session, embedding))
+        for layer, embedding in zip(query_layers, embeddings, strict=True)
+    )
+    candidates = aggregate_layer_recall_hits(layer_hits)
     return complete_finalist_catalog_fragments(
         session,
         rerank_candidates(
-            (loan_purpose_layer,),
+            query_layers,
             candidates,
             settings,
             top_n=top_n,

@@ -17,9 +17,11 @@ export interface ClassificationResult {
   version: number
   status: ClassificationStatus
   industry_code: string | null
+  industry_display_code: string | null
   industry_name: string | null
   matching_basis: string | null
   loan_industry_code: string | null
+  loan_industry_display_code: string | null
   loan_industry_name: string | null
   loan_matching_basis: string | null
   loan_matches_enterprise: boolean

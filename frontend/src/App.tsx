@@ -353,14 +353,14 @@ function ResultPanel({ caseData, result, errorMessage, showReview, setShowReview
     <Card className="result-card conclusion-result-card" bordered={false} title="AI 判定结论">
       <div className="result-status"><span><CheckCircleFilled /></span><div><p>{needsReview ? 'AI 判定需人工复核' : 'AI 判定已完成'}</p><h2>{result.industry_name || '待人工复核'}</h2><small>GB/T 4754-2017 · 四级行业分类结果 · 版本 {result.version}</small></div></div>
       <Descriptions className="result-details" column={1} size="small">
-        <Descriptions.Item label="行业代码">{result.industry_code || '--'}</Descriptions.Item>
+        <Descriptions.Item label="行业代码">{result.industry_display_code || '--'}</Descriptions.Item>
         <Descriptions.Item label="行业名称">{result.industry_name || '--'}</Descriptions.Item>
         <Descriptions.Item label="案例状态"><Tag color={needsReview ? 'warning' : 'success'}>{needsReview ? '待人工复核' : '已完成'}</Tag></Descriptions.Item>
         <Descriptions.Item label="匹配依据">{result.matching_basis || '--'}</Descriptions.Item>
       </Descriptions>
       <Divider className="loan-direction-divider" orientation="left" plain>贷款投向结论</Divider>
       <Descriptions className="result-details loan-direction-details" column={1} size="small">
-        <Descriptions.Item label="贷款投向代码">{result.loan_industry_code || '--'}</Descriptions.Item>
+        <Descriptions.Item label="贷款投向代码">{result.loan_industry_display_code || '--'}</Descriptions.Item>
         <Descriptions.Item label="贷款投向名称">{result.loan_industry_name || '--'}</Descriptions.Item>
         <Descriptions.Item label="贷款投向是否一致"><Tag color={result.loan_matches_enterprise ? 'success' : 'warning'}>{result.loan_matches_enterprise ? '与企业主营一致' : '与企业主营不一致'}</Tag></Descriptions.Item>
         <Descriptions.Item label="贷款投向匹配依据">{result.loan_matching_basis || '--'}</Descriptions.Item>
@@ -406,7 +406,7 @@ function HistoryPage() {
     <Card className="history-card" bordered={false}>
       <div className="history-row history-row-head"><span>企业名称</span><span>行业结论</span><span>匹配依据</span><span>状态</span><span>最近更新时间</span><span>操作</span></div>
       {errorMessage && <div className="history-row empty-row"><Alert type="error" showIcon message={errorMessage} /></div>}
-      {history.map((item) => <div className="history-row" key={item.id}><b>{caseData?.original_filename || '当前企业案例'}<small>版本 {item.version}{item.objection?.description ? ` · 异议：${item.objection.description}` : ''}</small></b><span className="history-conclusion"><span><strong>{item.industry_code || '--'}</strong> {item.industry_name || '待人工复核'}</span><small><span>贷款投向 <strong>{item.loan_industry_code || '--'}</strong> {item.loan_industry_name || '--'}</span><Tag color={item.loan_matches_enterprise ? 'success' : 'warning'}>{item.loan_matches_enterprise ? '一致' : '不一致'}</Tag></small></span><span className="history-basis">{item.matching_basis || '--'}<small>贷款投向依据：{item.loan_matching_basis || '--'}</small></span><span><Tag color={item.status === 'needs_review' ? 'warning' : 'success'}>{item.status === 'needs_review' ? '待人工复核' : '已完成'}</Tag></span><span>{new Date(item.created_at).toLocaleString('zh-CN')}</span><button type="button" onClick={() => navigate('/classify')}>查看详情 <ArrowRightOutlined /></button></div>)}
+      {history.map((item) => <div className="history-row" key={item.id}><b>{caseData?.original_filename || '当前企业案例'}<small>版本 {item.version}{item.objection?.description ? ` · 异议：${item.objection.description}` : ''}</small></b><span className="history-conclusion"><span><strong>{item.industry_display_code || '--'}</strong> {item.industry_name || '待人工复核'}</span><small><span>贷款投向 <strong>{item.loan_industry_display_code || '--'}</strong> {item.loan_industry_name || '--'}</span><Tag color={item.loan_matches_enterprise ? 'success' : 'warning'}>{item.loan_matches_enterprise ? '一致' : '不一致'}</Tag></small></span><span className="history-basis">{item.matching_basis || '--'}<small>贷款投向依据：{item.loan_matching_basis || '--'}</small></span><span><Tag color={item.status === 'needs_review' ? 'warning' : 'success'}>{item.status === 'needs_review' ? '待人工复核' : '已完成'}</Tag></span><span>{new Date(item.created_at).toLocaleString('zh-CN')}</span><button type="button" onClick={() => navigate('/classify')}>查看详情 <ArrowRightOutlined /></button></div>)}
       {!errorMessage && history.length === 0 && <div className="history-row empty-row"><span>暂无可展示的当前案例版本，请先完成一次分类。</span></div>}
     </Card>
   </main>

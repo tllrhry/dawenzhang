@@ -101,9 +101,9 @@ def _classification(
 
 
 def test_build_query_maps_labeled_fields_to_ordered_evidence_layers() -> None:
-    layers = build_classification_query(
-        _case().input_payload, "补充：自产水稻占比 90%"
-    )
+    input_payload = dict(_case().input_payload)
+    input_payload["main_business_revenue_share"] = "水稻45%；小麦30%；玉米5%"
+    layers = build_classification_query(input_payload, "补充：自产水稻占比 90%")
 
     assert [layer.level for layer in layers] == list(EvidenceLevel)
     labels_by_level = {
@@ -133,6 +133,42 @@ def test_build_query_maps_labeled_fields_to_ordered_evidence_layers() -> None:
     assert "统一社会信用代码" not in all_labels
     assert "贸易合同本次交易对手名称" not in all_labels
     assert layers[0].facts[-1].source == "objection"
+
+
+def test_build_query_locks_dominant_business_and_excludes_distracting_fields() -> None:
+    input_payload = dict(_case().input_payload)
+    input_payload.update(
+        {
+            "main_business": "综合养老与信息技术服务",
+            "main_business_revenue_share": (
+                "养老服务70%；计算机销售20%；网络工程10%"
+            ),
+            "core_products_services": "服务器；养老床位",
+        }
+    )
+
+    layers = build_classification_query(input_payload, "应按计算机销售判断")
+
+    assert layers[0].is_available
+    assert [fact.field_label for fact in layers[0].facts] == [
+        "主营业务及营收占比（主导主营）",
+        "异议说明",
+    ]
+    assert layers[0].facts[0].indicated_business == "养老服务"
+    assert layers[0].facts[0].raw_text == input_payload["main_business_revenue_share"]
+
+
+def test_build_query_without_dominant_business_keeps_existing_evidence_fields() -> None:
+    input_payload = dict(_case().input_payload)
+    input_payload["main_business_revenue_share"] = "计算机45%；软件30%；网络工程5%"
+
+    layers = build_classification_query(input_payload)
+
+    assert [fact.field_label for fact in layers[0].facts] == [
+        "主营业务",
+        "主营业务及营收占比",
+        "核心产品 / 服务名称",
+    ]
 
 
 def test_build_query_marks_empty_layers_unavailable_without_stringifying_none() -> None:
@@ -176,7 +212,8 @@ def test_initial_classification_saves_first_completed_version() -> None:
     assert case.status == "completed"
     evidence_layers = retrieval.call_args.args[1]
     assert evidence_layers[0].level is EvidenceLevel.MAIN_BUSINESS_REVENUE
-    assert evidence_layers[0].facts[0].field_label == "主营业务"
+    assert evidence_layers[0].facts[0].field_label == "主营业务及营收占比（主导主营）"
+    assert evidence_layers[0].facts[0].indicated_business == "水稻种植收入占"
     loan_retrieval.assert_called_once_with(session, evidence_layers, _settings())
     classifier.assert_called_once_with(
         evidence_layers,

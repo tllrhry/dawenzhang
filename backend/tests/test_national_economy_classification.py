@@ -12,6 +12,7 @@ from app.services.national_economy_decision_policy import (
     EvidenceFact,
     EvidenceLayer,
     EvidenceLevel,
+    build_main_business_revenue_layer,
 )
 from app.services.national_economy_retrieval import (
     CandidateEvidenceTrace,
@@ -78,6 +79,15 @@ def _evidence(business: str = "水稻种植") -> tuple[EvidenceLayer, ...]:
                 ),
             ),
         ),
+    )
+
+
+def _dominant_evidence(business: str = "养老服务") -> tuple[EvidenceLayer, ...]:
+    return (
+        build_main_business_revenue_layer(
+            f"{business}70%；计算机销售20%；网络工程10%"
+        ),
+        *_evidence(business)[1:],
     )
 
 
@@ -165,7 +175,7 @@ def test_specific_loan_direction_can_select_loan_candidate_and_recomputes_false(
 
     with _client(output) as client:
         result = classify_national_economy(
-            _evidence("航天器制造"),
+            _dominant_evidence("航天器制造"),
             enterprise_candidates,
             _settings(),
             client=client,
@@ -232,12 +242,46 @@ def test_request_contains_two_candidate_pools_and_loan_decision_tree() -> None:
     ]
     assert user_content["enterprise_candidates"][0]["industry_code"] == "0111"
     assert user_content["loan_direction_candidates"][0]["industry_code"] == "5263"
+    assert user_content["dominant_main_business"] is None
     assert user_content["objection"] == {"reason": "经营内容已变化"}
     assert "笼统" in system_prompt
     assert "不在主营但在营业执照经营范围内" in system_prompt
     assert "既不在主营也不在经营范围" in system_prompt
     assert "实际投向" in system_prompt
     assert "不得返回置信度、AI 总结或 matched" in system_prompt
+
+
+def test_request_hard_locks_enterprise_to_dominant_main_business() -> None:
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": json.dumps(_dual_success())}}]},
+        )
+
+    settings = _settings()
+    with httpx.Client(
+        transport=httpx.MockTransport(handler), base_url=settings.deepseek_base_url
+    ) as client:
+        classify_national_economy(
+            _dominant_evidence(),
+            (_candidate("0111", "稻谷种植", "目录命中片段"),),
+            settings,
+            client=client,
+        )
+
+    user_content = json.loads(captured["messages"][1]["content"])
+    system_prompt = captured["messages"][0]["content"]
+    assert user_content["dominant_main_business"] == "养老服务"
+    assert user_content["ordered_evidence"][0]["facts"][0]["raw_text"].startswith(
+        "养老服务70%"
+    )
+    assert "企业结论必须落在该主导主营对应的四级行业" in system_prompt
+    assert "绝对不得因核心产品/服务中的其他条目或更低占比业务线改判" in system_prompt
+    assert "该锁定只约束企业结论" in system_prompt
+    assert "为空时" in system_prompt and "既有行为不变" in system_prompt
 
 
 def test_specific_loan_direction_no_match_returns_needs_review() -> None:

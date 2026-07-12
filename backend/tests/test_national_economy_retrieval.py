@@ -10,6 +10,7 @@ from app.services.national_economy_decision_policy import (
     EvidenceFact,
     EvidenceLayer,
     EvidenceLevel,
+    build_main_business_revenue_layer,
 )
 from app.services.national_economy_retrieval import (
     RECALL_LIMIT,
@@ -154,6 +155,74 @@ def test_retrieve_vectorizes_query_then_reranks_aggregated_candidates() -> None:
         EvidenceLevel.BUSINESS_SCOPE,
     ]
     assert snapshots[0].evidence_traces[0].facts[0].field_label == "主营业务及营收占比"
+
+
+def test_retrieve_uses_only_dominant_business_text_for_locked_enterprise_query() -> None:
+    settings = _settings()
+    session = Mock()
+    session.execute.return_value.all.return_value = [
+        SimpleNamespace(
+            industry_code="8514",
+            industry_name="老年人、残疾人养护服务",
+            text="养老服务定义",
+            chunk_type="definition",
+            source_row=2,
+            distance=0.1,
+        )
+    ]
+    requested = []
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"results": [{"index": 0, "relevance_score": 0.95}]},
+        )
+
+    dominant_layer = build_main_business_revenue_layer(
+        "养老服务70%；计算机销售20%；网络工程10%"
+    )
+    layers = (
+        EvidenceLayer(
+            dominant_layer.level,
+            (
+                *dominant_layer.facts,
+                EvidenceFact(
+                    "异议说明",
+                    "应按计算机销售判断",
+                    "计算机销售",
+                    source="objection",
+                ),
+            ),
+        ),
+        EvidenceLayer(
+            EvidenceLevel.BUSINESS_SCOPE,
+            (
+                EvidenceFact(
+                    "营业执照经营范围（全文）",
+                    "养老服务；计算机销售",
+                    "养老服务；计算机销售",
+                ),
+            ),
+        ),
+    )
+    with httpx.Client(
+        transport=httpx.MockTransport(handler),
+        base_url=settings.siliconflow_base_url,
+    ) as client:
+        retrieve_industry_evidence(
+            session,
+            layers,
+            settings,
+            embedding_request=lambda texts: requested.append(tuple(texts))
+            or [[0.1, 0.2, 0.3], [0.3, 0.2, 0.1]],
+            rerank_client=client,
+        )
+
+    assert "养老服务" in requested[0][0]
+    assert "计算机销售" not in requested[0][0]
+    assert "网络工程" not in requested[0][0]
+    assert "应按计算机销售判断" not in requested[0][0]
+    assert "计算机销售" in requested[0][1]
 
 
 def test_retrieve_propagates_embedding_timeout() -> None:

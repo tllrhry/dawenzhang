@@ -17,6 +17,7 @@ from app.services.national_economy_decision_policy import (
     EvidenceFact,
     EvidenceLayer,
     EvidenceLevel,
+    build_main_business_revenue_layer,
     supplement_layer_with_objection,
 )
 from app.services.national_economy_retrieval import (
@@ -76,6 +77,11 @@ def build_classification_query(
         _build_evidence_layer(input_payload, level, fields)
         for level, fields in _EVIDENCE_FIELDS
     )
+    dominant_main_business_layer = build_main_business_revenue_layer(
+        _field_text(input_payload.get("main_business_revenue_share"))
+    )
+    if dominant_main_business_layer.is_available:
+        layers = (dominant_main_business_layer, *layers[1:])
     normalized_objection = (objection_text or "").strip()
     if normalized_objection:
         target_index = next(

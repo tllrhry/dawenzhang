@@ -333,10 +333,23 @@ def retrieve_loan_direction_evidence(
 
 
 def serialize_evidence_layer(layer: EvidenceLayer) -> str:
-    facts = "\n".join(
-        f"- [{fact.field_label}] {fact.raw_text.strip()} (source={fact.source})"
+    dominant_facts = tuple(
+        fact
         for fact in layer.usable_facts
+        if fact.field_label == "主营业务及营收占比（主导主营）"
     )
+    facts_for_query = dominant_facts or layer.usable_facts
+    serialized_facts = []
+    for fact in facts_for_query:
+        query_text = (
+            fact.indicated_business
+            if fact.field_label == "主营业务及营收占比（主导主营）"
+            else fact.raw_text
+        )
+        serialized_facts.append(
+            f"- [{fact.field_label}] {query_text.strip()} (source={fact.source})"
+        )
+    facts = "\n".join(serialized_facts)
     return f"priority={int(layer.level)} level={layer.level.name}\n{facts}"
 
 

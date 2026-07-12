@@ -6,7 +6,7 @@ from typing import Literal
 import httpx
 
 from app.core.config import Settings
-from app.services.national_economy_decision_policy import EvidenceLayer
+from app.services.national_economy_decision_policy import EvidenceLayer, EvidenceLevel
 from app.services.national_economy_retrieval import EvidenceSnapshot
 
 
@@ -116,7 +116,18 @@ def _build_request_payload(
     objection: Mapping[str, object] | None,
 ) -> dict[str, object]:
     ordered_layers = tuple(sorted(evidence_layers, key=lambda layer: layer.level))
+    dominant_main_business = next(
+        (
+            fact.indicated_business.strip()
+            for layer in ordered_layers
+            if layer.level is EvidenceLevel.MAIN_BUSINESS_REVENUE
+            for fact in layer.usable_facts
+            if fact.field_label == "主营业务及营收占比（主导主营）"
+        ),
+        None,
+    )
     prompt_input: dict[str, object] = {
+        "dominant_main_business": dominant_main_business,
         "ordered_evidence": [
             _serialize_evidence_layer(layer) for layer in ordered_layers
         ],
@@ -140,6 +151,11 @@ def _build_request_payload(
                     "经营范围。必须采用最高可用层；低层冲突不得推翻高层，只有高层不可用"
                     "才可降级，并须在 matching_basis 说明采用层级、字段标签、目录片段及"
                     "冲突或降级理由。异议已并入 ordered_evidence 的既有层，不是第五级。"
+                    "当 dominant_main_business 非空时，表示原文存在单项占比不低于50%的"
+                    "唯一主导主营：企业结论必须落在该主导主营对应的四级行业，绝对不得因"
+                    "核心产品/服务中的其他条目或更低占比业务线改判；该锁定只约束企业结论。"
+                    "当 dominant_main_business 为空时，不存在主导主营锁定，企业结论继续按"
+                    "上述四级证据优先级综合判定，既有行为不变。"
                     "贷款投向必须按以下决策树判定：一、贷款用途为空或仅为经营周转、"
                     "流动资金、经营使用等未指向具体经营领域的笼统表述，返回"
                     "specificity=generic，投向代码和名称必须回落为企业结论；二、具体用途"

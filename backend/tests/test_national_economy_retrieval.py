@@ -14,9 +14,11 @@ from app.services.national_economy_decision_policy import (
 )
 from app.services.national_economy_retrieval import (
     RECALL_LIMIT,
+    EvidenceSnapshot,
     IndustryCandidate,
     RecallHit,
     aggregate_recall_hits,
+    complete_finalist_catalog_fragments,
     display_chunk_type,
     recall_industry_chunks,
     rerank_candidates,
@@ -146,6 +148,82 @@ def test_rerank_returns_top_evidence_snapshots_with_configured_model() -> None:
     assert captured_payload["query"].index("priority=1") < captured_payload["query"].index("priority=4")
     assert len(snapshots) == 8
     assert snapshots[0].hits[0].text == "证据0"
+
+
+def test_complete_finalists_adds_all_catalog_fragments_without_reordering() -> None:
+    session = Mock()
+    session.execute.return_value.all.return_value = [
+        SimpleNamespace(
+            major_category_code="F51",
+            major_category_name="批发业",
+            industry_code="5111",
+            industry_name="谷物、豆及薯类批发",
+            text="不包括面向最终消费者的粮油零售",
+            chunk_type="exclude",
+            source_row=11,
+        ),
+        SimpleNamespace(
+            major_category_code="F51",
+            major_category_name="批发业",
+            industry_code="5111",
+            industry_name="谷物、豆及薯类批发",
+            text="包括谷物批发",
+            chunk_type="include",
+            source_row=11,
+        ),
+        SimpleNamespace(
+            major_category_code="F51",
+            major_category_name="批发业",
+            industry_code="5111",
+            industry_name="谷物、豆及薯类批发",
+            text="目录中的重复定义",
+            chunk_type="definition",
+            source_row=11,
+        ),
+        SimpleNamespace(
+            major_category_code="F52",
+            major_category_name="零售业",
+            industry_code="5221",
+            industry_name="粮油零售",
+            text="面向最终消费者的粮油零售",
+            chunk_type="definition",
+            source_row=22,
+        ),
+    ]
+    finalists = (
+        EvidenceSnapshot(
+            "5221",
+            "粮油零售",
+            0.91,
+            0.99,
+            (RecallHit("5221", "粮油零售", "召回定义", "definition", 22, 0.09),),
+        ),
+        EvidenceSnapshot(
+            "5111",
+            "谷物、豆及薯类批发",
+            0.88,
+            0.97,
+            (RecallHit("5111", "谷物、豆及薯类批发", "召回定义", "definition", 11, 0.12),),
+        ),
+    )
+
+    completed = complete_finalist_catalog_fragments(session, finalists)
+
+    statement = session.execute.call_args.args[0]
+    assert set(statement.compile().params["industry_code_1"]) == {"5111", "5221"}
+    assert [(item.industry_code, item.rerank_score) for item in completed] == [
+        ("5221", 0.99),
+        ("5111", 0.97),
+    ]
+    assert [(hit.chunk_type, hit.text) for hit in completed[1].hits] == [
+        ("definition", "召回定义"),
+        ("include", "包括谷物批发"),
+        ("exclude", "不包括面向最终消费者的粮油零售"),
+    ]
+    assert len(completed[1].hits) == 3
+    assert [(hit.chunk_type, hit.text) for hit in completed[0].hits] == [
+        ("definition", "召回定义")
+    ]
 
 
 @pytest.mark.parametrize("top_n", [4, 9])

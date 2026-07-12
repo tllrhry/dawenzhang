@@ -24,6 +24,7 @@ CHUNK_TYPE_LABELS = {
     "include": "包括",
     "exclude": "不包括",
 }
+CHUNK_TYPE_ORDER = {chunk_type: index for index, chunk_type in enumerate(CHUNK_TYPE_LABELS)}
 
 
 def display_chunk_type(chunk_type: str) -> str:
@@ -266,6 +267,77 @@ def rerank_candidates(
             http_client.close()
 
 
+def complete_finalist_catalog_fragments(
+    session: Session,
+    snapshots: Sequence[EvidenceSnapshot],
+) -> tuple[EvidenceSnapshot, ...]:
+    if not snapshots:
+        return ()
+
+    finalist_codes = tuple(dict.fromkeys(snapshot.industry_code for snapshot in snapshots))
+    statement = select(
+        NationalEconomyIndustryChunk.major_category_code,
+        NationalEconomyIndustryChunk.major_category_name,
+        NationalEconomyIndustryChunk.industry_code,
+        NationalEconomyIndustryChunk.industry_name,
+        NationalEconomyIndustryChunk.text,
+        NationalEconomyIndustryChunk.chunk_type,
+        NationalEconomyIndustryChunk.source_row,
+    ).where(NationalEconomyIndustryChunk.industry_code.in_(finalist_codes))
+    rows = session.execute(statement).all()
+
+    catalog_hits: dict[str, list[RecallHit]] = {}
+    for row in sorted(
+        rows,
+        key=lambda item: (
+            item.industry_code,
+            CHUNK_TYPE_ORDER.get(item.chunk_type, len(CHUNK_TYPE_ORDER)),
+            item.source_row,
+            item.text,
+        ),
+    ):
+        catalog_hits.setdefault(row.industry_code, []).append(
+            RecallHit(
+                industry_code=row.industry_code,
+                industry_name=row.industry_name,
+                text=row.text,
+                chunk_type=row.chunk_type,
+                source_row=row.source_row,
+                distance=1.0,
+                major_category_code=getattr(row, "major_category_code", None),
+                major_category_name=getattr(row, "major_category_name", None),
+            )
+        )
+
+    completed = []
+    for snapshot in snapshots:
+        unique_hits: dict[tuple[int, str], RecallHit] = {}
+        for hit in (*snapshot.hits, *catalog_hits.get(snapshot.industry_code, ())):
+            unique_hits.setdefault((hit.source_row, hit.chunk_type), hit)
+        sorted_hits = tuple(
+            sorted(
+                unique_hits.values(),
+                key=lambda hit: (
+                    CHUNK_TYPE_ORDER.get(hit.chunk_type, len(CHUNK_TYPE_ORDER)),
+                    hit.source_row,
+                ),
+            )
+        )
+        completed.append(
+            EvidenceSnapshot(
+                industry_code=snapshot.industry_code,
+                industry_name=snapshot.industry_name,
+                vector_score=snapshot.vector_score,
+                rerank_score=snapshot.rerank_score,
+                hits=sorted_hits,
+                evidence_traces=snapshot.evidence_traces,
+                major_category_code=snapshot.major_category_code,
+                major_category_name=snapshot.major_category_name,
+            )
+        )
+    return tuple(completed)
+
+
 def retrieve_industry_evidence(
     session: Session,
     evidence_layers: Sequence[EvidenceLayer],
@@ -289,12 +361,15 @@ def retrieve_industry_evidence(
         for layer, embedding in zip(ordered_evidence, embeddings, strict=True)
     )
     candidates = aggregate_layer_recall_hits(layer_hits)
-    return rerank_candidates(
-        ordered_evidence,
-        candidates,
-        settings,
-        top_n=top_n,
-        client=rerank_client,
+    return complete_finalist_catalog_fragments(
+        session,
+        rerank_candidates(
+            ordered_evidence,
+            candidates,
+            settings,
+            top_n=top_n,
+            client=rerank_client,
+        ),
     )
 
 
@@ -332,12 +407,15 @@ def retrieve_loan_direction_evidence(
 
     hits = recall_industry_chunks(session, embedding)
     candidates = aggregate_layer_recall_hits(((loan_purpose_layer, hits),))
-    return rerank_candidates(
-        (loan_purpose_layer,),
-        candidates,
-        settings,
-        top_n=top_n,
-        client=rerank_client,
+    return complete_finalist_catalog_fragments(
+        session,
+        rerank_candidates(
+            (loan_purpose_layer,),
+            candidates,
+            settings,
+            top_n=top_n,
+            client=rerank_client,
+        ),
     )
 
 

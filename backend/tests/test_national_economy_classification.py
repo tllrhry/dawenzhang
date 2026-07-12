@@ -365,6 +365,23 @@ def test_request_contains_two_candidate_pools_and_loan_decision_tree() -> None:
     assert "不在主营但在营业执照经营范围内" in system_prompt
     assert "既不在主营也不在经营范围" in system_prompt
     assert "实际投向" in system_prompt
+    assert "贷款用途详细描述是主信号" in system_prompt
+    assert "贸易合同核心交易品类用于揭示并校正资金真实流向" in system_prompt
+    assert "授信审批意见是资金用途的刚性约束" in system_prompt
+    assert (
+        "贷款用途详细描述高于贸易合同核心交易品类，贸易合同核心交易品类高于"
+        "授信审批意见"
+    ) in system_prompt
+    assert "贸易合同与授信审批意见冲突时必须以贸易合同" in system_prompt
+    assert "不得采用逐级降级只取最高可用层的布尔机制" in system_prompt
+    assert "必须综合三类证据得出真实投向" in system_prompt
+    assert "为企业自身主营经营采购的投入品或原材料" in system_prompt
+    assert "真实投向仍属企业主营" in system_prompt
+    assert "不得改判为该投入品所属行业" in system_prompt
+    assert (
+        "贷款投向 matching_basis 必须明确指明真实投向依据贷款用途、贸易合同核心"
+        "交易品类、授信审批意见中的哪一类或哪几类证据判定"
+    ) in system_prompt
     assert "matching_basis 与 reason 的内容必须全中文" in system_prompt
     assert "不得出现任何英文词元" in system_prompt
     assert "英文单词、字母缩写或英文片段类型标签" in system_prompt
@@ -372,7 +389,12 @@ def test_request_contains_two_candidate_pools_and_loan_decision_tree() -> None:
     assert "不得写采用了哪个优先级、字段或证据层" in system_prompt
     assert "说明采用层级" not in system_prompt
     assert "字段标签" not in system_prompt
+    assert "企业结论必须落在该主导主营对应的四级行业" in system_prompt
+    assert "必须采用最高可用层；低层冲突不得推翻高层" in system_prompt
+    assert "所选行业必须有业务证据命中其包括中的至少一条" in system_prompt
+    assert "根对象只能包含enterprise 和 loan_direction" in system_prompt
     assert "不得返回置信度、AI 总结或 matched" in system_prompt
+    assert "一致性由服务端复算" in system_prompt
 
 
 def test_request_hard_locks_enterprise_to_dominant_main_business() -> None:

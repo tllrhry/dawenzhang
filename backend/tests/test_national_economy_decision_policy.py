@@ -8,8 +8,11 @@ from app.services.national_economy_decision_policy import (
     LoanDirectionRoute,
     LoanPurposeSpecificity,
     NoUsableEvidenceError,
+    build_main_business_revenue_layer,
     decide_loan_direction,
     decide_primary_business,
+    find_dominant_main_business,
+    parse_main_business_revenue_shares,
     supplement_layer_with_objection,
 )
 
@@ -238,3 +241,90 @@ def test_no_usable_evidence_requires_manual_handling() -> None:
                 _layer(EvidenceLevel.BUSINESS_SCOPE, raw_text="", business=""),
             )
         )
+
+
+def test_revenue_share_parser_accepts_multiple_separators_and_full_width_percent() -> None:
+    items = parse_main_business_revenue_shares(
+        "养老服务70%；机构养老服务10%、社区养老服务 20％,其他业务5%"
+    )
+
+    assert [(item.business_label, item.percentage) for item in items] == [
+        ("养老服务", 70),
+        ("机构养老服务", 10),
+        ("社区养老服务", 20),
+        ("其他业务", 5),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("raw_text", "expected_business", "expected_percentage"),
+    [
+        ("养老服务70%；机构养老服务30%", "养老服务", 70),
+        ("养老服务50%；机构养老服务30%", "养老服务", 50),
+        ("养老服务 50％ / 机构养老服务 49%", "养老服务", 50),
+    ],
+)
+def test_revenue_share_at_or_above_fifty_locks_dominant_main_business(
+    raw_text: str,
+    expected_business: str,
+    expected_percentage: int,
+) -> None:
+    dominant = find_dominant_main_business(raw_text)
+
+    assert dominant is not None
+    assert dominant.business_label == expected_business
+    assert dominant.percentage == expected_percentage
+
+
+@pytest.mark.parametrize(
+    "raw_text",
+    [
+        "计算机及外部设备45%/软件30%/网络工程5%",
+        "计算机49%；软件30%",
+        "养老服务50%；机构养老服务50%",
+        "养老服务70；机构养老服务30",
+        "70%",
+        "",
+        "未填写",
+    ],
+)
+def test_revenue_share_without_unique_labeled_fifty_percent_item_does_not_lock(
+    raw_text: str,
+) -> None:
+    assert find_dominant_main_business(raw_text) is None
+
+
+def test_missing_percent_item_is_ignored_while_valid_item_is_still_parsed() -> None:
+    items = parse_main_business_revenue_shares("养老服务70；机构养老服务30%")
+
+    assert [(item.business_label, item.percentage) for item in items] == [
+        ("机构养老服务", 30)
+    ]
+    assert find_dominant_main_business("养老服务70；机构养老服务30%") is None
+
+
+def test_dominant_main_business_is_injected_into_revenue_evidence_layer() -> None:
+    raw_text = "养老服务70%；机构养老服务10%；社区养老服务20%"
+
+    layer = build_main_business_revenue_layer(raw_text)
+
+    assert layer.level is EvidenceLevel.MAIN_BUSINESS_REVENUE
+    assert layer.is_available is True
+    assert layer.usable_facts[0].field_label == "主营业务及营收占比（主导主营）"
+    assert layer.usable_facts[0].raw_text == raw_text
+    assert layer.usable_facts[0].indicated_business == "养老服务"
+
+
+@pytest.mark.parametrize(
+    "raw_text",
+    ["计算机及外部设备45%/软件30%/网络工程5%", "养老服务70", ""],
+)
+def test_revenue_evidence_layer_safely_falls_back_without_dominant_business(
+    raw_text: str,
+) -> None:
+    layer = build_main_business_revenue_layer(raw_text)
+
+    assert layer.level is EvidenceLevel.MAIN_BUSINESS_REVENUE
+    assert layer.is_available is False
+    assert layer.facts == ()
+    assert layer.unavailable_reason is not None

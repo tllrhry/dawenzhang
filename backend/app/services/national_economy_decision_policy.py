@@ -1,5 +1,7 @@
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from enum import Enum, IntEnum
+import re
 from typing import Literal
 
 
@@ -82,6 +84,79 @@ class EvidenceLayer:
     @property
     def is_available(self) -> bool:
         return self.unavailable_reason is None and bool(self.usable_facts)
+
+
+@dataclass(frozen=True)
+class RevenueShareItem:
+    business_label: str
+    percentage: Decimal
+
+
+_REVENUE_SHARE_SEPARATOR_PATTERN = re.compile(r"[、；;，,\n/]+")
+_PERCENTAGE_PATTERN = re.compile(r"(?P<percentage>\d+(?:\.\d+)?)\s*[%％]")
+_BUSINESS_LABEL_TRIM_CHARS = " \t\r\n:：-—()（）[]【】"
+
+
+def parse_main_business_revenue_shares(raw_text: str) -> tuple[RevenueShareItem, ...]:
+    items: list[RevenueShareItem] = []
+    for segment in _REVENUE_SHARE_SEPARATOR_PATTERN.split(raw_text or ""):
+        percentage_match = _PERCENTAGE_PATTERN.search(segment)
+        if percentage_match is None:
+            continue
+
+        business_label = segment[: percentage_match.start()].strip(
+            _BUSINESS_LABEL_TRIM_CHARS
+        )
+        try:
+            percentage = Decimal(percentage_match.group("percentage"))
+        except InvalidOperation:
+            continue
+        if not 0 <= percentage <= 100:
+            continue
+        items.append(
+            RevenueShareItem(
+                business_label=business_label,
+                percentage=percentage,
+            )
+        )
+    return tuple(items)
+
+
+def find_dominant_main_business(raw_text: str) -> RevenueShareItem | None:
+    labeled_items = tuple(
+        item
+        for item in parse_main_business_revenue_shares(raw_text)
+        if item.business_label
+    )
+    if not labeled_items:
+        return None
+
+    maximum_percentage = max(item.percentage for item in labeled_items)
+    maximum_items = tuple(
+        item for item in labeled_items if item.percentage == maximum_percentage
+    )
+    if maximum_percentage < Decimal("50") or len(maximum_items) != 1:
+        return None
+    return maximum_items[0]
+
+
+def build_main_business_revenue_layer(raw_text: str) -> EvidenceLayer:
+    dominant_business = find_dominant_main_business(raw_text)
+    if dominant_business is None:
+        return EvidenceLayer(
+            level=EvidenceLevel.MAIN_BUSINESS_REVENUE,
+            unavailable_reason="未解析出唯一且占比不低于50%的主导主营",
+        )
+    return EvidenceLayer(
+        level=EvidenceLevel.MAIN_BUSINESS_REVENUE,
+        facts=(
+            EvidenceFact(
+                field_label="主营业务及营收占比（主导主营）",
+                raw_text=raw_text,
+                indicated_business=dominant_business.business_label,
+            ),
+        ),
+    )
 
 
 @dataclass(frozen=True)

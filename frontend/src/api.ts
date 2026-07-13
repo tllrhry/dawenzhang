@@ -5,7 +5,7 @@ import {
 } from './scenarios'
 import type { ScenarioId } from './scenarios'
 
-export { NATIONAL_ECONOMY_SCENARIO, TECHNOLOGY_FINANCE_SCENARIO } from './scenarios'
+export { DIGITAL_FINANCE_SCENARIO, GREEN_FINANCE_SCENARIO, NATIONAL_ECONOMY_SCENARIO, PENSION_FINANCE_SCENARIO, TECHNOLOGY_FINANCE_SCENARIO } from './scenarios'
 export type { ScenarioId } from './scenarios'
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '')

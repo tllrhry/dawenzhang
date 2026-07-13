@@ -35,3 +35,15 @@ def test_rejects_non_positive_timeout() -> None:
 def test_rejects_non_positive_embedding_dimension() -> None:
     with pytest.raises(ValueError, match="greater than zero"):
         Settings(_env_file=None, embedding_dimension=0)
+
+
+def test_technology_finance_mapping_path_has_default_and_environment_alias() -> None:
+    assert Settings(_env_file=None).technology_finance_mapping_path == Path(
+        "五篇大文章映射/科技金融.xlsx"
+    )
+    assert Settings(
+        _env_file=None,
+        TECHNOLOGY_FINANCE_MAPPING_PATH="/mnt/catalogs/technology-finance.xlsx",
+    ).technology_finance_mapping_path == Path(
+        "/mnt/catalogs/technology-finance.xlsx"
+    )

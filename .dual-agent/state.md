@@ -14,15 +14,16 @@
 - **关键边界**：Stage A 不改逻辑且独立提交；Stage B 绑定 `stage_a_result_id` 独立重试。首期只用现有科技金融模板与科技金融映射，不改其他四篇资产、不引入五篇映射向量库、不开放其他场景。
 - **映射口径**：同步时以国民经济目录校验同粒度 code/name；运行时匹配 Excel 显式四位行及显式二位大类行；多标签全部输出并保留 mapping version/source row，并按「同主题最具体者优先」剔除同主题祖先大类标签（大类标签仅在该主题无更具体四位命中时作兜底——Claude 终审提出、用户已确认）。正常未命中按 `not_applicable=不属于科技金融`（Claude 终审复核确认正确），数据冲突/证据不足才 needs_review。
 - **一致性**：`consistent / inconsistent / needs_review`，不得因两码不同或有研发资质直接下结论；匹配依据与一致性均保存映射证据、业务字段 key/标签/原文摘录。
-- OpenSpec 已完成业务评审修订并通过 strict validation；实现已完成 task 1.1、1.2。
+- OpenSpec 已完成业务评审修订并通过 strict validation；实现已完成 task 1.1、1.2、2.1。
 
 ## 当前阶段与下一步
 
 - ✅ 需求、源文件小样本与现有事务边界已评审；OpenSpec proposal/design/specs/tasks 已按评审结论收敛为科技金融首期。
 - ✅ Task 1.1：新增 `technology_finance` 场景注册与 20 字段 schema（Stage A 既有 13 字段 + 科技金融附加 7 字段），模板路径只经 `Settings.technology_finance_template_path` 读取；现有模板两处 Stage A 标签差异登记为别名。
 - ✅ Task 1.2：科技金融 Word 摄取兼容现有段落模板和三列表格；缺失、重复、无法识别标签返回 422 且不建案例；科技金融案例详情按注册 schema 返回完整 20 字段。
-- ✅ 验证：task 1.2 定向 29 passed；后端全量 155 passed；统一 runner 后端/前端均 PASS；OpenSpec strict validation 通过。
-- ⏭️ 下一步：task 2.1 科技金融映射版本/行模型与 Alembic 迁移；修改符号前仍须先跑 GitNexus upstream impact，迁移等图谱盲区直接核对。
+- ✅ Task 2.1：新增科技金融映射版本/行模型与 0007 Alembic 迁移；数据库约束覆盖 draft/published/invalid、源哈希幂等、2/4 位粒度、查询索引和级联 FK，并完成 downgrade/upgrade 往返。
+- ✅ 验证：task 2.1 定向 4 passed；后端全量 159 passed；统一 runner 后端/前端均 PASS；Alembic downgrade/upgrade、head 与 metadata check 通过；OpenSpec strict validation 通过。
+- ⏭️ 下一步：task 2.2 科技金融映射同步；修改符号前仍须先跑 GitNexus upstream impact，映射资产只读且不得提交。
 - 📦 上一个 `refine-national-economy-loan-direction-evidence-fusion` 已完成并 commit（`dbfe164`/`bfdfaec`/`547f13e`），仍待用户验收后归档；`4278367..547f13e` 尚未 push origin/main。
 
 ## 常驻注意事项

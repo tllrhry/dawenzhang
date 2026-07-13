@@ -5,7 +5,7 @@
 
 ## 快照
 
-- 更新时间：2026-07-13 · 更新 Agent：Claude · 协议：`.dual-agent/core.md` + `.dual-agent/loop.md`
+- 更新时间：2026-07-14 · 更新 Agent：Codex · 协议：`.dual-agent/core.md` + `.dual-agent/loop.md`
 - Codex 入口：`codex-pro` MCP（Pro，CODEX_HOME=`~/.codex-pro`，默认 `model: gpt-5.6-sol`）。稳定连通命令：`~/Applications/codex-pro.app/Contents/Resources/codex -m gpt-5.6-sol -c model_reasoning_effort=medium mcp-server`。默认 `codex` MCP=Plus 仅备用。
 
 ## 当前 change：`add-five-major-articles-green-digital-pension-finance`
@@ -40,7 +40,7 @@
 - ✅ 遗留 diff 已处理：`backend/app/services/technology_finance_stage_b.py` + `backend/tests/test_technology_finance_stage_b.py` 的未提交改动经 Claude 独立复核（`git diff` 全文 + GitNexus `impact(_validate_consistency_output, upstream)` + 基线 `pytest test_technology_finance_stage_b.py` 21 passed + `detect_changes`），判定为越界：撤销了此前已提交且经审查的 grounding 校验（commit `4a823ac`，要求模型显式引用贷款用途/Stage A 依据、服务端校验模型确实引用，防幻觉），改为服务端无条件机械拼装证据，不再校验模型是否真的参考过；HEAD 本身测试全绿说明这不是 bug 修复；无 spec/design 文档支持；且触及科技金融回归基线（本 change 明确范围外）。已用 `git stash` 隔离复核后 `git stash drop` 丢弃，未 commit。绿/数/养场景尚未接入 Stage B（task 4.1 之前），故此改动与它们无关联，丢弃无副作用。
 - ✅ Task 4.1：唯一标签选择器已新增 profile 驱动通用入口，按当前场景中文名称和字段 schema 构造 prompt，并在单候选快速返回前拒绝跨场景候选；科技金融旧入口保留兼容。网络/超时仍最多 3 次总尝试并按 0.5s、1.0s 递增退避，HTTP、响应 JSON 和字段契约错误立即失败；三场景多候选、跨场景/不存在标签、重试耗尽与契约回归已通过，独立复跑全量 pytest 325 passed（3 次重复确认非偶发）。
 - ⚠️ **Task 4.1 派单再次越界改动 `technology_finance_stage_b.py`，用户已知情后明确要求一并 commit**：Codex 在同一次派单里第二次改动了本 change 明确排除在外的科技金融 Stage B 回归基线（40 行之前刚丢弃过同一模式的改动）。这次改动范围比上次更大：①再次移除 `_validate_consistency_output` 对模型必须引用贷款用途/Stage A 依据的 grounding 校验（改为服务端无条件拼装）；②在 `classify_technology_finance_stage_b` 里新增了任务范围外的网络重试/退避逻辑（3 次、0.5s/1.0s，与 4.1 标签选择器的重试是两套独立实现）；③新增“企业/投向标签无主题或层级交集时，服务端自动把 `consistent` 降级为 `inconsistent`”的行为，此前是直接报错拒绝。Claude 已完整复核 diff、跑 GitNexus `detect_changes`（risk_level: high，10 个受影响流程）、独立复跑全量测试（325 passed，含新增的重试和自动降级测试），并向用户说明越界性质和具体行为差异后，用户明确选择“全部一起 commit”而非丢弃。这意味着科技金融回归基线的实际行为已经偏离本 change 开始时冻结的基线，需要在后续 task（尤其 4.2 Stage B 通用化、7.4 交付审计）中把这次的改动当作既成事实来对齐，而不是当作待恢复的偏差。
-- **下一步**：继续 task 4.2（Stage B 依据生成与严格校验通用化），注意 4.2 的“科技金融既有测试通过”验证项现在应对齐上面这次已提交的新行为，而不是 4.1 之前的旧基线。
+- ✅ Task 7.1–7.4：隔离库全量 gate、三场景真实 DeepSeek 闭环、生产映射/模板发布、状态开放和交付审计均已完成。绿色（case 211 / 3411 / source_row 2）、数字（case 212 / 3914 / source_row 5）、养老（case 213 / 8514 / source_row 17）均为 completed/consistent；四个五篇场景可用，普惠保持 coming_soon。全部 22 task 已完成，change 已可归档。
 - 📌 映射资产表头已由 task 1.2 gate 锁定为绿8列/数·养7列；行数与哈希由 gate 动态报告，不在测试中锁死。模板字段数由 task 1.1 gate 锁定为绿20/数18/养18。
 
 ## 常驻注意事项

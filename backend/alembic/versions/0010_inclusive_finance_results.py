@@ -1,14 +1,14 @@
 """inclusive finance results
 
 Revision ID: 0010_inclusive_finance_results
-Revises: 0008_five_articles_results
+Revises: 0009_five_articles_integrity
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision = "0010_inclusive_finance_results"
-down_revision = "0008_five_articles_results"
+down_revision = "0009_five_articles_integrity"
 branch_labels = None
 depends_on = None
 

@@ -1,8 +1,9 @@
 export const NATIONAL_ECONOMY_SCENARIO = 'national_economy_classification'
 export const TECHNOLOGY_FINANCE_SCENARIO = 'technology_finance'
+export const INCLUSIVE_FINANCE_SCENARIO = 'inclusive_finance'
 
-export type ScenarioId = typeof NATIONAL_ECONOMY_SCENARIO | typeof TECHNOLOGY_FINANCE_SCENARIO
-export type ComingSoonScenarioId = 'agriculture_related' | 'green_finance' | 'inclusive_finance' | 'pension_finance' | 'digital_finance'
+export type ScenarioId = typeof NATIONAL_ECONOMY_SCENARIO | typeof TECHNOLOGY_FINANCE_SCENARIO | typeof INCLUSIVE_FINANCE_SCENARIO
+export type ComingSoonScenarioId = 'agriculture_related' | 'green_finance' | 'pension_finance' | 'digital_finance'
 
 export interface ScenarioView {
   id: ScenarioId
@@ -30,12 +31,19 @@ export const scenarioViews: Record<ScenarioId, ScenarioView> = {
     classifyPath: '/scenarios/technology_finance/classify',
     historyPath: '/scenarios/technology_finance/history',
   },
+  [INCLUSIVE_FINANCE_SCENARIO]: {
+    id: INCLUSIVE_FINANCE_SCENARIO,
+    name: '普惠金融',
+    description: '复用国民经济行业分类，按企业划型、经营性与授信额度进行确定性普惠判定。',
+    templateName: '普惠金融判定模板',
+    classifyPath: '/scenarios/inclusive_finance/classify',
+    historyPath: '/scenarios/inclusive_finance/history',
+  },
 }
 
 export const comingSoonScenarios: ReadonlyArray<{ id: ComingSoonScenarioId; name: string }> = [
   { id: 'agriculture_related', name: '涉农分类' },
   { id: 'green_finance', name: '绿色金融' },
-  { id: 'inclusive_finance', name: '普惠金融' },
   { id: 'pension_finance', name: '养老金融' },
   { id: 'digital_finance', name: '数字金融' },
 ]

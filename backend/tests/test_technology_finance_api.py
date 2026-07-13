@@ -358,7 +358,7 @@ def test_registered_scenario_upload_and_detail_return_complete_profile_schema(
     assert len(detail["input_fields"]) == len(registration.field_schema)
 
 
-@pytest.mark.parametrize("scenario_id", ["inclusive_finance", "not_registered"])
+@pytest.mark.parametrize("scenario_id", ["not_registered"])
 def test_unavailable_or_unknown_upload_is_rejected_before_handler_dispatch(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -379,7 +379,7 @@ def test_unavailable_or_unknown_upload_is_rejected_before_handler_dispatch(
         },
     )
 
-    assert response.status_code == (409 if scenario_id == "inclusive_finance" else 404)
+    assert response.status_code == 404
     handler_lookup.assert_not_called()
 
 
@@ -405,7 +405,6 @@ def test_scenario_mismatch_is_rejected_before_detail_handler_dispatch(
     [
         "agriculture_related",
         "green_finance",
-        "inclusive_finance",
         "pension_finance",
         "digital_finance",
     ],

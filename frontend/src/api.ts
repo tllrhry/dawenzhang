@@ -5,7 +5,7 @@ import {
 } from './scenarios'
 import type { ScenarioId } from './scenarios'
 
-export { NATIONAL_ECONOMY_SCENARIO, TECHNOLOGY_FINANCE_SCENARIO } from './scenarios'
+export { NATIONAL_ECONOMY_SCENARIO, TECHNOLOGY_FINANCE_SCENARIO, INCLUSIVE_FINANCE_SCENARIO } from './scenarios'
 export type { ScenarioId } from './scenarios'
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '')
@@ -88,8 +88,34 @@ export interface TechnologyFinanceWorkflowResult {
   stage_b: FiveArticlesResult | null
 }
 
-export type ClassificationOutcome = ClassificationResult | TechnologyFinanceWorkflowResult
-export type ClassificationHistoryItem = ClassificationResult | FiveArticlesResult
+export interface InclusiveFinanceResult {
+  id: string
+  version: number
+  status: FiveArticlesStatus
+  stage_a_result_id: string
+  borrower_type: string | null
+  computed_size: string | null
+  filled_size: string | null
+  size_consistent: boolean | null
+  is_operating_loan: boolean | null
+  credit_amount_wan: number | null
+  qualifies: boolean | null
+  inclusive_category: string | null
+  basis: string | null
+  evidence_refs: EvidenceReference[]
+  anomalies: Array<{ type?: string; message?: string }>
+  determination: Record<string, unknown> | null
+  error_detail: string | null
+  created_at: string
+}
+
+export interface InclusiveFinanceWorkflowResult {
+  stage_a: ClassificationResult
+  stage_b: InclusiveFinanceResult | null
+}
+
+export type ClassificationOutcome = ClassificationResult | TechnologyFinanceWorkflowResult | InclusiveFinanceWorkflowResult
+export type ClassificationHistoryItem = ClassificationResult | FiveArticlesResult | InclusiveFinanceResult
 
 export interface ClassificationCase {
   id: string

@@ -19,10 +19,13 @@ from app.models import (
     NationalEconomyCatalogVersion,
     NationalEconomyIndustryChunk,
 )
+from app.services.scenario_registry import (
+    TECHNOLOGY_FINANCE_REGISTRATION,
+    ScenarioRegistration,
+)
 
 
 TECHNOLOGY_FINANCE_SCENARIO_ID = "technology_finance"
-EXPECTED_CATEGORY = "科技金融"
 OPTIONAL_CATEGORY_HEADER = "属于类别"
 REQUIRED_HEADERS = (
     "主题",
@@ -99,7 +102,7 @@ class MappingSyncResult:
 
 def read_mapping_source(path: Path) -> MappingSyncSource:
     if not path.is_file():
-        raise FileNotFoundError(f"technology-finance mapping Excel not found: {path}")
+        raise FileNotFoundError(f"five-articles mapping Excel not found: {path}")
 
     source_hash = sha256(path.read_bytes()).hexdigest()
     workbook = load_workbook(path, read_only=True, data_only=True)
@@ -108,7 +111,7 @@ def read_mapping_source(path: Path) -> MappingSyncSource:
         values = worksheet.iter_rows(values_only=True)
         raw_headers = next(values, None)
         if raw_headers is None:
-            raise MappingHeaderError("technology-finance mapping Excel has no header row")
+            raise MappingHeaderError("five-articles mapping Excel has no header row")
 
         headers = tuple(_canonical_header(value) for value in raw_headers)
         positions: dict[str, int] = {}
@@ -159,6 +162,42 @@ def synchronize_technology_finance_mapping(
     *,
     scenario_id: str = TECHNOLOGY_FINANCE_SCENARIO_ID,
 ) -> MappingSyncResult:
+    """Compatibility wrapper for the original technology-finance sync API."""
+    return _synchronize_mapping(
+        session,
+        source,
+        settings,
+        scenario_id=scenario_id,
+        expected_category=TECHNOLOGY_FINANCE_REGISTRATION.name,
+    )
+
+
+def synchronize_scenario_mapping(
+    session: Session,
+    profile: ScenarioRegistration,
+    settings: Settings,
+) -> MappingSyncResult:
+    """Read, validate, and atomically publish one scenario profile's mapping."""
+    if not profile.is_executable_profile:
+        raise ValueError(f"scenario {profile.id!r} has no executable mapping profile")
+    source = read_mapping_source(profile.mapping_path(settings))
+    return _synchronize_mapping(
+        session,
+        source,
+        settings,
+        scenario_id=profile.id,
+        expected_category=profile.name,
+    )
+
+
+def _synchronize_mapping(
+    session: Session,
+    source: MappingSyncSource,
+    settings: Settings,
+    *,
+    scenario_id: str,
+    expected_category: str,
+) -> MappingSyncResult:
     existing = session.scalar(
         select(FiveArticlesMappingVersion).where(
             FiveArticlesMappingVersion.scenario_id == scenario_id,
@@ -168,7 +207,10 @@ def synchronize_technology_finance_mapping(
     if existing is not None:
         return MappingSyncResult(version=existing, reused=True)
 
-    normalized_rows, normalization_errors, normalizations = _normalize_rows(source.rows)
+    normalized_rows, normalization_errors, normalizations = _normalize_rows(
+        source.rows,
+        expected_category=expected_category,
+    )
     catalog = load_current_catalog_facts(session, settings)
     validation_errors = [*normalization_errors, *catalog.errors]
     if catalog.version is not None:
@@ -333,6 +375,8 @@ def load_current_catalog_facts(session: Session, settings: Settings) -> CatalogF
 
 def _normalize_rows(
     rows: Sequence[RawMappingRow],
+    *,
+    expected_category: str,
 ) -> tuple[
     tuple[NormalizedMappingRow, ...],
     list[dict[str, object]],
@@ -344,12 +388,12 @@ def _normalize_rows(
     for row in rows:
         raw_category = row.values.get(OPTIONAL_CATEGORY_HEADER)
         category = _normalize_text(raw_category)
-        if raw_category is not None and category != EXPECTED_CATEGORY:
+        if category and category != expected_category:
             errors.append(
                 {
                     "type": "category_mismatch",
                     "source_row": row.source_row,
-                    "expected": EXPECTED_CATEGORY,
+                    "expected": expected_category,
                     "actual": category,
                 }
             )

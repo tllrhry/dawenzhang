@@ -1,16 +1,17 @@
 from app.core.config import get_settings
 from app.db.session import get_sessionmaker
 from app.services.technology_finance_mapping_sync import (
-    read_mapping_source,
-    synchronize_technology_finance_mapping,
+    synchronize_scenario_mapping,
 )
+from app.services.scenario_registry import TECHNOLOGY_FINANCE_REGISTRATION
 
 
 def main() -> int:
     settings = get_settings()
-    source = read_mapping_source(settings.technology_finance_mapping_path)
     with get_sessionmaker()() as session:
-        result = synchronize_technology_finance_mapping(session, source, settings)
+        result = synchronize_scenario_mapping(
+            session, TECHNOLOGY_FINANCE_REGISTRATION, settings
+        )
         session.commit()
 
     version = result.version

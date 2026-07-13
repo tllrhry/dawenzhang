@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from app.core.config import Settings
 from app.services.national_economy_case_ingestion import FIELD_LABELS
 from app.services.scenario_registry import (
@@ -203,3 +205,67 @@ def test_technology_finance_template_path_defaults_to_existing_asset() -> None:
     assert settings.technology_finance_template_path == Path(
         "模板文件/五篇大文章/科技金融模版 .docx"
     )
+
+
+@pytest.mark.parametrize(
+    ("registration", "template_name", "mapping_name", "export_sheet_name"),
+    (
+        (
+            GREEN_FINANCE_REGISTRATION,
+            "green-template.docx",
+            "green-mapping.xlsx",
+            "绿色金融判定",
+        ),
+        (
+            DIGITAL_FINANCE_REGISTRATION,
+            "digital-template.docx",
+            "digital-mapping.xlsx",
+            "数字金融判定",
+        ),
+        (
+            PENSION_FINANCE_REGISTRATION,
+            "pension-template.docx",
+            "pension-mapping.xlsx",
+            "养老金融判定",
+        ),
+    ),
+)
+def test_new_finance_profiles_resolve_independent_execution_metadata(
+    monkeypatch,
+    tmp_path: Path,
+    registration,
+    template_name: str,
+    mapping_name: str,
+    export_sheet_name: str,
+) -> None:
+    template_path = tmp_path / template_name
+    mapping_path = tmp_path / mapping_name
+    monkeypatch.setenv(registration.template_path_setting.upper(), str(template_path))
+    monkeypatch.setenv(registration.mapping_path_setting.upper(), str(mapping_path))
+    settings = Settings(_env_file=None)
+
+    assert registration.status == "coming_soon"
+    assert registration.workflow == "technology_finance_two_stage"
+    assert registration.is_executable_profile is True
+    assert registration.template_path(settings) == template_path
+    assert registration.mapping_path(settings) == mapping_path
+    assert registration.export_sheet_name == export_sheet_name
+    assert registration.field_schema
+    assert registration.name in export_sheet_name
+
+
+def test_inclusive_and_unknown_scenarios_are_not_executable_profiles() -> None:
+    inclusive = SCENARIO_REGISTRY["inclusive_finance"]
+
+    assert inclusive.status == "coming_soon"
+    assert inclusive.workflow is None
+    assert inclusive.template_path_setting is None
+    assert inclusive.mapping_path_setting is None
+    assert inclusive.export_sheet_name is None
+    assert inclusive.is_executable_profile is False
+    assert SCENARIO_REGISTRY.get("not_registered") is None
+
+    with pytest.raises(ValueError, match="暂未配置模板"):
+        inclusive.template_path(Settings(_env_file=None))
+    with pytest.raises(ValueError, match="暂未配置映射"):
+        inclusive.mapping_path(Settings(_env_file=None))

@@ -63,6 +63,30 @@ class Settings(BaseSettings):
         default=Path("五篇大文章映射/科技金融.xlsx"),
         validation_alias=AliasChoices("TECHNOLOGY_FINANCE_MAPPING_PATH"),
     )
+    green_finance_template_path: Path = Field(
+        default=Path("模板文件/五篇大文章/绿色金融模版.docx"),
+        validation_alias=AliasChoices("GREEN_FINANCE_TEMPLATE_PATH"),
+    )
+    green_finance_mapping_path: Path = Field(
+        default=Path("五篇大文章映射/绿色金融.xlsx"),
+        validation_alias=AliasChoices("GREEN_FINANCE_MAPPING_PATH"),
+    )
+    digital_finance_template_path: Path = Field(
+        default=Path("模板文件/五篇大文章/数字金融模版.docx"),
+        validation_alias=AliasChoices("DIGITAL_FINANCE_TEMPLATE_PATH"),
+    )
+    digital_finance_mapping_path: Path = Field(
+        default=Path("五篇大文章映射/数字金融.xlsx"),
+        validation_alias=AliasChoices("DIGITAL_FINANCE_MAPPING_PATH"),
+    )
+    pension_finance_template_path: Path = Field(
+        default=Path("模板文件/五篇大文章/养老金融模版.docx"),
+        validation_alias=AliasChoices("PENSION_FINANCE_TEMPLATE_PATH"),
+    )
+    pension_finance_mapping_path: Path = Field(
+        default=Path("五篇大文章映射/养老金融.xlsx"),
+        validation_alias=AliasChoices("PENSION_FINANCE_MAPPING_PATH"),
+    )
 
     # Shared HTTP connect timeout for the cloud model clients.
     http_connect_timeout_seconds: float = Field(

@@ -47,3 +47,51 @@ def test_technology_finance_mapping_path_has_default_and_environment_alias() -> 
     ).technology_finance_mapping_path == Path(
         "/mnt/catalogs/technology-finance.xlsx"
     )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "environment_name", "default_path"),
+    (
+        (
+            "green_finance_template_path",
+            "GREEN_FINANCE_TEMPLATE_PATH",
+            "模板文件/五篇大文章/绿色金融模版.docx",
+        ),
+        (
+            "green_finance_mapping_path",
+            "GREEN_FINANCE_MAPPING_PATH",
+            "五篇大文章映射/绿色金融.xlsx",
+        ),
+        (
+            "digital_finance_template_path",
+            "DIGITAL_FINANCE_TEMPLATE_PATH",
+            "模板文件/五篇大文章/数字金融模版.docx",
+        ),
+        (
+            "digital_finance_mapping_path",
+            "DIGITAL_FINANCE_MAPPING_PATH",
+            "五篇大文章映射/数字金融.xlsx",
+        ),
+        (
+            "pension_finance_template_path",
+            "PENSION_FINANCE_TEMPLATE_PATH",
+            "模板文件/五篇大文章/养老金融模版.docx",
+        ),
+        (
+            "pension_finance_mapping_path",
+            "PENSION_FINANCE_MAPPING_PATH",
+            "五篇大文章映射/养老金融.xlsx",
+        ),
+    ),
+)
+def test_new_finance_asset_paths_have_defaults_and_environment_aliases(
+    field_name: str,
+    environment_name: str,
+    default_path: str,
+) -> None:
+    assert getattr(Settings(_env_file=None), field_name) == Path(default_path)
+
+    configured_path = f"/mnt/assets/{field_name}"
+    settings = Settings(_env_file=None, **{environment_name: configured_path})
+
+    assert getattr(settings, field_name) == Path(configured_path)

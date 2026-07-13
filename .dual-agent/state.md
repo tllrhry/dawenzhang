@@ -32,7 +32,8 @@
 - ✅ Task 1.2：建立三场景映射 Excel 资产预检，统一归一中英换行表头，校验必需列、归一后重复列和可选场景类别；忽略锁文件/`.DS_Store`，报告源 SHA-256 与动态数据行数。正式资产预检为绿 201、数 173、养 240 行，定向 7 tests 与统一 runner PASS。
 - ✅ Task 1.3：三个新场景已注册稳定 schema（绿20/数18/养18）、Stage A 13 字段子集、模板别名与完整 Stage B 证据白名单/优先级；场景仍保持 `coming_soon`，提示列不进入 schema。
 - ✅ Task 2.1：`config.py` 已按既有 pydantic-settings 模式新增绿色、数字、养老模板与映射路径；三个场景 profile 可分别解析模板、映射、schema、显示名与导出名，并注册两阶段工作流元数据但继续保持 `coming_soon`；普惠无工作流和资产路径，未知场景不注册。
-- ⏭️ 下一步：执行 task 2.2，将科技金融 Word 解析与案例创建抽取为按 profile 工作的通用五篇摄取器；修改任何符号前先做 GitNexus upstream impact，HIGH/CRITICAL 先暂停报告。
+- ✅ Task 2.2：科技金融 Word 解析与案例创建已抽取为 profile 驱动的通用五篇摄取器；绿色、数字、养老正式三列表格可按各自 schema 摄取，第三列提示不入库，缺失/重复/无法识别均在写库前失败；科技金融原段落与三列表格入口保留兼容包装。
+- ⏭️ 下一步：执行 task 2.3，将通用场景案例创建和详情端点改为注册处理器分派，并在摄取前拒绝 coming_soon、未知场景及 scenario/case 错配；修改任何符号前先做 GitNexus upstream impact，HIGH/CRITICAL 先暂停报告。
 - 📌 映射资产表头已由 task 1.2 gate 锁定为绿8列/数·养7列；行数与哈希由 gate 动态报告，不在测试中锁死。模板字段数由 task 1.1 gate 锁定为绿20/数18/养18。
 
 ## 常驻注意事项

@@ -148,7 +148,7 @@ def test_new_finance_scenario_schema_contracts_are_stable() -> None:
         }
 
         assert SCENARIO_REGISTRY[scenario_id] is registration
-        assert registration.status == "coming_soon"
+        assert registration.status == "available"
         assert registration.parent_id == "five_major_articles"
         assert len(registration.field_schema) == expected_count
         assert len(schema_labels) == expected_count
@@ -244,7 +244,7 @@ def test_new_finance_profiles_resolve_independent_execution_metadata(
     monkeypatch.setenv(registration.mapping_path_setting.upper(), str(mapping_path))
     settings = Settings(_env_file=None)
 
-    assert registration.status == "coming_soon"
+    assert registration.status == "available"
     assert registration.workflow == "technology_finance_two_stage"
     assert registration.is_executable_profile is True
     assert registration.template_path(settings) == template_path

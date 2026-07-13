@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 
 import httpx
@@ -6,7 +7,7 @@ import pytest
 
 from app.core.config import Settings
 from app.services.technology_finance_mapping_query import (
-    TechnologyFinanceMappingLabel,
+    FiveArticlesMappingLabel,
 )
 from app.services.technology_finance_stage_b import (
     TechnologyFinanceStageBError,
@@ -65,9 +66,9 @@ def _label(
     source_row: int,
     subject: str = "高技术产业",
     taxonomy_path: tuple[str, ...] = ("高技术产业", "研发与技术服务"),
-) -> TechnologyFinanceMappingLabel:
+) -> FiveArticlesMappingLabel:
     tiers = (*taxonomy_path, None, None, None, None)[:4]
-    return TechnologyFinanceMappingLabel(
+    return FiveArticlesMappingLabel(
         mapping_version_id=7,
         scenario_id="technology_finance",
         neic_code=code,
@@ -82,7 +83,7 @@ def _label(
     )
 
 
-def _fixed_label(label: TechnologyFinanceMappingLabel) -> dict[str, object]:
+def _fixed_label(label: FiveArticlesMappingLabel) -> dict[str, object]:
     return {
         "mapping_version_id": label.mapping_version_id,
         "source_row": label.source_row,
@@ -93,7 +94,7 @@ def _fixed_label(label: TechnologyFinanceMappingLabel) -> dict[str, object]:
     }
 
 
-def _mapping_ref(label: TechnologyFinanceMappingLabel) -> dict[str, object]:
+def _mapping_ref(label: FiveArticlesMappingLabel) -> dict[str, object]:
     fixed = _fixed_label(label)
     fixed.pop("subject")
     return {"type": "mapping", **fixed}
@@ -113,14 +114,14 @@ def _business_ref(
 
 
 def _label_ref(
-    label: TechnologyFinanceMappingLabel, side: str
+    label: FiveArticlesMappingLabel, side: str
 ) -> dict[str, object]:
     fixed = _fixed_label(label)
     fixed.pop("subject")
     return {"type": "label", "side": side, **fixed}
 
 
-def _label_output(label: TechnologyFinanceMappingLabel) -> dict[str, object]:
+def _label_output(label: FiveArticlesMappingLabel) -> dict[str, object]:
     return {
         **_fixed_label(label),
         "matching_basis": "贷款资金用于现有研发平台升级，命中该科技金融类别。",
@@ -129,8 +130,8 @@ def _label_output(label: TechnologyFinanceMappingLabel) -> dict[str, object]:
 
 
 def _model_output(
-    enterprise_labels: tuple[TechnologyFinanceMappingLabel, ...],
-    loan_labels: tuple[TechnologyFinanceMappingLabel, ...],
+    enterprise_labels: tuple[FiveArticlesMappingLabel, ...],
+    loan_labels: tuple[FiveArticlesMappingLabel, ...],
     status: str,
 ) -> dict[str, object]:
     refs: list[dict[str, object]] = []
@@ -182,8 +183,8 @@ def _client(model_output: object, status_code: int = 200) -> httpx.Client:
 
 def _run(
     output: dict[str, object],
-    enterprise_labels: tuple[TechnologyFinanceMappingLabel, ...],
-    loan_labels: tuple[TechnologyFinanceMappingLabel, ...],
+    enterprise_labels: tuple[FiveArticlesMappingLabel, ...],
+    loan_labels: tuple[FiveArticlesMappingLabel, ...],
     *,
     stage_a: SimpleNamespace | None = None,
     input_payload: dict[str, str] | None = None,
@@ -196,6 +197,47 @@ def _run(
             loan_labels,
             _settings(),
             client=client,
+        )
+
+
+def test_deterministic_labels_accept_one_non_technology_scenario() -> None:
+    enterprise = replace(
+        _label(code="2710", name="化学药品原料药制造", source_row=11),
+        scenario_id="green_finance",
+    )
+    loan = replace(
+        _label(code="6311", name="基础软件开发", source_row=22),
+        scenario_id="green_finance",
+    )
+
+    result = _run(
+        _model_output((enterprise,), (loan,), "consistent"),
+        (enterprise,),
+        (loan,),
+    )
+
+    assert result.consistency_status == "consistent"
+    assert [label["source_row"] for label in result.labels] == [loan.source_row]
+
+
+def test_deterministic_labels_reject_mixed_scenarios() -> None:
+    enterprise = replace(
+        _label(code="2710", name="化学药品原料药制造", source_row=11),
+        scenario_id="green_finance",
+    )
+    loan = replace(
+        _label(code="6311", name="基础软件开发", source_row=22),
+        scenario_id="digital_finance",
+    )
+
+    with pytest.raises(
+        TechnologyFinanceStageBError,
+        match="one non-empty scenario_id",
+    ):
+        _run(
+            _model_output((enterprise,), (loan,), "consistent"),
+            (enterprise,),
+            (loan,),
         )
 
 
@@ -318,8 +360,8 @@ def test_missing_mapping_evidence_is_rejected() -> None:
 )
 def test_different_codes_accept_grounded_consistent_and_inconsistent_states(
     status: str,
-    enterprise: TechnologyFinanceMappingLabel,
-    loan: TechnologyFinanceMappingLabel,
+    enterprise: FiveArticlesMappingLabel,
+    loan: FiveArticlesMappingLabel,
 ) -> None:
     result = _run(_model_output((enterprise,), (loan,), status), (enterprise,), (loan,))
 

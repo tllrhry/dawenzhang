@@ -18,9 +18,9 @@ from app.services.technology_finance_label_selection import (
     select_most_matching_technology_finance_label,
 )
 from app.services.technology_finance_mapping_query import (
-    TechnologyFinanceMappingLabel,
-    TechnologyFinanceMappingLookupResult,
-    lookup_technology_finance_mapping,
+    FiveArticlesMappingLabel,
+    FiveArticlesMappingLookupResult,
+    lookup_five_articles_mapping,
 )
 from app.services.technology_finance_stage_b import (
     TechnologyFinanceStageBResult,
@@ -36,8 +36,8 @@ StageAReclassificationCallable = Callable[
     [Session, NationalEconomyClassificationCase, str, Settings],
     NationalEconomyClassificationResult,
 ]
-MappingLookupCallable = Callable[..., TechnologyFinanceMappingLookupResult]
-LabelSelectionCallable = Callable[..., TechnologyFinanceMappingLabel]
+MappingLookupCallable = Callable[..., FiveArticlesMappingLookupResult]
+LabelSelectionCallable = Callable[..., FiveArticlesMappingLabel]
 StageBClassificationCallable = Callable[
     ...,
     TechnologyFinanceStageBResult,
@@ -56,7 +56,7 @@ def classify_technology_finance_case(
     settings: Settings | None = None,
     *,
     stage_a_classifier: StageAClassificationCallable = classify_case,
-    mapping_lookup: MappingLookupCallable = lookup_technology_finance_mapping,
+    mapping_lookup: MappingLookupCallable = lookup_five_articles_mapping,
     label_selector: LabelSelectionCallable = (
         select_most_matching_technology_finance_label
     ),
@@ -88,7 +88,7 @@ def reclassify_technology_finance_case(
     settings: Settings | None = None,
     *,
     stage_a_reclassifier: StageAReclassificationCallable = reclassify_case,
-    mapping_lookup: MappingLookupCallable = lookup_technology_finance_mapping,
+    mapping_lookup: MappingLookupCallable = lookup_five_articles_mapping,
     label_selector: LabelSelectionCallable = (
         select_most_matching_technology_finance_label
     ),
@@ -122,7 +122,7 @@ def run_technology_finance_stage_b(
     stage_a_result: NationalEconomyClassificationResult,
     settings: Settings,
     *,
-    mapping_lookup: MappingLookupCallable = lookup_technology_finance_mapping,
+    mapping_lookup: MappingLookupCallable = lookup_five_articles_mapping,
     label_selector: LabelSelectionCallable = (
         select_most_matching_technology_finance_label
     ),
@@ -147,7 +147,7 @@ def run_technology_finance_stage_b(
     if existing_completed is not None:
         return TechnologyFinanceWorkflowResult(stage_a_result, existing_completed)
 
-    mapping_result: TechnologyFinanceMappingLookupResult | None = None
+    mapping_result: FiveArticlesMappingLookupResult | None = None
     try:
         mapping_result = mapping_lookup(
             session,
@@ -211,7 +211,7 @@ def _build_stage_b_result(
     session: Session,
     case: NationalEconomyClassificationCase,
     stage_a_result: NationalEconomyClassificationResult,
-    mapping_result: TechnologyFinanceMappingLookupResult,
+    mapping_result: FiveArticlesMappingLookupResult,
     settings: Settings,
     label_selector: LabelSelectionCallable,
     stage_b_classifier: StageBClassificationCallable,

@@ -8,7 +8,7 @@ import httpx
 
 from app.core.config import Settings
 from app.services.scenario_registry import TECHNOLOGY_FINANCE_FIELD_SCHEMA
-from app.services.technology_finance_mapping_query import TechnologyFinanceMappingLabel
+from app.services.technology_finance_mapping_query import FiveArticlesMappingLabel
 from app.services.technology_finance_stage_b import StageAResult
 
 
@@ -23,10 +23,10 @@ class TechnologyFinanceLabelSelectionError(RuntimeError):
 def select_most_matching_technology_finance_label(
     input_payload: Mapping[str, object],
     stage_a_result: StageAResult,
-    candidate_labels: Sequence[TechnologyFinanceMappingLabel],
+    candidate_labels: Sequence[FiveArticlesMappingLabel],
     settings: Settings,
     client: httpx.Client | None = None,
-) -> TechnologyFinanceMappingLabel:
+) -> FiveArticlesMappingLabel:
     """Narrow multiple deterministic loan-direction candidates to the single
     most-matching one via a constrained LLM call grounded in business content."""
     if not candidate_labels:
@@ -88,7 +88,7 @@ def select_most_matching_technology_finance_label(
 def _build_request_payload(
     input_payload: Mapping[str, object],
     stage_a_result: StageAResult,
-    candidate_labels: Sequence[TechnologyFinanceMappingLabel],
+    candidate_labels: Sequence[FiveArticlesMappingLabel],
     model: str,
 ) -> dict[str, object]:
     field_payload = [
@@ -141,8 +141,8 @@ def _build_request_payload(
 
 def _validate_response(
     response_payload: object,
-    by_source_row: Mapping[int, TechnologyFinanceMappingLabel],
-) -> TechnologyFinanceMappingLabel:
+    by_source_row: Mapping[int, FiveArticlesMappingLabel],
+) -> FiveArticlesMappingLabel:
     try:
         content = response_payload["choices"][0]["message"]["content"]
     except (TypeError, KeyError, IndexError) as exc:

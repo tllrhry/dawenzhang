@@ -17,7 +17,7 @@ MAJOR_CATEGORY_CODE_PATTERN = re.compile(r"^[A-Za-z]?(\d{2})$")
 
 
 @dataclass(frozen=True)
-class TechnologyFinanceMappingLabel:
+class FiveArticlesMappingLabel:
     mapping_version_id: int
     scenario_id: str
     neic_code: str
@@ -51,24 +51,24 @@ class TechnologyFinanceMappingLabel:
 
 
 @dataclass(frozen=True)
-class TechnologyFinanceMappingLookupResult:
+class FiveArticlesMappingLookupResult:
     status: MappingLookupStatus
     mapping_version_id: int | None
     mapping_version: int | None
-    enterprise_labels: tuple[TechnologyFinanceMappingLabel, ...]
-    loan_direction_labels: tuple[TechnologyFinanceMappingLabel, ...]
+    enterprise_labels: tuple[FiveArticlesMappingLabel, ...]
+    loan_direction_labels: tuple[FiveArticlesMappingLabel, ...]
     detail: str
 
 
-def lookup_technology_finance_mapping(
+def lookup_five_articles_mapping(
     session: Session,
     *,
     enterprise_four_digit_code: str,
     enterprise_major_category_code: str,
     loan_direction_four_digit_code: str,
     loan_direction_major_category_code: str,
-    scenario_id: str = TECHNOLOGY_FINANCE_SCENARIO_ID,
-) -> TechnologyFinanceMappingLookupResult:
+    scenario_id: str,
+) -> FiveArticlesMappingLookupResult:
     versions = tuple(
         session.scalars(
             select(FiveArticlesMappingVersion)
@@ -131,7 +131,7 @@ def lookup_technology_finance_mapping(
     enterprise_labels = _prefer_most_specific_labels(enterprise_rows)
     loan_direction_labels = _prefer_most_specific_labels(loan_direction_rows)
     if not loan_direction_labels:
-        return TechnologyFinanceMappingLookupResult(
+        return FiveArticlesMappingLookupResult(
             status="not_applicable",
             mapping_version_id=version.id,
             mapping_version=version.version,
@@ -140,7 +140,7 @@ def lookup_technology_finance_mapping(
             detail="loan_direction_has_no_explicit_mapping",
         )
 
-    return TechnologyFinanceMappingLookupResult(
+    return FiveArticlesMappingLookupResult(
         status="mapping_hit",
         mapping_version_id=version.id,
         mapping_version=version.version,
@@ -154,8 +154,8 @@ def _review_result(
     *,
     detail: str,
     version: FiveArticlesMappingVersion | None = None,
-) -> TechnologyFinanceMappingLookupResult:
-    return TechnologyFinanceMappingLookupResult(
+) -> FiveArticlesMappingLookupResult:
+    return FiveArticlesMappingLookupResult(
         status="needs_review",
         mapping_version_id=version.id if version is not None else None,
         mapping_version=version.version if version is not None else None,
@@ -285,7 +285,7 @@ def _validate_query_rows(rows: tuple[FiveArticlesMappingRow, ...]) -> str | None
     return None
 
 
-def _row_integrity_issue(label: TechnologyFinanceMappingLabel) -> str | None:
+def _row_integrity_issue(label: FiveArticlesMappingLabel) -> str | None:
     if (
         not label.neic_name.strip()
         or not label.subject.strip()
@@ -305,9 +305,9 @@ def _row_integrity_issue(label: TechnologyFinanceMappingLabel) -> str | None:
 
 def _prefer_most_specific_labels(
     rows: tuple[FiveArticlesMappingRow, ...],
-) -> tuple[TechnologyFinanceMappingLabel, ...]:
+) -> tuple[FiveArticlesMappingLabel, ...]:
     labels = tuple(_row_to_label(row) for row in rows)
-    four_digit_by_subject: dict[str, tuple[TechnologyFinanceMappingLabel, ...]] = {}
+    four_digit_by_subject: dict[str, tuple[FiveArticlesMappingLabel, ...]] = {}
     for label in labels:
         if label.code_level != 4:
             continue
@@ -348,8 +348,8 @@ def _is_path_prefix(prefix: tuple[str, ...], path: tuple[str, ...]) -> bool:
     return len(prefix) <= len(path) and path[: len(prefix)] == prefix
 
 
-def _row_to_label(row: FiveArticlesMappingRow) -> TechnologyFinanceMappingLabel:
-    return TechnologyFinanceMappingLabel(
+def _row_to_label(row: FiveArticlesMappingRow) -> FiveArticlesMappingLabel:
+    return FiveArticlesMappingLabel(
         mapping_version_id=row.mapping_version_id,
         scenario_id=row.scenario_id,
         neic_code=row.neic_code,
@@ -361,4 +361,29 @@ def _row_to_label(row: FiveArticlesMappingRow) -> TechnologyFinanceMappingLabel:
         tier3=row.tier3,
         tier4=row.tier4,
         source_row=row.source_row,
+    )
+
+
+# Compatibility aliases keep the completed technology-finance workflow import-stable
+# while new callers use the scenario-generic names above.
+TechnologyFinanceMappingLabel = FiveArticlesMappingLabel
+TechnologyFinanceMappingLookupResult = FiveArticlesMappingLookupResult
+
+
+def lookup_technology_finance_mapping(
+    session: Session,
+    *,
+    enterprise_four_digit_code: str,
+    enterprise_major_category_code: str,
+    loan_direction_four_digit_code: str,
+    loan_direction_major_category_code: str,
+    scenario_id: str = TECHNOLOGY_FINANCE_SCENARIO_ID,
+) -> FiveArticlesMappingLookupResult:
+    return lookup_five_articles_mapping(
+        session,
+        enterprise_four_digit_code=enterprise_four_digit_code,
+        enterprise_major_category_code=enterprise_major_category_code,
+        loan_direction_four_digit_code=loan_direction_four_digit_code,
+        loan_direction_major_category_code=loan_direction_major_category_code,
+        scenario_id=scenario_id,
     )

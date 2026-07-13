@@ -8,8 +8,8 @@ from sqlalchemy.orm import Session
 from app.db.session import get_sessionmaker
 from app.models import FiveArticlesMappingRow, FiveArticlesMappingVersion
 from app.services.technology_finance_mapping_query import (
-    TechnologyFinanceMappingLookupResult,
-    lookup_technology_finance_mapping,
+    FiveArticlesMappingLookupResult,
+    lookup_five_articles_mapping,
 )
 
 
@@ -27,6 +27,16 @@ def mapping_query_context() -> Iterator[tuple[Session, str]]:
             )
         )
         session.commit()
+        session.close()
+
+
+@pytest.fixture
+def four_scenario_query_session() -> Iterator[Session]:
+    session = get_sessionmaker()()
+    try:
+        yield session
+    finally:
+        session.rollback()
         session.close()
 
 
@@ -103,8 +113,8 @@ def _lookup(
     enterprise_major_category_code: str = "C30",
     loan_direction_four_digit_code: str = "2710",
     loan_direction_major_category_code: str = "C27",
-) -> TechnologyFinanceMappingLookupResult:
-    return lookup_technology_finance_mapping(
+) -> FiveArticlesMappingLookupResult:
+    return lookup_five_articles_mapping(
         session,
         scenario_id=scenario_id,
         enterprise_four_digit_code=enterprise_four_digit_code,
@@ -112,6 +122,124 @@ def _lookup(
         loan_direction_four_digit_code=loan_direction_four_digit_code,
         loan_direction_major_category_code=loan_direction_major_category_code,
     )
+
+
+@pytest.mark.parametrize(
+    "scenario_id",
+    (
+        "technology_finance",
+        "green_finance",
+        "digital_finance",
+        "pension_finance",
+    ),
+)
+def test_each_five_articles_scenario_hits_only_its_own_four_digit_mapping(
+    four_scenario_query_session: Session,
+    scenario_id: str,
+) -> None:
+    session = four_scenario_query_session
+    version = _add_version(
+        session,
+        scenario_id,
+        version_number=2_000_000_000,
+        rows=(
+            _mapping_row(
+                neic_code="2710",
+                neic_name="化学药品原料药制造",
+                subject=f"{scenario_id}主题",
+                tier1=f"{scenario_id}层级",
+                source_row=2,
+            ),
+        ),
+    )
+
+    result = _lookup(session, scenario_id)
+
+    assert result.status == "mapping_hit"
+    assert result.mapping_version_id == version.id
+    assert [label.scenario_id for label in result.loan_direction_labels] == [
+        scenario_id
+    ]
+    assert [label.subject for label in result.loan_direction_labels] == [
+        f"{scenario_id}主题"
+    ]
+
+
+def test_same_code_in_other_scenarios_is_never_used_as_a_mapping_fallback(
+    four_scenario_query_session: Session,
+) -> None:
+    session = four_scenario_query_session
+    suffix = uuid4().hex
+    requested_scenario = f"digital_finance_{suffix}"
+    other_scenarios = (
+        f"technology_finance_{suffix}",
+        f"green_finance_{suffix}",
+        f"pension_finance_{suffix}",
+    )
+    _add_version(
+        session,
+        requested_scenario,
+        rows=(
+            _mapping_row(
+                neic_code="3011",
+                neic_name="工业设备制造",
+                subject="数字场景非投向主题",
+                tier1="数字场景层级",
+                source_row=2,
+            ),
+        ),
+    )
+    for index, other_scenario in enumerate(other_scenarios, start=2):
+        _add_version(
+            session,
+            other_scenario,
+            rows=(
+                _mapping_row(
+                    neic_code="2710",
+                    neic_name="化学药品原料药制造",
+                    subject=f"其他场景主题{index}",
+                    tier1=f"其他场景层级{index}",
+                    source_row=2,
+                ),
+            ),
+        )
+
+    result = _lookup(session, requested_scenario)
+
+    assert result.status == "not_applicable"
+    assert result.loan_direction_labels == ()
+    assert all(
+        label.scenario_id == requested_scenario
+        for label in result.enterprise_labels
+    )
+
+
+def test_other_scenario_published_mapping_does_not_hide_missing_requested_version(
+    four_scenario_query_session: Session,
+) -> None:
+    session = four_scenario_query_session
+    suffix = uuid4().hex
+    requested_scenario = f"pension_finance_{suffix}"
+    _add_version(
+        session,
+        f"green_finance_{suffix}",
+        rows=(
+            _mapping_row(
+                neic_code="2710",
+                neic_name="化学药品原料药制造",
+                subject="绿色场景主题",
+                tier1="绿色场景层级",
+                source_row=2,
+            ),
+        ),
+    )
+
+    result = _lookup(session, requested_scenario)
+
+    assert result.status == "needs_review"
+    assert result.detail == "published_mapping_version_not_found"
+    assert result.mapping_version_id is None
+    assert result.loan_direction_labels == ()
 
 
 def test_lookup_queries_enterprise_and_loan_direction_sides_separately(

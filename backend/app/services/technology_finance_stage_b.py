@@ -9,10 +9,9 @@ import httpx
 from app.core.config import Settings
 from app.services.scenario_registry import (
     TECHNOLOGY_FINANCE_FIELD_SCHEMA,
-    TECHNOLOGY_FINANCE_SCENARIO,
 )
 from app.services.technology_finance_mapping_query import (
-    TechnologyFinanceMappingLabel,
+    FiveArticlesMappingLabel,
 )
 
 
@@ -106,8 +105,8 @@ class _EvidenceSource:
 def classify_technology_finance_stage_b(
     input_payload: Mapping[str, object],
     stage_a_result: StageAResult,
-    enterprise_labels: Sequence[TechnologyFinanceMappingLabel],
-    loan_direction_labels: Sequence[TechnologyFinanceMappingLabel],
+    enterprise_labels: Sequence[FiveArticlesMappingLabel],
+    loan_direction_labels: Sequence[FiveArticlesMappingLabel],
     settings: Settings,
     client: httpx.Client | None = None,
 ) -> TechnologyFinanceStageBResult:
@@ -176,8 +175,8 @@ def classify_technology_finance_stage_b(
 def _build_stage_b_request_payload(
     input_payload: Mapping[str, object],
     stage_a_snapshot: Mapping[str, object],
-    enterprise_labels: Sequence[TechnologyFinanceMappingLabel],
-    loan_direction_labels: Sequence[TechnologyFinanceMappingLabel],
+    enterprise_labels: Sequence[FiveArticlesMappingLabel],
+    loan_direction_labels: Sequence[FiveArticlesMappingLabel],
     model: str,
     *,
     same_code: bool,
@@ -251,8 +250,8 @@ def _build_stage_b_request_payload(
 def _validate_stage_b_model_response(
     response_payload: object,
     stage_a_snapshot: Mapping[str, object],
-    enterprise_labels: Sequence[TechnologyFinanceMappingLabel],
-    loan_direction_labels: Sequence[TechnologyFinanceMappingLabel],
+    enterprise_labels: Sequence[FiveArticlesMappingLabel],
+    loan_direction_labels: Sequence[FiveArticlesMappingLabel],
     business_sources: Mapping[str, _EvidenceSource],
     *,
     same_code: bool,
@@ -345,7 +344,7 @@ def _validate_stage_b_model_response(
 
 def _validate_label_outputs(
     raw_labels: object,
-    expected_labels: Sequence[TechnologyFinanceMappingLabel],
+    expected_labels: Sequence[FiveArticlesMappingLabel],
     business_sources: Mapping[str, _EvidenceSource],
 ) -> tuple[dict[str, object], ...]:
     if not isinstance(raw_labels, list):
@@ -403,7 +402,7 @@ def _validate_label_outputs(
 
 def _validate_single_label_basis(
     raw_basis: object,
-    expected_labels: Sequence[TechnologyFinanceMappingLabel],
+    expected_labels: Sequence[FiveArticlesMappingLabel],
     business_sources: Mapping[str, _EvidenceSource],
 ) -> tuple[dict[str, object], ...]:
     if len(expected_labels) != 1:
@@ -455,7 +454,7 @@ def _validate_single_label_basis(
 
 def _validate_label_evidence_refs(
     raw_refs: object,
-    expected_label: TechnologyFinanceMappingLabel,
+    expected_label: FiveArticlesMappingLabel,
     business_sources: Mapping[str, _EvidenceSource],
     *,
     branch: str,
@@ -496,8 +495,8 @@ def _validate_label_evidence_refs(
 
 def _validate_consistency_output(
     raw_consistency: object,
-    enterprise_labels: Sequence[TechnologyFinanceMappingLabel],
-    loan_direction_labels: Sequence[TechnologyFinanceMappingLabel],
+    enterprise_labels: Sequence[FiveArticlesMappingLabel],
+    loan_direction_labels: Sequence[FiveArticlesMappingLabel],
     business_sources: Mapping[str, _EvidenceSource],
 ) -> tuple[
     TechnologyFinanceConsistencyStatus,
@@ -615,8 +614,8 @@ def _validate_consistency_output(
 
 
 def _validate_deterministic_labels(
-    enterprise_labels: Sequence[TechnologyFinanceMappingLabel],
-    loan_direction_labels: Sequence[TechnologyFinanceMappingLabel],
+    enterprise_labels: Sequence[FiveArticlesMappingLabel],
+    loan_direction_labels: Sequence[FiveArticlesMappingLabel],
     stage_a_snapshot: Mapping[str, object],
 ) -> None:
     if not loan_direction_labels:
@@ -629,6 +628,14 @@ def _validate_deterministic_labels(
         raise TechnologyFinanceStageBError(
             "all deterministic labels must use one positive mapping_version_id"
         )
+    scenario_ids = {label.scenario_id for label in all_labels}
+    if (
+        len(scenario_ids) != 1
+        or not next(iter(scenario_ids)).strip()
+    ):
+        raise TechnologyFinanceStageBError(
+            "all deterministic labels must use one non-empty scenario_id"
+        )
     for side, labels in (
         ("enterprise", enterprise_labels),
         ("loan_direction", loan_direction_labels),
@@ -637,10 +644,6 @@ def _validate_deterministic_labels(
         if len(keys) != len(set(keys)):
             raise TechnologyFinanceStageBError(
                 f"{side} deterministic labels contain duplicates"
-            )
-        if any(label.scenario_id != TECHNOLOGY_FINANCE_SCENARIO for label in labels):
-            raise TechnologyFinanceStageBError(
-                f"{side} labels must belong to technology_finance"
             )
     same_code = (
         stage_a_snapshot["enterprise_neic_code"]
@@ -750,7 +753,7 @@ def _validate_business_ref(
     }
 
 
-def _serialize_label(label: TechnologyFinanceMappingLabel) -> dict[str, object]:
+def _serialize_label(label: FiveArticlesMappingLabel) -> dict[str, object]:
     return {
         "mapping_version_id": label.mapping_version_id,
         "source_row": label.source_row,
@@ -762,7 +765,7 @@ def _serialize_label(label: TechnologyFinanceMappingLabel) -> dict[str, object]:
 
 
 def _mapping_evidence_ref(
-    label: TechnologyFinanceMappingLabel,
+    label: FiveArticlesMappingLabel,
 ) -> dict[str, object]:
     return {
         "type": "mapping",
@@ -775,7 +778,7 @@ def _mapping_evidence_ref(
 
 
 def _consistency_label_ref(
-    label: TechnologyFinanceMappingLabel, side: str
+    label: FiveArticlesMappingLabel, side: str
 ) -> dict[str, object]:
     return {
         "type": "label",
@@ -789,7 +792,7 @@ def _consistency_label_ref(
 
 
 def _label_key_from_label(
-    label: TechnologyFinanceMappingLabel,
+    label: FiveArticlesMappingLabel,
 ) -> tuple[object, ...]:
     return (
         label.mapping_version_id,
@@ -823,7 +826,7 @@ def _label_key_from_output(
     )
 
 
-def _mapping_key(label: TechnologyFinanceMappingLabel) -> tuple[object, ...]:
+def _mapping_key(label: FiveArticlesMappingLabel) -> tuple[object, ...]:
     return (
         label.mapping_version_id,
         label.source_row,
@@ -853,8 +856,8 @@ def _mapping_ref_key(
 
 
 def _labels_intersect(
-    enterprise_labels: Sequence[TechnologyFinanceMappingLabel],
-    loan_direction_labels: Sequence[TechnologyFinanceMappingLabel],
+    enterprise_labels: Sequence[FiveArticlesMappingLabel],
+    loan_direction_labels: Sequence[FiveArticlesMappingLabel],
 ) -> bool:
     enterprise_taxonomies = {
         (label.subject, label.taxonomy_path) for label in enterprise_labels

@@ -9,7 +9,7 @@ from app.services.technology_finance_label_selection import (
     TechnologyFinanceLabelSelectionError,
     select_most_matching_technology_finance_label,
 )
-from app.services.technology_finance_mapping_query import TechnologyFinanceMappingLabel
+from app.services.technology_finance_mapping_query import FiveArticlesMappingLabel
 
 
 def _settings() -> Settings:
@@ -53,8 +53,8 @@ def _label(
     source_row: int,
     code: str = "2710",
     name: str = "化学药品原料药制造",
-) -> TechnologyFinanceMappingLabel:
-    return TechnologyFinanceMappingLabel(
+) -> FiveArticlesMappingLabel:
+    return FiveArticlesMappingLabel(
         mapping_version_id=7,
         scenario_id="technology_finance",
         neic_code=code,
@@ -69,7 +69,7 @@ def _label(
     )
 
 
-def _candidates() -> tuple[TechnologyFinanceMappingLabel, ...]:
+def _candidates() -> tuple[FiveArticlesMappingLabel, ...]:
     return (
         _label(subject="高技术产业（制造业）", tier1="医药制造业", source_row=11),
         _label(subject="国家科技重大项目", tier1="重大新药创制", source_row=22),

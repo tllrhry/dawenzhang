@@ -19,8 +19,8 @@ from app.services.technology_finance_classification_workflow import (
     reclassify_technology_finance_case,
 )
 from app.services.technology_finance_mapping_query import (
-    TechnologyFinanceMappingLabel,
-    TechnologyFinanceMappingLookupResult,
+    FiveArticlesMappingLabel,
+    FiveArticlesMappingLookupResult,
 )
 from app.services.technology_finance_stage_b import (
     TechnologyFinanceStageBError,
@@ -119,8 +119,8 @@ def _mapping_result(
     mapping_version_id: int,
     *,
     status: str = "mapping_hit",
-) -> TechnologyFinanceMappingLookupResult:
-    label = TechnologyFinanceMappingLabel(
+) -> FiveArticlesMappingLookupResult:
+    label = FiveArticlesMappingLabel(
         mapping_version_id=mapping_version_id,
         scenario_id="technology_finance",
         neic_code="2710",
@@ -133,7 +133,7 @@ def _mapping_result(
         tier4=None,
         source_row=12,
     )
-    return TechnologyFinanceMappingLookupResult(
+    return FiveArticlesMappingLookupResult(
         status=status,  # type: ignore[arg-type]
         mapping_version_id=mapping_version_id,
         mapping_version=1,
@@ -341,9 +341,9 @@ def test_uncompleted_stage_a_short_circuits_without_mapping_or_stage_b(
 
 def _multi_subject_labels(
     mapping_version_id: int,
-) -> tuple[TechnologyFinanceMappingLabel, ...]:
+) -> tuple[FiveArticlesMappingLabel, ...]:
     return (
-        TechnologyFinanceMappingLabel(
+        FiveArticlesMappingLabel(
             mapping_version_id=mapping_version_id,
             scenario_id="technology_finance",
             neic_code="2710",
@@ -356,7 +356,7 @@ def _multi_subject_labels(
             tier4=None,
             source_row=11,
         ),
-        TechnologyFinanceMappingLabel(
+        FiveArticlesMappingLabel(
             mapping_version_id=mapping_version_id,
             scenario_id="technology_finance",
             neic_code="2710",
@@ -379,7 +379,7 @@ def test_multiple_candidates_are_narrowed_to_one_before_stage_b(
 ) -> None:
     session, case, mapping_version = workflow_context
     candidates = _multi_subject_labels(mapping_version.id)
-    mapping_result = TechnologyFinanceMappingLookupResult(
+    mapping_result = FiveArticlesMappingLookupResult(
         status="mapping_hit",
         mapping_version_id=mapping_version.id,
         mapping_version=1,
@@ -444,7 +444,7 @@ def test_same_code_narrows_enterprise_side_to_the_same_winner(
 ) -> None:
     session, case, mapping_version = workflow_context
     candidates = _multi_subject_labels(mapping_version.id)
-    mapping_result = TechnologyFinanceMappingLookupResult(
+    mapping_result = FiveArticlesMappingLookupResult(
         status="mapping_hit",
         mapping_version_id=mapping_version.id,
         mapping_version=1,

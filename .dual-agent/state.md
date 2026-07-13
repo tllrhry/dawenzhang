@@ -35,7 +35,8 @@
 - ✅ Task 2.2：科技金融 Word 解析与案例创建已抽取为 profile 驱动的通用五篇摄取器；绿色、数字、养老正式三列表格可按各自 schema 摄取，第三列提示不入库，缺失/重复/无法识别均在写库前失败；科技金融原段落与三列表格入口保留兼容包装。
 - ✅ Task 2.3：通用场景案例上传与详情已按 workflow 注册处理器分派；可执行 profile 使用当前场景 schema 完整摄取并返回案例输入，unknown/coming_soon 在处理器与摄取前拒绝，scenario/case 错配在详情处理器前拒绝；四场景契约、普惠/未知负例、错配和国民经济旧端点回归通过，三个新场景生产状态仍保持 `coming_soon`。
 - ✅ Task 3.1：科技金融映射同步器已抽取为 profile 驱动的通用五篇映射同步器；通用命令按 `scenario_id` 解析 profile 与资产路径，科技金融旧命令保留兼容。源哈希幂等、2/4 位规范化、同粒度目录校验、完全重复、invalid 报告和原子发布保持不变；绿色、数字、养老各覆盖有效发布、同源复用、代码不存在、名称冲突、完全重复和类别错配，科技金融同步回归通过。
-- ⏭️ 下一步：执行 task 3.2，将映射查询类型与实现通用化并建立四场景查询隔离 gate；修改任何符号前先做 GitNexus upstream impact，HIGH/CRITICAL 先暂停报告。
+- ✅ Task 3.2：映射标签、查询结果与查询入口已通用化为 `FiveArticles*`，通用入口强制显式接收 `scenario_id`，科技金融旧名保留兼容；查询只选择当前场景最新 published 版本并同时约束版本/行场景，既有显式 4/2 位、完整路径去重、同主题祖先剔除、not_applicable/needs_review 语义保持不变。四场景命中、同 code 跨场景不命中/不兜底及 Stage B 同场景一致性 gate 已建立，定向 58 tests 与统一 runner PASS。
+- ⏭️ 下一步：执行 task 3.3，使用正式同步命令分别预检并发布绿色、数字、养老映射，核对 validation report、published 行数、source_hash 和场景隔离；修改任何符号前先做 GitNexus upstream impact，HIGH/CRITICAL 先暂停报告。
 - 📌 映射资产表头已由 task 1.2 gate 锁定为绿8列/数·养7列；行数与哈希由 gate 动态报告，不在测试中锁死。模板字段数由 task 1.1 gate 锁定为绿20/数18/养18。
 
 ## 常驻注意事项

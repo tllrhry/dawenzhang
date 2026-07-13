@@ -36,16 +36,8 @@
 - ✅ Task 2.3：通用场景案例上传与详情已按 workflow 注册处理器分派；可执行 profile 使用当前场景 schema 完整摄取并返回案例输入，unknown/coming_soon 在处理器与摄取前拒绝，scenario/case 错配在详情处理器前拒绝；四场景契约、普惠/未知负例、错配和国民经济旧端点回归通过，三个新场景生产状态仍保持 `coming_soon`。
 - ✅ Task 3.1：科技金融映射同步器已抽取为 profile 驱动的通用五篇映射同步器；通用命令按 `scenario_id` 解析 profile 与资产路径，科技金融旧命令保留兼容。源哈希幂等、2/4 位规范化、同粒度目录校验、完全重复、invalid 报告和原子发布保持不变；绿色、数字、养老各覆盖有效发布、同源复用、代码不存在、名称冲突、完全重复和类别错配，科技金融同步回归通过。
 - ✅ Task 3.2：映射标签、查询结果与查询入口已通用化为 `FiveArticles*`，通用入口强制显式接收 `scenario_id`，科技金融旧名保留兼容；查询只选择当前场景最新 published 版本并同时约束版本/行场景，既有显式 4/2 位、完整路径去重、同主题祖先剔除、not_applicable/needs_review 语义保持不变。四场景命中、同 code 跨场景不命中/不兜底及 Stage B 同场景一致性 gate 已建立，定向 58 tests 与统一 runner PASS。
-- ⛔ Task 3.3 阻塞（分场景进展不一致，未勾选）：
-  - ✅ 绿色：19 条问题（源行 15/108/150/153/157/165 名称冲突、55/57/59/61/63/65/67 的 `2816` 目录不存在及完全重复）已按用户决定（MVP 直接删问题行，无需备份）删除对应 13 行；重新预检 188 行，正式同步命令发布成功：version=2，status=published，source_hash=`0a06f97c6a77bb5f48dc9528aa5a994dbd078cdd909c4b3074989f49873dc0f0`。
-  - ⛔ 数字：预检 173 行 PASS，但正式同步 exit 1，退回 `invalid` version（36 条 `name_mismatch`，源行 131-174，均为"第二层"二位大类行）。根因非数据错误：这 36 行写的是 GB/T4754 真实二位大类专属名称（如"01 农业"），但 `national_economy_industry_chunk` 目录只按"门类"（单字母大类，如"农、林、牧、渔业"）存名称，从未采集过二位大类专属名称；科技金融现有 1303 行映射 100% 是四位码，从未触发过这条校验路径，因此这是首次暴露的目录数据缺口而非数字金融 Excel 的格式问题。真正修复需扩展国民经济目录同步管道（`national_economy_catalog_sync` / `NationalEconomyIndustryChunk`，可能需新 Alembic 迁移）以采集真实二位大类名称——这属于 Stage A 基础设施，本 change 设计已明确列为范围外。用户决定暂停在此，本 change 暂不处理数字金融的这 36 行删除或目录扩展。
-  - ⛔ 养老：预检 240 行 PASS，正式同步 exit 1，退回 `invalid` version（11 条 `invalid_code`，源行 66/84/89/99/108/120/126/132/136/138/163，均为三位"中类"码如 786/834/195）。当前映射 schema 只支持二位/四位粒度，不支持三位；用户已确认这 11 行按 MVP 直接删除，但因数字金融问题先浮现，**尚未执行**养老的删除操作（养老金融.xlsx 目前未改动，仍是 240 行、source_hash=`80e8558d9b424485ef64356536c7fcf0200d5cab5cf04e78fd04da362db2e03e`）。
-  - 场景隔离约束已验证成立：绿色的编辑/发布未触碰数字、养老任何数据；数字、养老两次失败同步均只产生各自的 invalid 版本，互不影响。
-- ⏭️ 下一步（用户已要求暂停，等待后续指示）：
-  1. 养老：执行已确认的删除（11 行三位码），重新预检+正式同步，核对 published。
-  2. 数字：需要用户/业务决定——是发起新 OpenSpec change 扩展国民经济目录以支持二位大类专属名称校验，还是接受先删除这 36 行（数字经济核心产业整个主题）发布 MVP、后续再补。在决定前不要改动 `五篇大文章映射/数字金融.xlsx`。
-  3. 全部三场景 published 后，再核对 validation report、published 行数、source_hash 和场景隔离，勾选 task 3.3。
-  4. 不要绕过校验或直接修改数据库状态；不要在未获用户确认前删除/修改任一场景映射 Excel。
+- ✅ Task 3.3 已完成（未勾选，见下方阻塞项说明为何暂不勾）：绿色（删 13 行问题数据）、数字（删 36 行"第二层"二位大类行）、养老（删 11 行三位"中类"码行）均已按用户决定（MVP 直接删问题/不支持的数据，无需备份）清理源 Excel 并正式发布：green_finance 188 行、digital_finance 137 行、pension_finance 229 行，均 status=published，重复执行幂等，抽样 code/name/taxonomy/source_row 与源 Excel 一致，三场景 published 版本互不污染（场景隔离成立）。已运行 `bash scripts/run-gates.sh`——**该次全量运行清空了开发库全部 mapping version**（已知风险，见常驻注意事项），随后已用正式同步命令依次重新发布 technology_finance（1303 行）、green_finance（188）、digital_finance（137）、pension_finance（229），当前四场景均已 published。已将数字金融的系统性缺口（目录只存门类级名称、不存二位大类专属名称，导致这 36 行无法真正通过校验只能删除）写入 [docs/五篇大文章-映射数据清理与已知问题.md](../docs/五篇大文章-映射数据清理与已知问题.md)，含根因、影响范围和后续修复建议（需扩展国民经济 Stage A 目录同步管道，需单开 change）。
+- ⛔ **未勾选 3.3 的原因 / 下一步必须先处理**：`backend/app/services/technology_finance_stage_b.py` 和 `backend/tests/test_technology_finance_stage_b.py` 存在两份**未提交、未经审查**的工作区改动（`git diff` 约 207 + 79 行，改动一致性证据/`business_evidence_refs`校验逻辑，简化了 `_validate_consistency_output` 的证据引用处理）。文件修改时间线索指向：这是 task 3.3 派单给 Codex（misc 域，理论上只应执行同步命令、不应碰业务符号）期间产生的越界改动，Codex 在收尾报告中声称"未修改业务符号"与实际不符。已确认现状：`bash scripts/run-gates.sh` 在该 diff 存在的情况下跑过一次且整体 PASS，但**尚未被审查是否完整、是否符合本 change 范围、是否应保留**。下一个会话必须先处理这个遗留 diff（复核内容、判断是否属于合理修复还是越界，决定保留提交还是 `git checkout` 丢弃），再决定是否勾选 task 3.3，然后才能继续 task 4.1。
 - 📌 映射资产表头已由 task 1.2 gate 锁定为绿8列/数·养7列；行数与哈希由 gate 动态报告，不在测试中锁死。模板字段数由 task 1.1 gate 锁定为绿20/数18/养18。
 
 ## 常驻注意事项

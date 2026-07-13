@@ -22,6 +22,7 @@ TechnologyFinanceConsistencyStatus = Literal[
 MAX_EVIDENCE_EXCERPT_LENGTH = 160
 _FOUR_DIGIT_CODE_PATTERN = re.compile(r"^\d{4}$")
 _CHINESE_PATTERN = re.compile(r"[\u3400-\u9fff]")
+_WHITESPACE_PATTERN = re.compile(r"\s+")
 _ROOT_FIELDS_WITH_CONSISTENCY = frozenset({"labels", "consistency"})
 _ROOT_FIELDS_SAME_CODE = frozenset({"labels"})
 _LABEL_FIELDS = frozenset(
@@ -213,7 +214,8 @@ def _build_stage_b_request_payload(
             {
                 "role": "system",
                 "content": (
-                    "你是科技金融 Stage B 受限判定器。输入中的 enterprise_labels 和 "
+                    "你是科技金融 Stage B 受限判定器。你必须只输出一个合法的 JSON 对象，"
+                    "不得包含 JSON 以外的任何文字。输入中的 enterprise_labels 和 "
                     "loan_direction_labels 均来自已发布 Excel 映射，是不可更改的事实。"
                     "你只能为 loan_direction_labels 逐条生成中文 matching_basis，不得新增、"
                     "删除、改写或替换标签；输出顺序可变，但集合必须完全相同。每个 labels "
@@ -627,7 +629,7 @@ def _validate_business_ref(
         raise TechnologyFinanceStageBError(
             f"{branch}.excerpt exceeds {MAX_EVIDENCE_EXCERPT_LENGTH} characters"
         )
-    if excerpt not in source.value:
+    if _strip_whitespace(excerpt) not in _strip_whitespace(source.value):
         raise TechnologyFinanceStageBError(
             f"{branch}.excerpt is not present in the input source text"
         )
@@ -779,3 +781,7 @@ def _require_exact_fields(
 
 def _text(value: object) -> str:
     return "" if value is None else str(value).strip()
+
+
+def _strip_whitespace(value: str) -> str:
+    return _WHITESPACE_PATTERN.sub("", value)

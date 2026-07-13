@@ -5,24 +5,26 @@
 
 ## 快照
 
-- 更新时间：2026-07-12 · 更新 Agent：Claude · 协议：`.dual-agent/core.md` + `.dual-agent/loop.md`
+- 更新时间：2026-07-13 · 更新 Agent：Codex · 协议：`.dual-agent/core.md` + `.dual-agent/loop.md`
 - Codex 入口：`codex-pro` MCP（Pro，CODEX_HOME=`~/.codex-pro`，默认 `model: gpt-5.6-sol`）。稳定连通命令：`~/Applications/codex-pro.app/Contents/Resources/codex -m gpt-5.6-sol -c model_reasoning_effort=medium mcp-server`。默认 `codex` MCP=Plus 仅备用。
 
-## 当前 change：`refine-national-economy-loan-direction-evidence-fusion`
+## 当前 change：`add-five-major-articles-technology-finance`
 
-- **目标**：判贷款真实投向。三级优先级 **贷款用途 > 贸易合同 > 授信审批**，**冲突以贸易合同为准**（受托支付下钱直接买合同标的物，反映真实流向）；要求**证据融合 + LLM 仲裁，明确否决布尔式逐级降级**（用途几乎永远可用，严格降级会永远停第一级）。
-- **起因**：投向信号原只来自「贷款用途详细描述」——`retrieve_loan_direction_evidence` 只用贷款用途层召回、提示词决策树只围绕用途 vs 主营/经营范围；「贸易合同核心交易品类」第 2 层完全没进投向候选、「授信审批意见」随第 3 层进召回但提示词未当辅助证据用。
-- **范围外**：企业轴、一致性标记语义（投向码==企业码字面相等）、死代码 `decide_loan_direction`。
-- **3 任务**：1.1 检索追加贸易合同召回并入投向候选 + 放宽跳过条件；2.1 提示词三级融合仲裁 + 贸易合同优先冲突 + 「为主营采购投入不改判」原则 + matching_basis 指明判定证据；3.1 真实闭环（背离样例投向跟随贸易合同 + 授信审批样例 + 养老/大米基准回归）。
-- OpenSpec 已起草并通过 `--strict`。
+- **目标**：五篇大文章先落地科技金融闭环。上传科技金融 Word 后先独立完成 Stage A 国民经济分类，再以科技金融 Excel 的 code/name 关系做确定性多标签映射，生成结构化匹配依据，并展示“贷款对应的五篇大文章类别与企业类别是否一致”的三态判断。
+- **关键边界**：Stage A 不改逻辑且独立提交；Stage B 绑定 `stage_a_result_id` 独立重试。首期只用现有科技金融模板与科技金融映射，不改其他四篇资产、不引入五篇映射向量库、不开放其他场景。
+- **映射口径**：同步时以国民经济目录校验同粒度 code/name；运行时匹配 Excel 显式四位行及显式二位大类行；多标签全部输出并保留 mapping version/source row，并按「同主题最具体者优先」剔除同主题祖先大类标签（大类标签仅在该主题无更具体四位命中时作兜底——Claude 终审提出、用户已确认）。正常未命中按 `not_applicable=不属于科技金融`（Claude 终审复核确认正确），数据冲突/证据不足才 needs_review。
+- **一致性**：`consistent / inconsistent / needs_review`，不得因两码不同或有研发资质直接下结论；匹配依据与一致性均保存映射证据、业务字段 key/标签/原文摘录。
+- OpenSpec 已完成业务评审修订并通过 strict validation；实现已完成 task 1.1。
 
 ## 当前阶段与下一步
 
-- ✅ **全 3 任务完成并 commit：1.1（`dbfe164`）/2.1（`bfdfaec`）/3.1 fixtures（`547f13e`）**（明细见 loop-log）。**本 change 已收尾，等用户验收后归档**（`openspec/changes/archive/2026-07-12-refine-national-economy-loan-direction-evidence-fusion`）。三单未 push origin/main（`4278367..547f13e` 待推）。
-- ✅ **3.1 真实云端闭环（Claude 直接执行，四场景全通过）**：①「用途与贸易合同背离」机床企业服装贸易（案例 704）——用途「补充经营流动资金」笼统，贸易合同核心品类=服装批发→企业 3421 金属切削机床制造（88% 主导锁定+定义命中）、**投向 5132 服装批发（未回落企业结论，融合正确跟随贸易合同真实流向）、matches=false、依据全中文直接指明「据贸易合同判定资金真实流向为服装批发…命中 5132 包括…」、按经销商=批发**；②「授信审批限定投向」（案例 707）——用途「补充流动资金」笼统+贸易合同「无」+授信审批「专款专用只可用于采购服装批发」→投向 5132 服装批发、matches=false、依据指明依据授信审批，**验证 1.1 授信审批跳过放宽（候选池经含授信审批文本的贷款用途层召回出 5132）**；③养老（705）笼统用途→回落 8514 养老服务 matches=true（主导锁定+授信审批佐证属主营，未劣化）；④大米（706）用途收购大米属主营→回落 5121 米面制品及食用油批发 matches=true（definition-grounded 批发未回退零售、演示「为主营采购投入不改判」，未劣化）。Excel 导出（704）三工作表当前结论+判定历史均含贷款投向代码 `F51-F5132 服装批发`+投向依据+一致性「不一致」。全 gates：后端 145 passed、前端 tsc+build PASS、run-gates OVERALL PASS、strict valid。dev 库遗留验证案例 703-707（未清；703 为汽配坏样例已弃、docx 已删）。**初次曾选「汽车零配件批发」作背离 B，实测发现 GB/T 4754 无该四位码（只有 5263 汽车零配件零售、5173 摩托车零配件批发）→改用有干净码的 5132 服装批发重跑；期间证实融合逻辑本身在坏样例上也正确（模型正确跟随贸易合同判服装/汽配批发、正确排除零售），no_match 仅因目标码不存在。**
-- 上一个 change `refine-...-basis-code-and-dominant-main-business`（大类-小类显示码 + 主营锁定 + 依据全中文，全 7 任务已 commit）**等用户验收后归档**（`openspec/changes/archive/2026-07-12-...`）。`definition-grounded` change 已全部收尾归档并 push origin/main（`60ab394..4278367`）。
+- ✅ 需求、源文件小样本与现有事务边界已评审；OpenSpec proposal/design/specs/tasks 已按评审结论收敛为科技金融首期。
+- ✅ Task 1.1：新增 `technology_finance` 场景注册与 20 字段 schema（Stage A 既有 13 字段 + 科技金融附加 7 字段），模板路径只经 `Settings.technology_finance_template_path` 读取；现有模板两处 Stage A 标签差异登记为别名。
+- ✅ 验证：增量 9 passed；后端全量 150 passed；统一 runner 后端/前端均 PASS；GitNexus `detect_changes` 为 LOW、无受影响执行流程。
+- ⏭️ 下一步：task 1.2 科技金融 Word 摄取与按场景 schema 返回案例详情；修改符号前仍须先跑 GitNexus upstream impact。
+- 📦 上一个 `refine-national-economy-loan-direction-evidence-fusion` 已完成并 commit（`dbfe164`/`bfdfaec`/`547f13e`），仍待用户验收后归档；`4278367..547f13e` 尚未 push origin/main。
 
 ## 常驻注意事项
 
 - 📌 dev 库遗留验证案例未清（大米/养老等历史连跑残留）；真实联调需 db 容器 + 后端起 + 已同步目录 + 真实云端密钥，dev 走 vite proxy 或 `VITE_API_BASE_URL`。
-- 📌 `contracts.md`/`env-diff.md` 仍空，待真实契约/差异出现再填。openspec/ 已 gitignore 并取消跟踪（本地保留供双 Agent 流程）；密钥仅存本地 `.env`，从未上云。
+- 📌 `contracts.md` 已登记 Stage A 独立提交与按场景 schema 展示/导出两条待建 gate；`env-diff.md` 仍空。openspec/ 已 gitignore 并取消跟踪（本地保留供双 Agent 流程）；密钥仅存本地 `.env`，从未上云。

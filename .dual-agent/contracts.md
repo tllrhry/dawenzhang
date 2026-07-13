@@ -16,7 +16,8 @@
 
 | 契约 | 机器强制点（gate 在哪） | 命中触发（改到这个就查本行） | 状态 |
 |---|---|---|---|
-| _（暂无，待真实发现后逐行填）_ | | | |
+| 复用 `national_economy_classification_workflow.classify_case` 的组合工作流必须把 Stage A 视为已独立提交，固定并持久化 `stage_a_result_id`；下游失败不得假设可回滚 Stage A，无异议重试不得重复生成 Stage A 版本 | `add-five-major-articles-technology-finance` task 3.3：待建 workflow 测试（Stage B 失败保留 Stage A、重试版本不增加、异议才生成新版本） | 新增/修改任何复用 `classify_case` 的复合分类工作流 | ⏳待建 |
+| 多场景案例详情、前端展示和导出必须按场景注册的字段 schema 枚举字段，不得继续写死国民经济 `FIELD_LABELS` 导致场景附加字段丢失 | `add-five-major-articles-technology-finance` task 1.2/4.1/4.2：待建 API 与导出测试（科技金融全部字段可读/可导出，国民经济回归不变） | 新增场景、修改案例响应、输入展示或案例导出 | ⏳待建 |
 
 ## 维护规则
 - **新发现一条横切契约**（周期性体检 / 评审中撞见）→ 加一行，状态先标「无 gate=挂账」，再排是否 gate 化。

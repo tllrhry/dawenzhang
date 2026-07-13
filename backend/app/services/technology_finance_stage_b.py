@@ -1,0 +1,781 @@
+import json
+import re
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from typing import Literal, Protocol
+
+import httpx
+
+from app.core.config import Settings
+from app.services.scenario_registry import (
+    TECHNOLOGY_FINANCE_FIELD_SCHEMA,
+    TECHNOLOGY_FINANCE_SCENARIO,
+)
+from app.services.technology_finance_mapping_query import (
+    TechnologyFinanceMappingLabel,
+)
+
+
+TechnologyFinanceConsistencyStatus = Literal[
+    "consistent", "inconsistent", "needs_review"
+]
+MAX_EVIDENCE_EXCERPT_LENGTH = 160
+_FOUR_DIGIT_CODE_PATTERN = re.compile(r"^\d{4}$")
+_CHINESE_PATTERN = re.compile(r"[\u3400-\u9fff]")
+_ROOT_FIELDS_WITH_CONSISTENCY = frozenset({"labels", "consistency"})
+_ROOT_FIELDS_SAME_CODE = frozenset({"labels"})
+_LABEL_FIELDS = frozenset(
+    {
+        "mapping_version_id",
+        "source_row",
+        "NEIC_Code",
+        "NEIC_Name",
+        "subject",
+        "taxonomy_path",
+        "matching_basis",
+        "evidence_refs",
+    }
+)
+_MAPPING_EVIDENCE_FIELDS = frozenset(
+    {
+        "type",
+        "mapping_version_id",
+        "source_row",
+        "NEIC_Code",
+        "NEIC_Name",
+        "taxonomy_path",
+    }
+)
+_BUSINESS_EVIDENCE_FIELDS = frozenset(
+    {"type", "field_key", "field_label", "excerpt"}
+)
+_LABEL_EVIDENCE_FIELDS = frozenset(
+    {
+        "type",
+        "side",
+        "mapping_version_id",
+        "source_row",
+        "NEIC_Code",
+        "NEIC_Name",
+        "taxonomy_path",
+    }
+)
+_CONSISTENCY_FIELDS = frozenset({"status", "basis", "evidence_refs"})
+_CONSISTENCY_STATUSES = frozenset(
+    {"consistent", "inconsistent", "needs_review"}
+)
+
+
+class StageAResult(Protocol):
+    id: int
+    industry_code: str | None
+    industry_major_code: str | None
+    industry_name: str | None
+    rationale: str | None
+    loan_industry_code: str | None
+    loan_industry_major_code: str | None
+    loan_industry_name: str | None
+    loan_matching_basis: str | None
+
+
+class TechnologyFinanceStageBError(RuntimeError):
+    """Raised when Stage B cannot produce a grounded constrained decision."""
+
+
+@dataclass(frozen=True)
+class TechnologyFinanceStageBResult:
+    labels: tuple[dict[str, object], ...]
+    consistency_status: TechnologyFinanceConsistencyStatus
+    consistency_basis: str
+    consistency_evidence_refs: tuple[dict[str, object], ...]
+    model_output: dict[str, object]
+
+
+@dataclass(frozen=True)
+class _EvidenceSource:
+    field_key: str
+    field_label: str
+    value: str
+
+
+def classify_technology_finance_stage_b(
+    input_payload: Mapping[str, object],
+    stage_a_result: StageAResult,
+    enterprise_labels: Sequence[TechnologyFinanceMappingLabel],
+    loan_direction_labels: Sequence[TechnologyFinanceMappingLabel],
+    settings: Settings,
+    client: httpx.Client | None = None,
+) -> TechnologyFinanceStageBResult:
+    """Generate and strictly validate matching bases for a mapping-hit Stage B."""
+    enterprise_snapshot = tuple(enterprise_labels)
+    loan_snapshot = tuple(loan_direction_labels)
+    stage_a_snapshot = _serialize_stage_a_result(stage_a_result)
+    _validate_deterministic_labels(
+        enterprise_snapshot,
+        loan_snapshot,
+        stage_a_snapshot,
+    )
+    business_sources = _build_business_sources(input_payload, stage_a_snapshot)
+    same_code = (
+        stage_a_snapshot["enterprise_neic_code"]
+        == stage_a_snapshot["loan_neic_code"]
+    )
+    request_payload = _build_stage_b_request_payload(
+        input_payload,
+        stage_a_snapshot,
+        enterprise_snapshot,
+        loan_snapshot,
+        settings.deepseek_model,
+        same_code=same_code,
+    )
+
+    if not settings.deepseek_api_key:
+        raise TechnologyFinanceStageBError(
+            "DEEPSEEK_API_KEY is required for technology-finance Stage B"
+        )
+
+    owns_client = client is None
+    http_client = client or httpx.Client(
+        base_url=settings.deepseek_base_url.rstrip("/"),
+        timeout=httpx.Timeout(
+            settings.deepseek_timeout_seconds,
+            connect=settings.http_connect_timeout_seconds,
+        ),
+    )
+    try:
+        response = http_client.post(
+            "/chat/completions",
+            headers={"Authorization": f"Bearer {settings.deepseek_api_key}"},
+            json=request_payload,
+        )
+        response.raise_for_status()
+        return _validate_stage_b_model_response(
+            response.json(),
+            stage_a_snapshot,
+            enterprise_snapshot,
+            loan_snapshot,
+            business_sources,
+            same_code=same_code,
+        )
+    except TechnologyFinanceStageBError:
+        raise
+    except (httpx.HTTPError, json.JSONDecodeError, TypeError, ValueError, KeyError) as exc:
+        raise TechnologyFinanceStageBError(
+            f"DeepSeek technology-finance Stage B failed: {exc}"
+        ) from exc
+    finally:
+        if owns_client:
+            http_client.close()
+
+
+def _build_stage_b_request_payload(
+    input_payload: Mapping[str, object],
+    stage_a_snapshot: Mapping[str, object],
+    enterprise_labels: Sequence[TechnologyFinanceMappingLabel],
+    loan_direction_labels: Sequence[TechnologyFinanceMappingLabel],
+    model: str,
+    *,
+    same_code: bool,
+) -> dict[str, object]:
+    field_payload = [
+        {"field_key": field.key, "field_label": field.label, "value": value}
+        for field in TECHNOLOGY_FINANCE_FIELD_SCHEMA
+        if (value := _text(input_payload.get(field.key)))
+    ]
+    prompt_input = {
+        "template_fields": field_payload,
+        "stage_a_result": dict(stage_a_snapshot),
+        "enterprise_labels": [_serialize_label(label) for label in enterprise_labels],
+        "loan_direction_labels": [
+            _serialize_label(label) for label in loan_direction_labels
+        ],
+        "same_four_digit_code": same_code,
+        "max_excerpt_length": MAX_EVIDENCE_EXCERPT_LENGTH,
+    }
+    consistency_instruction = (
+        "企业四位码与投向四位码相同，一致性由服务端确定为 consistent；"
+        "根对象只能返回 labels，不得返回 consistency。"
+        if same_code
+        else (
+            "两码不同，根对象必须返回 labels 和 consistency。consistency 只能包含 "
+            "status、basis、evidence_refs。status 只能是 consistent、inconsistent 或 "
+            "needs_review：企业和投向标签存在交集且资金服务企业现有主营或科技活动才可"
+            "为 consistent；标签无交集或资金明确流向无关独立活动可为 inconsistent；"
+            "企业侧未命中、用途笼统、证据冲突或不足必须为 needs_review。不得仅凭两码"
+            "不同判 inconsistent，也不得仅凭研发、专利或资质判 consistent。"
+        )
+    )
+    return {
+        "model": model,
+        "response_format": {"type": "json_object"},
+        "temperature": 0,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "你是科技金融 Stage B 受限判定器。输入中的 enterprise_labels 和 "
+                    "loan_direction_labels 均来自已发布 Excel 映射，是不可更改的事实。"
+                    "你只能为 loan_direction_labels 逐条生成中文 matching_basis，不得新增、"
+                    "删除、改写或替换标签；输出顺序可变，但集合必须完全相同。每个 labels "
+                    "元素只能包含 mapping_version_id、source_row、NEIC_Code、NEIC_Name、"
+                    "subject、taxonomy_path、matching_basis、evidence_refs。固定标签字段必须"
+                    "逐字复制输入。每标签 evidence_refs 至少一条 type=mapping 和一条 "
+                    "type=business。mapping 引用只能包含 type、mapping_version_id、source_row、"
+                    "NEIC_Code、NEIC_Name、taxonomy_path，且必须等于本标签映射源。business "
+                    "引用只能包含 type、field_key、field_label、excerpt；字段必须来自输入，"
+                    "label 必须匹配，excerpt 必须是对应 value 的原文子串且不超过输入规定"
+                    "长度。业务证据优先贷款用途、Stage A 贷款投向依据、核心交易品类和"
+                    "授信审批意见，再用主营、经营范围、研发知识产权或资质补充；不得捏造"
+                    "字段或摘录。matching_basis、consistency.basis 必须是非空中文。"
+                    "consistency 的 type=label 引用必须来自给定企业或投向标签，type=business "
+                    "引用遵循相同原文规则。consistent 或 inconsistent 必须同时引用企业标签、"
+                    "投向标签、贷款用途和 Stage A 贷款投向依据；证据不足时必须输出 "
+                    "needs_review。" + consistency_instruction
+                ),
+            },
+            {
+                "role": "user",
+                "content": json.dumps(prompt_input, ensure_ascii=False),
+            },
+        ],
+    }
+
+
+def _validate_stage_b_model_response(
+    response_payload: object,
+    stage_a_snapshot: Mapping[str, object],
+    enterprise_labels: Sequence[TechnologyFinanceMappingLabel],
+    loan_direction_labels: Sequence[TechnologyFinanceMappingLabel],
+    business_sources: Mapping[str, _EvidenceSource],
+    *,
+    same_code: bool,
+) -> TechnologyFinanceStageBResult:
+    try:
+        content = response_payload["choices"][0]["message"]["content"]
+    except (TypeError, KeyError, IndexError) as exc:
+        raise TechnologyFinanceStageBError(
+            "DeepSeek response is missing choices[0].message.content"
+        ) from exc
+    if not isinstance(content, str) or not content.strip():
+        raise TechnologyFinanceStageBError(
+            "DeepSeek Stage B response content must be non-empty"
+        )
+    try:
+        model_output = json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise TechnologyFinanceStageBError(
+            "DeepSeek Stage B response content is not valid JSON"
+        ) from exc
+    if not isinstance(model_output, dict):
+        raise TechnologyFinanceStageBError(
+            "DeepSeek Stage B model output must be a JSON object"
+        )
+    _require_exact_fields(
+        model_output,
+        _ROOT_FIELDS_SAME_CODE if same_code else _ROOT_FIELDS_WITH_CONSISTENCY,
+        "root",
+    )
+    labels = _validate_label_outputs(
+        model_output.get("labels"),
+        loan_direction_labels,
+        business_sources,
+    )
+
+    if same_code:
+        code = str(stage_a_snapshot["enterprise_neic_code"])
+        enterprise_name = str(stage_a_snapshot["enterprise_neic_name"])
+        loan_name = str(stage_a_snapshot["loan_neic_name"])
+        return TechnologyFinanceStageBResult(
+            labels=labels,
+            consistency_status="consistent",
+            consistency_basis=(
+                f"企业四位码与贷款投向四位码均为{code}，对应企业行业{enterprise_name}"
+                f"和投向行业{loan_name}，确定为一致。"
+            ),
+            consistency_evidence_refs=(
+                _stage_a_evidence_ref(
+                    "stage_a.industry_code", "Stage A 企业四位码", code
+                ),
+                _stage_a_evidence_ref(
+                    "stage_a.loan_industry_code", "Stage A 贷款投向四位码", code
+                ),
+            ),
+            model_output=model_output,
+        )
+
+    status, basis, refs = _validate_consistency_output(
+        model_output.get("consistency"),
+        enterprise_labels,
+        loan_direction_labels,
+        business_sources,
+    )
+    return TechnologyFinanceStageBResult(
+        labels=labels,
+        consistency_status=status,
+        consistency_basis=basis,
+        consistency_evidence_refs=refs,
+        model_output=model_output,
+    )
+
+
+def _validate_label_outputs(
+    raw_labels: object,
+    expected_labels: Sequence[TechnologyFinanceMappingLabel],
+    business_sources: Mapping[str, _EvidenceSource],
+) -> tuple[dict[str, object], ...]:
+    if not isinstance(raw_labels, list):
+        raise TechnologyFinanceStageBError("model output labels must be an array")
+    expected_by_key = {_label_key_from_label(label): label for label in expected_labels}
+    if len(raw_labels) != len(expected_by_key):
+        raise TechnologyFinanceStageBError("model output changed deterministic label count")
+
+    validated_by_key: dict[tuple[object, ...], dict[str, object]] = {}
+    for index, raw_label in enumerate(raw_labels):
+        if not isinstance(raw_label, dict):
+            raise TechnologyFinanceStageBError(
+                f"labels[{index}] must be a JSON object"
+            )
+        _require_exact_fields(raw_label, _LABEL_FIELDS, f"labels[{index}]")
+        key = _label_key_from_output(raw_label, f"labels[{index}]")
+        expected = expected_by_key.get(key)
+        if expected is None:
+            raise TechnologyFinanceStageBError(
+                f"labels[{index}] altered or invented a deterministic label"
+            )
+        if key in validated_by_key:
+            raise TechnologyFinanceStageBError(
+                f"labels[{index}] duplicated a deterministic label"
+            )
+        basis = _required_chinese_text(raw_label, "matching_basis", f"labels[{index}]")
+        evidence_refs = _validate_label_evidence_refs(
+            raw_label.get("evidence_refs"),
+            expected,
+            business_sources,
+            branch=f"labels[{index}]",
+        )
+        validated_by_key[key] = {
+            **_serialize_label(expected),
+            "matching_basis": basis,
+            "evidence_refs": list(evidence_refs),
+        }
+
+    if set(validated_by_key) != set(expected_by_key):
+        raise TechnologyFinanceStageBError(
+            "model output label set differs from deterministic labels"
+        )
+    return tuple(
+        validated_by_key[_label_key_from_label(label)] for label in expected_labels
+    )
+
+
+def _validate_label_evidence_refs(
+    raw_refs: object,
+    expected_label: TechnologyFinanceMappingLabel,
+    business_sources: Mapping[str, _EvidenceSource],
+    *,
+    branch: str,
+) -> tuple[dict[str, object], ...]:
+    refs = _required_array(raw_refs, f"{branch}.evidence_refs")
+    validated: list[dict[str, object]] = []
+    has_mapping = False
+    has_business = False
+    for index, raw_ref in enumerate(refs):
+        ref_branch = f"{branch}.evidence_refs[{index}]"
+        if not isinstance(raw_ref, dict):
+            raise TechnologyFinanceStageBError(f"{ref_branch} must be an object")
+        ref_type = raw_ref.get("type")
+        if ref_type == "mapping":
+            _require_exact_fields(raw_ref, _MAPPING_EVIDENCE_FIELDS, ref_branch)
+            if _mapping_ref_key(raw_ref, ref_branch) != _mapping_key(expected_label):
+                raise TechnologyFinanceStageBError(
+                    f"{ref_branch} does not match the label mapping source"
+                )
+            has_mapping = True
+            validated.append(dict(raw_ref))
+        elif ref_type == "business":
+            _require_exact_fields(raw_ref, _BUSINESS_EVIDENCE_FIELDS, ref_branch)
+            validated.append(
+                _validate_business_ref(raw_ref, business_sources, ref_branch)
+            )
+            has_business = True
+        else:
+            raise TechnologyFinanceStageBError(
+                f"{ref_branch}.type must be mapping or business"
+            )
+    if not has_mapping or not has_business:
+        raise TechnologyFinanceStageBError(
+            f"{branch} requires at least one mapping and one business evidence ref"
+        )
+    return tuple(validated)
+
+
+def _validate_consistency_output(
+    raw_consistency: object,
+    enterprise_labels: Sequence[TechnologyFinanceMappingLabel],
+    loan_direction_labels: Sequence[TechnologyFinanceMappingLabel],
+    business_sources: Mapping[str, _EvidenceSource],
+) -> tuple[
+    TechnologyFinanceConsistencyStatus,
+    str,
+    tuple[dict[str, object], ...],
+]:
+    if not isinstance(raw_consistency, dict):
+        raise TechnologyFinanceStageBError("model output consistency must be an object")
+    _require_exact_fields(raw_consistency, _CONSISTENCY_FIELDS, "consistency")
+    raw_status = raw_consistency.get("status")
+    if raw_status not in _CONSISTENCY_STATUSES:
+        raise TechnologyFinanceStageBError(
+            "consistency.status must be consistent, inconsistent, or needs_review"
+        )
+    status: TechnologyFinanceConsistencyStatus = raw_status
+    basis = _required_chinese_text(raw_consistency, "basis", "consistency")
+    raw_refs = _required_array(
+        raw_consistency.get("evidence_refs"), "consistency.evidence_refs"
+    )
+    enterprise_by_mapping = {_mapping_key(label): label for label in enterprise_labels}
+    loan_by_mapping = {_mapping_key(label): label for label in loan_direction_labels}
+    validated_refs: list[dict[str, object]] = []
+    cited_enterprise_label = False
+    cited_loan_label = False
+    cited_business_keys: set[str] = set()
+    for index, raw_ref in enumerate(raw_refs):
+        branch = f"consistency.evidence_refs[{index}]"
+        if not isinstance(raw_ref, dict):
+            raise TechnologyFinanceStageBError(f"{branch} must be an object")
+        ref_type = raw_ref.get("type")
+        if ref_type == "label":
+            _require_exact_fields(raw_ref, _LABEL_EVIDENCE_FIELDS, branch)
+            side = raw_ref.get("side")
+            mapping_key = _mapping_ref_key(raw_ref, branch)
+            if side == "enterprise" and mapping_key in enterprise_by_mapping:
+                cited_enterprise_label = True
+            elif side == "loan_direction" and mapping_key in loan_by_mapping:
+                cited_loan_label = True
+            else:
+                raise TechnologyFinanceStageBError(
+                    f"{branch} references a label absent from the declared side"
+                )
+            validated_refs.append(dict(raw_ref))
+        elif ref_type == "business":
+            _require_exact_fields(raw_ref, _BUSINESS_EVIDENCE_FIELDS, branch)
+            validated = _validate_business_ref(raw_ref, business_sources, branch)
+            cited_business_keys.add(str(validated["field_key"]))
+            validated_refs.append(validated)
+        else:
+            raise TechnologyFinanceStageBError(
+                f"{branch}.type must be label or business"
+            )
+
+    evidence_is_insufficient = (
+        not enterprise_labels
+        or "loan_purpose" not in business_sources
+        or "stage_a.loan_matching_basis" not in business_sources
+    )
+    if evidence_is_insufficient and status != "needs_review":
+        raise TechnologyFinanceStageBError(
+            "insufficient consistency evidence must result in needs_review"
+        )
+    if status == "consistent" and not _labels_intersect(
+        enterprise_labels, loan_direction_labels
+    ):
+        raise TechnologyFinanceStageBError(
+            "consistent requires an enterprise/loan taxonomy intersection"
+        )
+    if not cited_loan_label:
+        raise TechnologyFinanceStageBError(
+            f"{status} requires loan label evidence"
+        )
+    if enterprise_labels and not cited_enterprise_label:
+        raise TechnologyFinanceStageBError(
+            f"{status} requires available enterprise label evidence"
+        )
+    required_business_keys = {
+        field_key
+        for field_key in ("loan_purpose", "stage_a.loan_matching_basis")
+        if field_key in business_sources
+    }
+    if not required_business_keys.issubset(cited_business_keys):
+        raise TechnologyFinanceStageBError(
+            f"{status} must cite all available loan-purpose and Stage A loan-basis evidence"
+        )
+    return status, basis, tuple(validated_refs)
+
+
+def _validate_deterministic_labels(
+    enterprise_labels: Sequence[TechnologyFinanceMappingLabel],
+    loan_direction_labels: Sequence[TechnologyFinanceMappingLabel],
+    stage_a_snapshot: Mapping[str, object],
+) -> None:
+    if not loan_direction_labels:
+        raise TechnologyFinanceStageBError(
+            "Stage B constrained decision requires loan-direction mapping labels"
+        )
+    all_labels = (*enterprise_labels, *loan_direction_labels)
+    mapping_version_ids = {label.mapping_version_id for label in all_labels}
+    if len(mapping_version_ids) != 1 or next(iter(mapping_version_ids)) <= 0:
+        raise TechnologyFinanceStageBError(
+            "all deterministic labels must use one positive mapping_version_id"
+        )
+    for side, labels in (
+        ("enterprise", enterprise_labels),
+        ("loan_direction", loan_direction_labels),
+    ):
+        keys = [_label_key_from_label(label) for label in labels]
+        if len(keys) != len(set(keys)):
+            raise TechnologyFinanceStageBError(
+                f"{side} deterministic labels contain duplicates"
+            )
+        if any(label.scenario_id != TECHNOLOGY_FINANCE_SCENARIO for label in labels):
+            raise TechnologyFinanceStageBError(
+                f"{side} labels must belong to technology_finance"
+            )
+    same_code = (
+        stage_a_snapshot["enterprise_neic_code"]
+        == stage_a_snapshot["loan_neic_code"]
+    )
+    if same_code and {
+        _label_key_from_label(label) for label in enterprise_labels
+    } != {_label_key_from_label(label) for label in loan_direction_labels}:
+        raise TechnologyFinanceStageBError(
+            "same-code enterprise and loan deterministic label sets must be identical"
+        )
+
+
+def _serialize_stage_a_result(stage_a_result: StageAResult) -> dict[str, object]:
+    enterprise_code = _required_stage_a_text(
+        stage_a_result.industry_code, "industry_code"
+    )
+    loan_code = _required_stage_a_text(
+        stage_a_result.loan_industry_code, "loan_industry_code"
+    )
+    if (
+        _FOUR_DIGIT_CODE_PATTERN.fullmatch(enterprise_code) is None
+        or _FOUR_DIGIT_CODE_PATTERN.fullmatch(loan_code) is None
+    ):
+        raise TechnologyFinanceStageBError(
+            "Stage A enterprise and loan codes must be four digits"
+        )
+    result_id = stage_a_result.id
+    if type(result_id) is not int or result_id <= 0:
+        raise TechnologyFinanceStageBError("Stage A result id must be positive")
+    return {
+        "stage_a_result_id": result_id,
+        "enterprise_neic_code": enterprise_code,
+        "enterprise_major_category_code": _text(
+            stage_a_result.industry_major_code
+        ),
+        "enterprise_neic_name": _required_stage_a_text(
+            stage_a_result.industry_name, "industry_name"
+        ),
+        "enterprise_matching_basis": _text(stage_a_result.rationale),
+        "loan_neic_code": loan_code,
+        "loan_major_category_code": _text(
+            stage_a_result.loan_industry_major_code
+        ),
+        "loan_neic_name": _required_stage_a_text(
+            stage_a_result.loan_industry_name, "loan_industry_name"
+        ),
+        "loan_matching_basis": _text(stage_a_result.loan_matching_basis),
+    }
+
+
+def _build_business_sources(
+    input_payload: Mapping[str, object],
+    stage_a_snapshot: Mapping[str, object],
+) -> dict[str, _EvidenceSource]:
+    sources = {
+        field.key: _EvidenceSource(field.key, field.label, value)
+        for field in TECHNOLOGY_FINANCE_FIELD_SCHEMA
+        if (value := _text(input_payload.get(field.key)))
+    }
+    stage_a_fields = (
+        (
+            "stage_a.enterprise_matching_basis",
+            "Stage A 企业匹配依据",
+            stage_a_snapshot["enterprise_matching_basis"],
+        ),
+        (
+            "stage_a.loan_matching_basis",
+            "Stage A 贷款投向匹配依据",
+            stage_a_snapshot["loan_matching_basis"],
+        ),
+    )
+    for field_key, field_label, raw_value in stage_a_fields:
+        if value := _text(raw_value):
+            sources[field_key] = _EvidenceSource(field_key, field_label, value)
+    return sources
+
+
+def _validate_business_ref(
+    raw_ref: Mapping[str, object],
+    business_sources: Mapping[str, _EvidenceSource],
+    branch: str,
+) -> dict[str, object]:
+    field_key = raw_ref.get("field_key")
+    if not isinstance(field_key, str) or field_key not in business_sources:
+        raise TechnologyFinanceStageBError(
+            f"{branch} references a business field absent from the input"
+        )
+    source = business_sources[field_key]
+    if raw_ref.get("field_label") != source.field_label:
+        raise TechnologyFinanceStageBError(f"{branch} has a false field label")
+    excerpt = raw_ref.get("excerpt")
+    if not isinstance(excerpt, str) or not excerpt.strip():
+        raise TechnologyFinanceStageBError(f"{branch}.excerpt must be non-empty")
+    excerpt = excerpt.strip()
+    if len(excerpt) > MAX_EVIDENCE_EXCERPT_LENGTH:
+        raise TechnologyFinanceStageBError(
+            f"{branch}.excerpt exceeds {MAX_EVIDENCE_EXCERPT_LENGTH} characters"
+        )
+    if excerpt not in source.value:
+        raise TechnologyFinanceStageBError(
+            f"{branch}.excerpt is not present in the input source text"
+        )
+    return {
+        "type": "business",
+        "field_key": source.field_key,
+        "field_label": source.field_label,
+        "excerpt": excerpt,
+    }
+
+
+def _serialize_label(label: TechnologyFinanceMappingLabel) -> dict[str, object]:
+    return {
+        "mapping_version_id": label.mapping_version_id,
+        "source_row": label.source_row,
+        "NEIC_Code": label.neic_code,
+        "NEIC_Name": label.neic_name,
+        "subject": label.subject,
+        "taxonomy_path": list(label.taxonomy_path),
+    }
+
+
+def _label_key_from_label(
+    label: TechnologyFinanceMappingLabel,
+) -> tuple[object, ...]:
+    return (
+        label.mapping_version_id,
+        label.source_row,
+        label.neic_code,
+        label.neic_name,
+        label.subject,
+        label.taxonomy_path,
+    )
+
+
+def _label_key_from_output(
+    payload: Mapping[str, object], branch: str
+) -> tuple[object, ...]:
+    taxonomy_path = payload.get("taxonomy_path")
+    if (
+        not isinstance(taxonomy_path, list)
+        or not taxonomy_path
+        or any(not isinstance(tier, str) or not tier.strip() for tier in taxonomy_path)
+    ):
+        raise TechnologyFinanceStageBError(
+            f"{branch}.taxonomy_path must be a non-empty string array"
+        )
+    return (
+        payload.get("mapping_version_id"),
+        payload.get("source_row"),
+        payload.get("NEIC_Code"),
+        payload.get("NEIC_Name"),
+        payload.get("subject"),
+        tuple(taxonomy_path),
+    )
+
+
+def _mapping_key(label: TechnologyFinanceMappingLabel) -> tuple[object, ...]:
+    return (
+        label.mapping_version_id,
+        label.source_row,
+        label.neic_code,
+        label.neic_name,
+        label.taxonomy_path,
+    )
+
+
+def _mapping_ref_key(
+    payload: Mapping[str, object], branch: str
+) -> tuple[object, ...]:
+    taxonomy_path = payload.get("taxonomy_path")
+    if not isinstance(taxonomy_path, list) or any(
+        not isinstance(tier, str) or not tier.strip() for tier in taxonomy_path
+    ):
+        raise TechnologyFinanceStageBError(
+            f"{branch}.taxonomy_path must be a string array"
+        )
+    return (
+        payload.get("mapping_version_id"),
+        payload.get("source_row"),
+        payload.get("NEIC_Code"),
+        payload.get("NEIC_Name"),
+        tuple(taxonomy_path),
+    )
+
+
+def _labels_intersect(
+    enterprise_labels: Sequence[TechnologyFinanceMappingLabel],
+    loan_direction_labels: Sequence[TechnologyFinanceMappingLabel],
+) -> bool:
+    enterprise_taxonomies = {
+        (label.subject, label.taxonomy_path) for label in enterprise_labels
+    }
+    return any(
+        (label.subject, label.taxonomy_path) in enterprise_taxonomies
+        for label in loan_direction_labels
+    )
+
+
+def _stage_a_evidence_ref(
+    field_key: str, field_label: str, excerpt: str
+) -> dict[str, object]:
+    return {
+        "type": "stage_a",
+        "field_key": field_key,
+        "field_label": field_label,
+        "excerpt": excerpt,
+    }
+
+
+def _required_stage_a_text(value: object, field: str) -> str:
+    text = _text(value)
+    if not text:
+        raise TechnologyFinanceStageBError(f"Stage A {field} must be non-empty")
+    return text
+
+
+def _required_chinese_text(
+    payload: Mapping[str, object], field: str, branch: str
+) -> str:
+    value = payload.get(field)
+    if not isinstance(value, str) or not value.strip():
+        raise TechnologyFinanceStageBError(
+            f"{branch}.{field} must be non-empty text"
+        )
+    value = value.strip()
+    if _CHINESE_PATTERN.search(value) is None:
+        raise TechnologyFinanceStageBError(f"{branch}.{field} must contain Chinese")
+    return value
+
+
+def _required_array(value: object, branch: str) -> list[object]:
+    if not isinstance(value, list):
+        raise TechnologyFinanceStageBError(f"{branch} must be an array")
+    return value
+
+
+def _require_exact_fields(
+    payload: Mapping[str, object], expected: frozenset[str], branch: str
+) -> None:
+    actual = set(payload)
+    if actual != expected:
+        missing = sorted(expected - actual)
+        unexpected = sorted(actual - expected)
+        raise TechnologyFinanceStageBError(
+            f"{branch} fields differ: missing={missing}, unexpected={unexpected}"
+        )
+
+
+def _text(value: object) -> str:
+    return "" if value is None else str(value).strip()

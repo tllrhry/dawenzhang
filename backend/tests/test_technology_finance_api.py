@@ -119,14 +119,55 @@ def _persist_workflow_result(
         mapping_version_id=None,
         labels=[
             {
+                "mapping_version_id": 3,
                 "subject": "高技术产业（制造业）",
-                "taxonomy_path": ["医药制造业"],
+                "taxonomy_path": ["医药制造业", "化学药品制造"],
                 "NEIC_Code": "2710",
                 "NEIC_Name": "化学药品原料药制造",
                 "source_row": 12,
                 "matching_basis": "贷款投向命中科技金融映射。",
-                "evidence_refs": [],
-            }
+                "evidence_refs": [
+                    {
+                        "type": "mapping",
+                        "mapping_version_id": 3,
+                        "source_row": 12,
+                        "NEIC_Code": "2710",
+                        "NEIC_Name": "化学药品原料药制造",
+                        "taxonomy_path": ["医药制造业", "化学药品制造"],
+                    },
+                    {
+                        "type": "business",
+                        "field_key": "loan_purpose",
+                        "field_label": "贷款用途详细描述",
+                        "excerpt": "用于医药项目建设",
+                    },
+                ],
+            },
+            {
+                "mapping_version_id": 3,
+                "subject": "战略性新兴产业",
+                "taxonomy_path": ["生物产业"],
+                "NEIC_Code": "27",
+                "NEIC_Name": "医药制造业",
+                "source_row": 28,
+                "matching_basis": "贷款投向同时命中显式大类映射。",
+                "evidence_refs": [
+                    {
+                        "type": "mapping",
+                        "mapping_version_id": 3,
+                        "source_row": 28,
+                        "NEIC_Code": "27",
+                        "NEIC_Name": "医药制造业",
+                        "taxonomy_path": ["生物产业"],
+                    },
+                    {
+                        "type": "business",
+                        "field_key": "stage_a.loan_matching_basis",
+                        "field_label": "Stage A 贷款投向匹配依据",
+                        "excerpt": "贷款用于医药项目建设",
+                    },
+                ],
+            },
         ],
         loan_neic_code="2710",
         loan_neic_name="化学药品原料药制造",
@@ -224,11 +265,29 @@ def test_technology_finance_seven_endpoint_types(
     assert export_response.status_code == 200
     assert export_response.headers["content-type"] == route_module.XLSX_MIME
     workbook = load_workbook(BytesIO(export_response.content))
-    assert workbook.sheetnames == ["案例输入", "当前结论", "判定历史"]
+    assert workbook.sheetnames == [
+        "案例输入",
+        "当前结论",
+        "判定历史",
+        "科技金融判定",
+    ]
     exported_labels = {
         cell.value for cell in workbook["案例输入"]["A"] if cell.value is not None
     }
     assert {field.label for field in TECHNOLOGY_FINANCE_FIELD_SCHEMA} <= exported_labels
+    technology_sheet = workbook["科技金融判定"]
+    headers = tuple(cell.value for cell in technology_sheet[1])
+    rows = [dict(zip(headers, row, strict=True)) for row in technology_sheet.iter_rows(
+        min_row=2,
+        values_only=True,
+    )]
+    assert [row["主题"] for row in rows] == [
+        "高技术产业（制造业）",
+        "战略性新兴产业",
+    ]
+    assert [row["映射源行"] for row in rows] == [12, 28]
+    assert rows[0]["业务证据摘要"] == "贷款用途详细描述：用于医药项目建设"
+    assert rows[1]["Stage A结果ID"] == objection_response.json()["stage_a"]["id"]
 
 
 @pytest.mark.parametrize(

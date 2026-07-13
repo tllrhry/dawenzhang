@@ -329,8 +329,16 @@ def export_scenario_case(
     session: Session = Depends(get_db),
 ) -> StreamingResponse:
     case = _get_scenario_case(session, scenario_id, case_id)
+    five_articles_results = session.scalars(
+        select(FiveArticlesResult)
+        .where(FiveArticlesResult.case_id == case.id)
+        .order_by(FiveArticlesResult.version, FiveArticlesResult.id)
+    ).all()
     return _download_response(
-        export_case_workbook(case),
+        export_case_workbook(
+            case,
+            five_articles_results=five_articles_results,
+        ),
         XLSX_MIME,
         f"{scenario_id.replace('_', '-')}-case-{case.id}.xlsx",
     )

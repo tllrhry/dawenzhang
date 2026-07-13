@@ -7,6 +7,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from app.models import (
     FiveArticlesResult,
+    InclusiveFinanceResult,
     NationalEconomyClassificationCase,
     NationalEconomyClassificationResult,
 )
@@ -27,6 +28,7 @@ CASE_INPUT_SHEET = "案例输入"
 CURRENT_RESULT_SHEET = "当前结论"
 RESULT_HISTORY_SHEET = "判定历史"
 TECHNOLOGY_FINANCE_RESULT_SHEET = "科技金融判定"
+INCLUSIVE_FINANCE_RESULT_SHEET = "普惠金融判定"
 TECHNOLOGY_FINANCE_CONSISTENCY_LABEL = (
     "贷款对应的五篇大文章类别与企业类别是否一致"
 )
@@ -73,6 +75,7 @@ def export_case_workbook(
     case: NationalEconomyClassificationCase,
     *,
     five_articles_results: Sequence[FiveArticlesResult] = (),
+    inclusive_finance_results: Sequence[InclusiveFinanceResult] = (),
 ) -> bytes:
     workbook = Workbook()
     input_sheet = workbook.active
@@ -93,10 +96,23 @@ def export_case_workbook(
             technology_finance_sheet,
             five_articles_results,
         )
+    if case.scenario == "inclusive_finance":
+        sheet = workbook.create_sheet(INCLUSIVE_FINANCE_RESULT_SHEET)
+        _write_inclusive_finance_result(sheet, inclusive_finance_results)
 
     output = BytesIO()
     workbook.save(output)
     return output.getvalue()
+
+def _write_inclusive_finance_result(sheet: Worksheet, results: Sequence[InclusiveFinanceResult]) -> None:
+    headers = ("Stage B版本", "普惠状态", "借款主体", "计算划型", "填报划型", "划型一致性", "是否经营性", "授信金额(万元)", "是否属于普惠", "普惠子类别", "判定依据", "业务证据摘要", "异常")
+    sheet.append(headers)
+    if not results:
+        sheet.append(("", "尚未判定", "", "", "", "", "", "", "", "", "尚无普惠金融判定结果。", "", "")); return
+    result = max(results, key=lambda item: (item.version, item.id or 0))
+    evidence = "\n".join(f"{ref.get('field_key', ref.get('field', '证据'))}：{ref.get('raw_value', '')}" for ref in result.evidence_refs if isinstance(ref, dict))
+    anomalies = "\n".join(str(item.get("message", item)) for item in result.anomalies if isinstance(item, dict))
+    sheet.append((result.version, _RESULT_STATUS_LABELS.get(result.status, result.status), result.borrower_type, result.computed_size, result.filled_size, "一致" if result.size_consistent else ("不一致" if result.size_consistent is False else "未判定"), "是" if result.is_operating_loan else ("否" if result.is_operating_loan is False else "未判定"), result.credit_amount_wan, "是" if result.qualifies else ("否" if result.qualifies is False else "未判定"), result.inclusive_category, result.basis, evidence, anomalies))
 
 
 def _write_technology_finance_result(

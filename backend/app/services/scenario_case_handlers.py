@@ -71,6 +71,7 @@ FIVE_ARTICLES_CASE_HANDLER = ScenarioCaseHandler()
 SCENARIO_CASE_HANDLERS: Mapping[str, ScenarioCaseHandler] = MappingProxyType(
     {
         "technology_finance_two_stage": FIVE_ARTICLES_CASE_HANDLER,
+        "inclusive_finance_single_stage": FIVE_ARTICLES_CASE_HANDLER,
     }
 )
 

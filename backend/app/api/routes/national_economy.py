@@ -7,12 +7,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
-from app.models import FiveArticlesResult, NationalEconomyClassificationCase
+from app.models import FiveArticlesResult, InclusiveFinanceResult, NationalEconomyClassificationCase
 from app.schemas.five_articles import (
     FiveArticlesHistoryResponse,
     FiveArticlesResultResponse,
     TechnologyFinanceWorkflowResponse,
 )
+from app.schemas.inclusive_finance import InclusiveFinanceHistoryResponse, InclusiveFinanceResultResponse, InclusiveFinanceWorkflowResponse
 from app.schemas.national_economy import (
     CaseCreatedResponse,
     CaseInputField,
@@ -47,6 +48,8 @@ from app.services.technology_finance_classification_workflow import (
     classify_technology_finance_case,
     reclassify_technology_finance_case,
 )
+from app.services.inclusive_finance_workflow import InclusiveFinanceWorkflowResult
+from app.services.scenario_workflow_handlers import get_scenario_workflow_handler
 
 
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -261,67 +264,72 @@ def export_case(case_id: int, session: Session = Depends(get_db)) -> StreamingRe
 
 @router.post(
     "/scenarios/{scenario_id}/cases/{case_id}/classifications",
-    response_model=TechnologyFinanceWorkflowResponse,
+    response_model=None,
 )
 def classify_scenario_case(
     scenario_id: str,
     case_id: int,
     session: Session = Depends(get_db),
-) -> TechnologyFinanceWorkflowResponse:
+) -> object:
     case = _get_scenario_case(session, scenario_id, case_id)
     try:
-        outcome = classify_technology_finance_case(session, case)
+        profile = _get_available_scenario(scenario_id)
+        outcome = (
+            classify_technology_finance_case(session, case)
+            if profile.workflow == "technology_finance_two_stage"
+            else get_scenario_workflow_handler(profile).classify(session, case)
+        )
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={"message": "分类服务暂时不可用，请稍后重试", "error": str(exc)},
         ) from exc
-    return _technology_finance_workflow_response(outcome)
+    return _workflow_response(outcome)
 
 
 @router.post(
     "/scenarios/{scenario_id}/cases/{case_id}/objections",
-    response_model=TechnologyFinanceWorkflowResponse,
+    response_model=None,
 )
 def object_to_scenario_classification(
     scenario_id: str,
     case_id: int,
     payload: ObjectionRequest,
     session: Session = Depends(get_db),
-) -> TechnologyFinanceWorkflowResponse:
+) -> object:
     case = _get_scenario_case(session, scenario_id, case_id)
     objection_text = payload.objection_text.strip()
     if not objection_text:
         raise HTTPException(status_code=422, detail="异议说明不能为空")
     try:
-        outcome = reclassify_technology_finance_case(
-            session,
-            case,
-            objection_text,
+        profile = _get_available_scenario(scenario_id)
+        outcome = (
+            reclassify_technology_finance_case(session, case, objection_text)
+            if profile.workflow == "technology_finance_two_stage"
+            else get_scenario_workflow_handler(profile).reclassify(session, case, objection_text)
         )
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={"message": "异议重判暂时不可用，请稍后重试", "error": str(exc)},
         ) from exc
-    return _technology_finance_workflow_response(outcome)
+    return _workflow_response(outcome)
 
 
 @router.get(
     "/scenarios/{scenario_id}/cases/{case_id}/history",
-    response_model=FiveArticlesHistoryResponse,
+    response_model=None,
 )
 def get_scenario_history(
     scenario_id: str,
     case_id: int,
     session: Session = Depends(get_db),
-) -> FiveArticlesHistoryResponse:
+) -> object:
     case = _get_scenario_case(session, scenario_id, case_id)
-    results = session.scalars(
-        select(FiveArticlesResult)
-        .where(FiveArticlesResult.case_id == case.id)
-        .order_by(FiveArticlesResult.version, FiveArticlesResult.id)
-    ).all()
+    handler = get_scenario_workflow_handler(_get_available_scenario(scenario_id))
+    results = handler.history(session, case)
+    if case.scenario == "inclusive_finance":
+        return InclusiveFinanceHistoryResponse(items=[InclusiveFinanceResultResponse.model_validate(result) for result in results])
     return FiveArticlesHistoryResponse(
         items=[FiveArticlesResultResponse.model_validate(result) for result in results]
     )
@@ -334,15 +342,13 @@ def export_scenario_case(
     session: Session = Depends(get_db),
 ) -> StreamingResponse:
     case = _get_scenario_case(session, scenario_id, case_id)
-    five_articles_results = session.scalars(
-        select(FiveArticlesResult)
-        .where(FiveArticlesResult.case_id == case.id)
-        .order_by(FiveArticlesResult.version, FiveArticlesResult.id)
-    ).all()
+    handler = get_scenario_workflow_handler(_get_available_scenario(scenario_id))
+    results = handler.history(session, case)
     return _download_response(
         export_case_workbook(
             case,
-            five_articles_results=five_articles_results,
+            five_articles_results=results if case.scenario != "inclusive_finance" else (),
+            inclusive_finance_results=results if case.scenario == "inclusive_finance" else (),
         ),
         XLSX_MIME,
         f"{scenario_id.replace('_', '-')}-case-{case.id}.xlsx",
@@ -392,6 +398,11 @@ def _technology_finance_workflow_response(
             else None
         ),
     )
+
+def _workflow_response(outcome: object) -> object:
+    if isinstance(outcome, InclusiveFinanceWorkflowResult):
+        return InclusiveFinanceWorkflowResponse(stage_a=ClassificationResultResponse.model_validate(outcome.stage_a_result), stage_b=InclusiveFinanceResultResponse.model_validate(outcome.stage_b_result) if outcome.stage_b_result else None)
+    return _technology_finance_workflow_response(outcome)
 
 
 def _case_response(case: NationalEconomyClassificationCase) -> CaseResponse:

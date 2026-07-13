@@ -7,12 +7,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
-from app.models import FiveArticlesResult, NationalEconomyClassificationCase
+from app.models import FiveArticlesResult, InclusiveFinanceResult, NationalEconomyClassificationCase
 from app.schemas.five_articles import (
     FiveArticlesHistoryResponse,
     FiveArticlesResultResponse,
     TechnologyFinanceWorkflowResponse,
 )
+from app.schemas.inclusive_finance import InclusiveFinanceHistoryResponse, InclusiveFinanceResultResponse, InclusiveFinanceWorkflowResponse
 from app.schemas.national_economy import (
     CaseCreatedResponse,
     CaseInputField,
@@ -48,6 +49,7 @@ from app.services.scenario_workflow_handlers import (
 from app.services.technology_finance_classification_workflow import (
     TechnologyFinanceWorkflowResult,
 )
+from app.services.inclusive_finance_workflow import InclusiveFinanceWorkflowResult
 
 
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -262,13 +264,13 @@ def export_case(case_id: int, session: Session = Depends(get_db)) -> StreamingRe
 
 @router.post(
     "/scenarios/{scenario_id}/cases/{case_id}/classifications",
-    response_model=TechnologyFinanceWorkflowResponse,
+    response_model=None,
 )
 def classify_scenario_case(
     scenario_id: str,
     case_id: int,
     session: Session = Depends(get_db),
-) -> TechnologyFinanceWorkflowResponse:
+) -> object:
     case = _get_scenario_case(session, scenario_id, case_id)
     registration = SCENARIO_REGISTRY[scenario_id]
     handler = get_scenario_workflow_handler(registration)
@@ -279,19 +281,19 @@ def classify_scenario_case(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={"message": "分类服务暂时不可用，请稍后重试", "error": str(exc)},
         ) from exc
-    return _technology_finance_workflow_response(outcome)
+    return _workflow_response(outcome)
 
 
 @router.post(
     "/scenarios/{scenario_id}/cases/{case_id}/objections",
-    response_model=TechnologyFinanceWorkflowResponse,
+    response_model=None,
 )
 def object_to_scenario_classification(
     scenario_id: str,
     case_id: int,
     payload: ObjectionRequest,
     session: Session = Depends(get_db),
-) -> TechnologyFinanceWorkflowResponse:
+) -> object:
     case = _get_scenario_case(session, scenario_id, case_id)
     registration = SCENARIO_REGISTRY[scenario_id]
     handler = get_scenario_workflow_handler(registration)
@@ -310,18 +312,18 @@ def object_to_scenario_classification(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={"message": "异议重判暂时不可用，请稍后重试", "error": str(exc)},
         ) from exc
-    return _technology_finance_workflow_response(outcome)
+    return _workflow_response(outcome)
 
 
 @router.get(
     "/scenarios/{scenario_id}/cases/{case_id}/history",
-    response_model=FiveArticlesHistoryResponse,
+    response_model=None,
 )
 def get_scenario_history(
     scenario_id: str,
     case_id: int,
     session: Session = Depends(get_db),
-) -> FiveArticlesHistoryResponse:
+) -> object:
     case = _get_scenario_case(session, scenario_id, case_id)
     registration = SCENARIO_REGISTRY[scenario_id]
     results = get_scenario_workflow_handler(registration).history(
@@ -329,6 +331,8 @@ def get_scenario_history(
         case,
         registration,
     )
+    if case.scenario == "inclusive_finance":
+        return InclusiveFinanceHistoryResponse(items=[InclusiveFinanceResultResponse.model_validate(result) for result in results])
     return FiveArticlesHistoryResponse(
         items=[FiveArticlesResultResponse.model_validate(result) for result in results]
     )
@@ -396,6 +400,11 @@ def _technology_finance_workflow_response(
             else None
         ),
     )
+
+def _workflow_response(outcome: object) -> object:
+    if isinstance(outcome, InclusiveFinanceWorkflowResult):
+        return InclusiveFinanceWorkflowResponse(stage_a=ClassificationResultResponse.model_validate(outcome.stage_a_result), stage_b=InclusiveFinanceResultResponse.model_validate(outcome.stage_b_result) if outcome.stage_b_result else None)
+    return _technology_finance_workflow_response(outcome)
 
 
 def _case_response(case: NationalEconomyClassificationCase) -> CaseResponse:

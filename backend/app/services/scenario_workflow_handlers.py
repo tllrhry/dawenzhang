@@ -1,11 +1,20 @@
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Mapping
+from typing import Callable, Mapping
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import FiveArticlesResult, NationalEconomyClassificationCase
+from app.models import (
+    FiveArticlesResult,
+    InclusiveFinanceResult,
+    NationalEconomyClassificationCase,
+)
+from app.services.inclusive_finance_workflow import (
+    InclusiveFinanceWorkflowResult,
+    classify_inclusive_finance_case,
+    reclassify_inclusive_finance_case,
+)
 from app.services.national_economy_case_export import export_case_workbook
 from app.services.scenario_registry import ScenarioRegistration
 from app.services.technology_finance_classification_workflow import (
@@ -17,15 +26,23 @@ from app.services.technology_finance_classification_workflow import (
 
 @dataclass(frozen=True)
 class ScenarioWorkflowHandler:
-    """Run and present the registered five-articles workflow family."""
+    """Run and present a registered five-articles workflow family."""
+
+    classify_callable: Callable | None = None
+    reclassify_callable: Callable | None = None
+    result_model: type[FiveArticlesResult] | type[InclusiveFinanceResult] | None = None
 
     def classify(
         self,
         session: Session,
         case: NationalEconomyClassificationCase,
         profile: ScenarioRegistration,
-    ) -> TechnologyFinanceWorkflowResult:
+    ) -> TechnologyFinanceWorkflowResult | InclusiveFinanceWorkflowResult:
         self._validate_case_profile(case, profile)
+        if self.classify_callable is not None:
+            return self.classify_callable(session, case)
+        if profile.workflow == "inclusive_finance_single_stage":
+            return classify_inclusive_finance_case(session, case)
         return classify_five_articles_case(session, case, profile)
 
     def reclassify(
@@ -34,30 +51,34 @@ class ScenarioWorkflowHandler:
         case: NationalEconomyClassificationCase,
         objection_text: str,
         profile: ScenarioRegistration,
-    ) -> TechnologyFinanceWorkflowResult:
+    ) -> TechnologyFinanceWorkflowResult | InclusiveFinanceWorkflowResult:
         self._validate_case_profile(case, profile)
-        return reclassify_five_articles_case(
-            session,
-            case,
-            objection_text,
-            profile,
-        )
+        if self.reclassify_callable is not None:
+            return self.reclassify_callable(session, case, objection_text)
+        if profile.workflow == "inclusive_finance_single_stage":
+            return reclassify_inclusive_finance_case(session, case, objection_text)
+        return reclassify_five_articles_case(session, case, objection_text, profile)
 
     def history(
         self,
         session: Session,
         case: NationalEconomyClassificationCase,
         profile: ScenarioRegistration,
-    ) -> list[FiveArticlesResult]:
+    ) -> list[FiveArticlesResult] | list[InclusiveFinanceResult]:
         self._validate_case_profile(case, profile)
+        result_model = self.result_model or (
+            InclusiveFinanceResult
+            if profile.workflow == "inclusive_finance_single_stage"
+            else FiveArticlesResult
+        )
         return list(
             session.scalars(
-                select(FiveArticlesResult)
+                select(result_model)
                 .where(
-                    FiveArticlesResult.case_id == case.id,
-                    FiveArticlesResult.scenario_id == profile.id,
+                    result_model.case_id == case.id,
+                    result_model.scenario_id == profile.id,
                 )
-                .order_by(FiveArticlesResult.version, FiveArticlesResult.id)
+                .order_by(result_model.version, result_model.id)
             ).all()
         )
 
@@ -67,9 +88,16 @@ class ScenarioWorkflowHandler:
         case: NationalEconomyClassificationCase,
         profile: ScenarioRegistration,
     ) -> bytes:
+        results = self.history(session, case, profile)
+        if profile.workflow == "inclusive_finance_single_stage":
+            return export_case_workbook(
+                case,
+                inclusive_finance_results=results,
+                profile=profile,
+            )
         return export_case_workbook(
             case,
-            five_articles_results=self.history(session, case, profile),
+            five_articles_results=results,
             profile=profile,
         )
 
@@ -83,10 +111,16 @@ class ScenarioWorkflowHandler:
 
 
 FIVE_ARTICLES_WORKFLOW_HANDLER = ScenarioWorkflowHandler()
+INCLUSIVE_FINANCE_WORKFLOW_HANDLER = ScenarioWorkflowHandler(
+    classify_inclusive_finance_case,
+    reclassify_inclusive_finance_case,
+    InclusiveFinanceResult,
+)
 
 SCENARIO_WORKFLOW_HANDLERS: Mapping[str, ScenarioWorkflowHandler] = MappingProxyType(
     {
         "technology_finance_two_stage": FIVE_ARTICLES_WORKFLOW_HANDLER,
+        "inclusive_finance_single_stage": INCLUSIVE_FINANCE_WORKFLOW_HANDLER,
     }
 )
 

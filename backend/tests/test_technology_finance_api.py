@@ -473,7 +473,7 @@ def test_cross_scenario_history_is_rejected_before_workflow_dispatch(
     handler_lookup.assert_not_called()
 
 
-@pytest.mark.parametrize("scenario_id", ["inclusive_finance", "not_registered"])
+@pytest.mark.parametrize("scenario_id", ["not_registered"])
 def test_unavailable_or_unknown_upload_is_rejected_before_handler_dispatch(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -494,7 +494,7 @@ def test_unavailable_or_unknown_upload_is_rejected_before_handler_dispatch(
         },
     )
 
-    assert response.status_code == (409 if scenario_id == "inclusive_finance" else 404)
+    assert response.status_code == 404
     handler_lookup.assert_not_called()
 
 
@@ -519,7 +519,6 @@ def test_scenario_mismatch_is_rejected_before_detail_handler_dispatch(
     "scenario_id",
     [
         "agriculture_related",
-        "inclusive_finance",
     ],
 )
 def test_coming_soon_scenarios_are_rejected(
@@ -532,11 +531,11 @@ def test_coming_soon_scenarios_are_rejected(
     assert response.json()["detail"] == "场景暂未开放"
 
 
-def test_coming_soon_case_upload_is_rejected(client: TestClient) -> None:
+def test_agriculture_related_case_upload_is_rejected(client: TestClient) -> None:
     template_path = get_settings().technology_finance_template_path
 
     response = client.post(
-        "/api/v1/scenarios/inclusive_finance/cases",
+        "/api/v1/scenarios/agriculture_related/cases",
         files={
             "file": (
                 template_path.name,

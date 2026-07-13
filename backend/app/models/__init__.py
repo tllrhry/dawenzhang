@@ -3,6 +3,7 @@ from app.models.five_articles import (
     FiveArticlesMappingVersion,
     FiveArticlesResult,
 )
+from app.models.inclusive_finance import InclusiveFinanceResult
 from app.models.national_economy import (
     NationalEconomyCatalogVersion,
     NationalEconomyClassificationCase,
@@ -14,6 +15,7 @@ __all__ = [
     "FiveArticlesMappingRow",
     "FiveArticlesMappingVersion",
     "FiveArticlesResult",
+    "InclusiveFinanceResult",
     "NationalEconomyCatalogVersion",
     "NationalEconomyClassificationCase",
     "NationalEconomyClassificationResult",

@@ -49,17 +49,23 @@ import type {
   ClassificationResult,
   EvidenceReference,
   FiveArticlesResult,
+  InclusiveFinanceResult,
+  InclusiveFinanceWorkflowResult,
   ScenarioId,
   TechnologyFinanceWorkflowResult,
 } from './api'
-import { caseMatchesScenario, currentCaseStorageKey, fiveArticlesScenarioIds, isFiveArticlesScenario, scenarioViews } from './scenarios'
+import { caseMatchesScenario, currentCaseStorageKey, fiveArticlesScenarioIds, INCLUSIVE_FINANCE_SCENARIO, isFiveArticlesScenario, scenarioViews } from './scenarios'
 
-function isTechnologyFinanceWorkflow(result: ClassificationOutcome): result is TechnologyFinanceWorkflowResult {
+function isTechnologyFinanceWorkflow(result: ClassificationOutcome): result is TechnologyFinanceWorkflowResult | InclusiveFinanceWorkflowResult {
   return 'stage_a' in result
 }
 
 function isFiveArticlesResult(result: ClassificationHistoryItem): result is FiveArticlesResult {
-  return 'stage_a_result_id' in result
+  return 'stage_a_result_id' in result && 'labels' in result
+}
+
+function isInclusiveFinanceResult(result: ClassificationHistoryItem): result is InclusiveFinanceResult {
+  return 'stage_a_result_id' in result && 'borrower_type' in result
 }
 
 const stageBStatusLabels: Record<Exclude<FiveArticlesResult['status'], 'not_applicable'>, string> = {
@@ -213,10 +219,9 @@ function FiveArticlesScenario() {
       <div className="scene-icon scene-icon-active"><BankOutlined /></div>
       <div className="scene-body">
         <h2>五篇大文章分类</h2>
-        <p>科技、绿色、养老、数字金融均按国民经济分类与各自映射形成独立两阶段判定。</p>
-        <Tag className="available-tag" icon={<CheckCircleFilled />}>四个子场景已开放</Tag>
+        <p>科技、绿色、普惠、养老、数字金融均已开放；普惠金融采用独立的确定性判定规则。</p>
+        <Tag className="available-tag" icon={<CheckCircleFilled />}>五个子场景已开放</Tag>
         {fiveArticlesScenarioIds.map((scenarioId) => <Button key={scenarioId} type="primary" size="middle" block icon={<ArrowRightOutlined />} iconPosition="end" onClick={() => navigate(scenarioViews[scenarioId].classifyPath)}>进入{scenarioViews[scenarioId].name}</Button>)}
-        <div className="topic-tags"><span>普惠金融 · 暂未开放</span></div>
       </div>
       <Divider />
       <span className="learn-link is-muted"><InfoCircleOutlined /> 其他专题暂未开放 <LockOutlined /></span>
@@ -244,7 +249,7 @@ function ClassifyPage({ scenarioId }: { scenarioId: ScenarioId }) {
   const [selectedFile, setSelectedFile] = useState<File>()
   const [caseData, setCaseData] = useState<ClassificationCase>()
   const [result, setResult] = useState<ClassificationResult>()
-  const [stageBResult, setStageBResult] = useState<FiveArticlesResult | null>()
+  const [stageBResult, setStageBResult] = useState<FiveArticlesResult | InclusiveFinanceResult | null>()
   const [errorMessage, setErrorMessage] = useState<string>()
   const [isSubmittingReview, setIsSubmittingReview] = useState(false)
   const [showReview, setShowReview] = useState(false)
@@ -263,7 +268,7 @@ function ClassifyPage({ scenarioId }: { scenarioId: ScenarioId }) {
       setCaseData(loadedCase)
       if (loadedCase.current_result) {
         setResult(loadedCase.current_result)
-        const latestStageB = history.filter(isFiveArticlesResult).at(-1) || null
+        const latestStageB = history.filter((item) => isFiveArticlesResult(item) || isInclusiveFinanceResult(item)).at(-1) || null
         setStageBResult(latestStageB)
         setStage('result')
       }
@@ -430,7 +435,7 @@ function ProcessingPanel({ scenarioId, fileName }: { scenarioId: ScenarioId; fil
 }
 
 function ResultPanel({ scenarioId, caseData, result, stageBResult, errorMessage, showReview, setShowReview, reviewText, setReviewText, isSubmittingReview, onBackToClassification, onReclassify, onRetry }: {
-  scenarioId: ScenarioId; caseData: ClassificationCase; result: ClassificationResult; stageBResult?: FiveArticlesResult | null; errorMessage?: string; showReview: boolean; setShowReview: (value: boolean) => void; reviewText: string; setReviewText: (value: string) => void; isSubmittingReview: boolean; onBackToClassification: () => void; onReclassify: () => void; onRetry: () => void
+  scenarioId: ScenarioId; caseData: ClassificationCase; result: ClassificationResult; stageBResult?: FiveArticlesResult | InclusiveFinanceResult | null; errorMessage?: string; showReview: boolean; setShowReview: (value: boolean) => void; reviewText: string; setReviewText: (value: string) => void; isSubmittingReview: boolean; onBackToClassification: () => void; onReclassify: () => void; onRetry: () => void
 }) {
   const navigate = useNavigate()
   const scenarioView = scenarioViews[scenarioId]
@@ -475,7 +480,7 @@ function ResultPanel({ scenarioId, caseData, result, stageBResult, errorMessage,
       <div className="result-actions"><Button onClick={onBackToClassification}>返回{scenarioView.name}</Button><Button icon={<DownloadOutlined />} onClick={() => window.location.assign(exportUrl(scenarioId, caseData.id))}>导出 Excel</Button><Button icon={<HistoryOutlined />} onClick={() => navigate(scenarioView.historyPath)}>查看判定历史</Button><Button type="primary" onClick={toggleReview}>提出异议并复核</Button></div>
     </Card>
     {isFiveArticles && <Card className="result-card technology-result-card" bordered={false} title={`Stage B · ${scenarioView.name}判定`}>
-      {stageBResult ? <>
+      {stageBResult && isFiveArticlesResult(stageBResult) ? <>
         <div className="technology-status-row">
           <div><span>判定状态</span><Tag color={statusColor(stageBResult.status)}>{stageBStatusLabel(scenarioId, stageBResult.status)}</Tag></div>
           <small>{scenarioView.name}版本 {stageBResult.version} · Stage A 结果 #{stageBResult.stage_a_result_id}{stageBResult.mapping_version_id ? ` · 映射版本 ${stageBResult.mapping_version_id}` : ''}</small>
@@ -505,6 +510,18 @@ function ResultPanel({ scenarioId, caseData, result, stageBResult, errorMessage,
           {stageBResult.consistency_evidence_refs.length > 0 && <div className="evidence-summary"><b>一致性证据</b>{stageBResult.consistency_evidence_refs.map((reference, index) => <span key={`consistency-${index}`}>{evidenceSummary(reference)}</span>)}</div>}
         </section>
       </> : <Alert className="technology-empty-state" type={stageAFailed ? 'error' : 'warning'} showIcon message="Stage B 未执行" description={`Stage A 当前为“${stageAStatusLabel}”，只有 Stage A 完成后才会进入${scenarioView.name}判定。`} />}
+    </Card>}
+    {scenarioId === INCLUSIVE_FINANCE_SCENARIO && <Card className="result-card technology-result-card" bordered={false} title="Stage B · 普惠金融判定">
+      {stageBResult && isInclusiveFinanceResult(stageBResult) ? <Descriptions column={1} size="small">
+        <Descriptions.Item label="判定状态"><Tag color={statusColor(stageBResult.status)}>{stageBResult.status === 'not_applicable' ? '不属于普惠金融' : stageBStatusLabels[stageBResult.status]}</Tag></Descriptions.Item>
+        <Descriptions.Item label="借款主体类型">{stageBResult.borrower_type || '--'}</Descriptions.Item>
+        <Descriptions.Item label="计算划型">{stageBResult.computed_size || '--'}{stageBResult.size_consistent === false ? '（与填报不一致）' : ''}</Descriptions.Item>
+        <Descriptions.Item label="是否经营性贷款">{stageBResult.is_operating_loan === null ? '待人工复核' : stageBResult.is_operating_loan ? '是' : '否'}</Descriptions.Item>
+        <Descriptions.Item label="授信金额">{stageBResult.credit_amount_wan ?? '--'} 万元</Descriptions.Item>
+        <Descriptions.Item label="是否属于普惠">{stageBResult.qualifies === null ? '待人工复核' : stageBResult.qualifies ? '是' : '否'}</Descriptions.Item>
+        <Descriptions.Item label="普惠子类别">{stageBResult.inclusive_category || '--'}</Descriptions.Item>
+        <Descriptions.Item label="判定依据">{stageBResult.basis || stageBResult.error_detail || '--'}</Descriptions.Item>
+      </Descriptions> : <Alert type="warning" showIcon message="Stage B 未执行" description="Stage A 完成后才会执行普惠金融判定。" />}
     </Card>}
     {showReview && <Card id="classification-review" className="review-card" bordered={false} title="补充异议信息，发起再次判定">
       <p>新的说明会与原始企业资料一同重新检索和判定，原有结论会保留在历史版本中。</p>
@@ -548,7 +565,9 @@ function HistoryPage({ scenarioId }: { scenarioId: ScenarioId }) {
       {errorMessage && <div className="history-row empty-row"><Alert type="error" showIcon message={errorMessage} /></div>}
       {history.map((item) => isFiveArticlesResult(item)
         ? <div className="history-row" key={`stage-b-${item.id}`}><b>{caseData?.original_filename || '当前企业案例'}<small>{scenarioView.name}版本 {item.version} · Stage A #{item.stage_a_result_id}</small></b><span className="history-conclusion"><span><strong>{item.loan_neic_code || '--'}</strong> {item.loan_neic_name || '暂无正式标签'}</span><small>{item.labels.length} 个{scenarioView.name}标签{item.consistency_status ? ` · ${consistencyLabels[item.consistency_status]}` : ''}</small></span><span className="history-basis">{stageBEmptyDescription(scenarioId, item)}</span><span><Tag color={statusColor(item.status)}>{stageBStatusLabel(scenarioId, item.status)}</Tag></span><span>{new Date(item.created_at).toLocaleString('zh-CN')}</span><button type="button" onClick={() => navigate(scenarioView.classifyPath)}>查看详情 <ArrowRightOutlined /></button></div>
-        : <div className="history-row" key={item.id}><b>{caseData?.original_filename || '当前企业案例'}<small>版本 {item.version}{item.objection?.description ? ` · 异议：${item.objection.description}` : ''}</small></b><span className="history-conclusion"><span><strong>{item.industry_display_code || '--'}</strong> {item.industry_name || '待人工复核'}</span><small><span>贷款投向 <strong>{item.loan_industry_display_code || '--'}</strong> {item.loan_industry_name || '--'}</span><Tag color={item.loan_matches_enterprise ? 'success' : 'warning'}>{item.loan_matches_enterprise ? '一致' : '不一致'}</Tag></small></span><span className="history-basis">{item.matching_basis || '--'}<small>贷款投向依据：{item.loan_matching_basis || '--'}</small></span><span><Tag color={item.status === 'needs_review' ? 'warning' : 'success'}>{item.status === 'needs_review' ? '待人工复核' : '已完成'}</Tag></span><span>{new Date(item.created_at).toLocaleString('zh-CN')}</span><button type="button" onClick={() => navigate(scenarioView.classifyPath)}>查看详情 <ArrowRightOutlined /></button></div>)}
+        : isInclusiveFinanceResult(item)
+          ? <div className="history-row" key={`inclusive-${item.id}`}><b>{caseData?.original_filename || '当前企业案例'}<small>普惠版本 {item.version} · Stage A #{item.stage_a_result_id}</small></b><span className="history-conclusion"><strong>{item.inclusive_category || '未形成普惠子类别'}</strong><small>{item.computed_size || '划型待复核'} · {item.credit_amount_wan ?? '--'} 万元</small></span><span className="history-basis">{item.basis || item.error_detail || '暂无说明'}</span><span><Tag color={statusColor(item.status)}>{item.status === 'not_applicable' ? '不属于普惠金融' : stageBStatusLabels[item.status]}</Tag></span><span>{new Date(item.created_at).toLocaleString('zh-CN')}</span><button type="button" onClick={() => navigate(scenarioView.classifyPath)}>查看详情 <ArrowRightOutlined /></button></div>
+          : <div className="history-row" key={item.id}><b>{caseData?.original_filename || '当前企业案例'}<small>版本 {item.version}{item.objection?.description ? ` · 异议：${item.objection.description}` : ''}</small></b><span className="history-conclusion"><span><strong>{item.industry_display_code || '--'}</strong> {item.industry_name || '待人工复核'}</span><small><span>贷款投向 <strong>{item.loan_industry_display_code || '--'}</strong> {item.loan_industry_name || '--'}</span><Tag color={item.loan_matches_enterprise ? 'success' : 'warning'}>{item.loan_matches_enterprise ? '一致' : '不一致'}</Tag></small></span><span className="history-basis">{item.matching_basis || '--'}<small>贷款投向依据：{item.loan_matching_basis || '--'}</small></span><span><Tag color={item.status === 'needs_review' ? 'warning' : 'success'}>{item.status === 'needs_review' ? '待人工复核' : '已完成'}</Tag></span><span>{new Date(item.created_at).toLocaleString('zh-CN')}</span><button type="button" onClick={() => navigate(scenarioView.classifyPath)}>查看详情 <ArrowRightOutlined /></button></div>)}
       {!errorMessage && history.length === 0 && <div className="history-row empty-row"><span>暂无可展示的当前案例版本，请先完成一次分类。</span></div>}
     </Card>
   </main>

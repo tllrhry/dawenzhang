@@ -39,8 +39,8 @@ from app.services.scenario_registry import (
     SCENARIO_REGISTRY,
     ScenarioRegistration,
 )
-from app.services.technology_finance_case_ingestion import (
-    create_technology_finance_case_from_template,
+from app.services.scenario_case_handlers import (
+    get_scenario_case_handler,
 )
 from app.services.technology_finance_classification_workflow import (
     TechnologyFinanceWorkflowResult,
@@ -149,16 +149,18 @@ async def upload_scenario_case(
     file: UploadFile = File(...),
     session: Session = Depends(get_db),
 ) -> CaseCreatedResponse:
-    _get_available_scenario(scenario_id)
+    registration = _get_available_scenario(scenario_id)
+    handler = get_scenario_case_handler(registration)
     filename = Path(file.filename or "").name
     if not filename.lower().endswith(".docx"):
         raise HTTPException(status_code=422, detail="请上传单个 .docx 文件")
     document_bytes = await file.read()
     try:
-        case = create_technology_finance_case_from_template(
+        case = handler.create_case(
             session,
             document_bytes,
             filename,
+            registration,
         )
     except NationalEconomyTemplateError as exc:
         raise HTTPException(
@@ -187,7 +189,10 @@ def get_scenario_case(
     case_id: int,
     session: Session = Depends(get_db),
 ) -> CaseResponse:
-    return _case_response(_get_scenario_case(session, scenario_id, case_id))
+    case = _get_scenario_case(session, scenario_id, case_id)
+    registration = SCENARIO_REGISTRY[scenario_id]
+    handler = get_scenario_case_handler(registration)
+    return handler.case_response(case, registration)
 
 
 @router.post(

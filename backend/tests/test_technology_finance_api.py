@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -18,7 +19,15 @@ from app.models import (
     NationalEconomyClassificationCase,
     NationalEconomyClassificationResult,
 )
-from app.services.scenario_registry import TECHNOLOGY_FINANCE_FIELD_SCHEMA
+from app.services.scenario_registry import (
+    DIGITAL_FINANCE_REGISTRATION,
+    GREEN_FINANCE_REGISTRATION,
+    PENSION_FINANCE_REGISTRATION,
+    SCENARIO_REGISTRY,
+    TECHNOLOGY_FINANCE_FIELD_SCHEMA,
+    TECHNOLOGY_FINANCE_REGISTRATION,
+    ScenarioRegistration,
+)
 from app.services.technology_finance_classification_workflow import (
     TechnologyFinanceWorkflowResult,
 )
@@ -64,6 +73,23 @@ def _upload_technology_finance(client: TestClient):
     template_path = get_settings().technology_finance_template_path
     return client.post(
         f"/api/v1/scenarios/{SCENARIO_ID}/cases",
+        files={
+            "file": (
+                template_path.name,
+                template_path.read_bytes(),
+                route_module.DOCX_MIME,
+            )
+        },
+    )
+
+
+def _upload_registered_scenario(
+    client: TestClient,
+    registration: ScenarioRegistration,
+):
+    template_path = registration.template_path()
+    return client.post(
+        f"/api/v1/scenarios/{registration.id}/cases",
         files={
             "file": (
                 template_path.name,
@@ -288,6 +314,90 @@ def test_technology_finance_seven_endpoint_types(
     assert [row["映射源行"] for row in rows] == [12, 28]
     assert rows[0]["业务证据摘要"] == "贷款用途详细描述：用于医药项目建设"
     assert rows[1]["Stage A结果ID"] == objection_response.json()["stage_a"]["id"]
+
+
+@pytest.mark.parametrize(
+    "registration",
+    [
+        TECHNOLOGY_FINANCE_REGISTRATION,
+        GREEN_FINANCE_REGISTRATION,
+        DIGITAL_FINANCE_REGISTRATION,
+        PENSION_FINANCE_REGISTRATION,
+    ],
+    ids=lambda registration: registration.id,
+)
+def test_registered_scenario_upload_and_detail_return_complete_profile_schema(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    registration: ScenarioRegistration,
+) -> None:
+    available_registration = replace(registration, status="available")
+    monkeypatch.setattr(
+        route_module,
+        "SCENARIO_REGISTRY",
+        {
+            **SCENARIO_REGISTRY,
+            registration.id: available_registration,
+        },
+    )
+
+    upload_response = _upload_registered_scenario(client, available_registration)
+
+    assert upload_response.status_code == 201
+    created = upload_response.json()
+    assert created["scenario"] == registration.id
+    detail_response = client.get(
+        f"/api/v1/scenarios/{registration.id}/cases/{created['id']}"
+    )
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["scenario"] == registration.id
+    assert [(item["field"], item["label"]) for item in detail["input_fields"]] == [
+        (field.key, field.label) for field in registration.field_schema
+    ]
+    assert len(detail["input_fields"]) == len(registration.field_schema)
+
+
+@pytest.mark.parametrize("scenario_id", ["inclusive_finance", "not_registered"])
+def test_unavailable_or_unknown_upload_is_rejected_before_handler_dispatch(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    scenario_id: str,
+) -> None:
+    handler_lookup = MagicMock()
+    monkeypatch.setattr(route_module, "get_scenario_case_handler", handler_lookup)
+    template_path = get_settings().technology_finance_template_path
+
+    response = client.post(
+        f"/api/v1/scenarios/{scenario_id}/cases",
+        files={
+            "file": (
+                template_path.name,
+                template_path.read_bytes(),
+                route_module.DOCX_MIME,
+            )
+        },
+    )
+
+    assert response.status_code == (409 if scenario_id == "inclusive_finance" else 404)
+    handler_lookup.assert_not_called()
+
+
+def test_scenario_mismatch_is_rejected_before_detail_handler_dispatch(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    national_case_id = _upload_national_economy(client).json()["id"]
+    handler_lookup = MagicMock()
+    monkeypatch.setattr(route_module, "get_scenario_case_handler", handler_lookup)
+
+    response = client.get(
+        f"/api/v1/scenarios/{SCENARIO_ID}/cases/{national_case_id}"
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "案例不存在"
+    handler_lookup.assert_not_called()
 
 
 @pytest.mark.parametrize(

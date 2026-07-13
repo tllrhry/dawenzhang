@@ -30,7 +30,8 @@
 - ✅ `add-five-major-articles-technology-finance` 已验收归档；本 change 现为唯一待做 change，归档顺序前置约束已满足。
 - ✅ Task 1.1：养老模板已将“项目建设/运营内容”“核心交易品类/服务内容”恢复为独立字段行；绿20/数18/养18 DOCX 资产预检及缺失、重复、嵌入提示负例已建立，统一 runner PASS。LibreOffice 本机缺失，DOCX 已完成结构校验但未完成 PNG 视觉渲染。
 - ✅ Task 1.2：建立三场景映射 Excel 资产预检，统一归一中英换行表头，校验必需列、归一后重复列和可选场景类别；忽略锁文件/`.DS_Store`，报告源 SHA-256 与动态数据行数。正式资产预检为绿 201、数 173、养 240 行，定向 7 tests 与统一 runner PASS。
-- ⏭️ 下一步：执行 task 1.3，定义三个场景稳定 schema、字段别名、Stage A 13 字段子集和 Stage B 证据优先级。派单走 `/dispatch` + `codex-pro`。修改任何符号前先做 GitNexus upstream impact，HIGH/CRITICAL 先暂停报告。
+- ✅ Task 1.3：三个新场景已注册稳定 schema（绿20/数18/养18）、Stage A 13 字段子集、模板别名与完整 Stage B 证据白名单/优先级；场景仍保持 `coming_soon`，提示列不进入 schema。
+- ⏭️ 下一步：执行 task 2.1，在 `config.py` 增加三场景模板/映射路径配置，并把注册扩展为可执行 profile；新场景仍保持 `coming_soon`。派单走 `/dispatch` + `codex-pro`。修改任何符号前先做 GitNexus upstream impact，HIGH/CRITICAL 先暂停报告。
 - 📌 映射资产表头已由 task 1.2 gate 锁定为绿8列/数·养7列；行数与哈希由 gate 动态报告，不在测试中锁死。模板字段数由 task 1.1 gate 锁定为绿20/数18/养18。
 
 ## 常驻注意事项

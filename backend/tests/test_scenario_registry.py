@@ -3,11 +3,88 @@ from pathlib import Path
 from app.core.config import Settings
 from app.services.national_economy_case_ingestion import FIELD_LABELS
 from app.services.scenario_registry import (
+    DIGITAL_FINANCE_ADDITIONAL_FIELDS,
+    DIGITAL_FINANCE_REGISTRATION,
+    DIGITAL_FINANCE_SCENARIO,
+    GREEN_FINANCE_ADDITIONAL_FIELDS,
+    GREEN_FINANCE_REGISTRATION,
+    GREEN_FINANCE_SCENARIO,
+    PENSION_FINANCE_ADDITIONAL_FIELDS,
+    PENSION_FINANCE_REGISTRATION,
+    PENSION_FINANCE_SCENARIO,
     SCENARIO_REGISTRY,
     TECHNOLOGY_FINANCE_ADDITIONAL_FIELDS,
     TECHNOLOGY_FINANCE_FIELD_SCHEMA,
     TECHNOLOGY_FINANCE_REGISTRATION,
     TECHNOLOGY_FINANCE_SCENARIO,
+)
+
+
+NEW_SCENARIO_CONTRACTS = (
+    (
+        GREEN_FINANCE_SCENARIO,
+        GREEN_FINANCE_REGISTRATION,
+        GREEN_FINANCE_ADDITIONAL_FIELDS,
+        20,
+        {
+            "entity_type": "主体类型",
+            "annual_revenue": "上年度营业收入",
+            "green_project_name": "对应绿色项目名称",
+            "project_content": "项目建设 / 运营内容",
+            "energy_saving_pollution_control": "节能减排 / 污染治理内容",
+            "green_certifications": "环保与绿色资质认证",
+            "carbon_environmental_benefits": "碳排放与环境效益",
+        },
+        (
+            "loan_purpose",
+            "green_project_name",
+            "project_content",
+            "energy_saving_pollution_control",
+            "carbon_environmental_benefits",
+            "green_certifications",
+            "trade_goods_services",
+        ),
+    ),
+    (
+        DIGITAL_FINANCE_SCENARIO,
+        DIGITAL_FINANCE_REGISTRATION,
+        DIGITAL_FINANCE_ADDITIONAL_FIELDS,
+        18,
+        {
+            "entity_type": "主体类型",
+            "annual_revenue": "上年度营业收入",
+            "project_name": "对应项目名称",
+            "project_content": "项目建设 / 运营内容",
+            "rd_ip_info": "研发与知识产权情况",
+        },
+        (
+            "loan_purpose",
+            "project_name",
+            "project_content",
+            "rd_ip_info",
+            "trade_goods_services",
+        ),
+    ),
+    (
+        PENSION_FINANCE_SCENARIO,
+        PENSION_FINANCE_REGISTRATION,
+        PENSION_FINANCE_ADDITIONAL_FIELDS,
+        18,
+        {
+            "entity_type": "主体类型",
+            "annual_revenue": "上年度营业收入",
+            "project_name": "对应项目名称",
+            "project_content": "项目建设 / 运营内容",
+            "certifications": "企业核心资质与认证",
+        },
+        (
+            "loan_purpose",
+            "project_name",
+            "project_content",
+            "certifications",
+            "trade_goods_services",
+        ),
+    ),
 )
 
 
@@ -52,6 +129,60 @@ def test_technology_finance_schema_contains_all_additional_fields() -> None:
     }
 
     assert additional_fields == EXPECTED_ADDITIONAL_FIELDS
+
+
+def test_new_finance_scenario_schema_contracts_are_stable() -> None:
+    for (
+        scenario_id,
+        registration,
+        additional_fields,
+        expected_count,
+        expected_additional_fields,
+        expected_evidence_prefix,
+    ) in NEW_SCENARIO_CONTRACTS:
+        schema_labels = {field.key: field.label for field in registration.field_schema}
+        actual_additional_fields = {
+            field.key: field.label for field in additional_fields
+        }
+
+        assert SCENARIO_REGISTRY[scenario_id] is registration
+        assert registration.status == "coming_soon"
+        assert registration.parent_id == "five_major_articles"
+        assert len(registration.field_schema) == expected_count
+        assert len(schema_labels) == expected_count
+        assert all(field.key and field.label for field in registration.field_schema)
+        assert actual_additional_fields == expected_additional_fields
+        assert registration.stage_a_field_keys == tuple(FIELD_LABELS)
+        assert {
+            key: schema_labels[key] for key in registration.stage_a_field_keys
+        } == FIELD_LABELS
+        assert registration.stage_b_evidence_field_keys[: len(expected_evidence_prefix)] == (
+            expected_evidence_prefix
+        )
+        assert set(registration.stage_b_evidence_field_keys) == set(schema_labels)
+        assert len(registration.stage_b_evidence_field_keys) == expected_count
+
+
+def test_new_finance_schemas_normalize_locked_stage_a_aliases() -> None:
+    expected_aliases = {
+        "enterprise_name": ("企业全称",),
+        "counterparty_name": ("本次交易对手名称",),
+        "trade_goods_services": ("核心交易品类 / 服务内容",),
+    }
+
+    for _, registration, *_ in NEW_SCENARIO_CONTRACTS:
+        fields = {field.key: field for field in registration.field_schema}
+        assert {
+            key: fields[key].aliases for key in expected_aliases
+        } == expected_aliases
+
+
+def test_new_finance_schemas_do_not_persist_template_hint_column() -> None:
+    for _, registration, *_ in NEW_SCENARIO_CONTRACTS:
+        assert "填写提示" not in {
+            field.label for field in registration.field_schema
+        }
+        assert all(not hasattr(field, "hint") for field in registration.field_schema)
 
 
 def test_technology_finance_template_path_comes_from_settings(

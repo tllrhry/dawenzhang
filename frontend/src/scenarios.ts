@@ -25,7 +25,7 @@ export const scenarioViews: Record<ScenarioId, ScenarioView> = {
   [TECHNOLOGY_FINANCE_SCENARIO]: {
     id: TECHNOLOGY_FINANCE_SCENARIO,
     name: '科技金融',
-    description: '先完成国民经济行业分类，再生成可追溯的科技金融多标签判定。',
+    description: '先完成国民经济行业分类，再生成可追溯的科技金融标签判定。',
     templateName: '科技金融分类模板',
     classifyPath: '/scenarios/technology_finance/classify',
     historyPath: '/scenarios/technology_finance/history',

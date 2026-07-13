@@ -14,7 +14,11 @@ from app.services.national_economy_classification_workflow import (
     classify_case,
     reclassify_case,
 )
+from app.services.technology_finance_label_selection import (
+    select_most_matching_technology_finance_label,
+)
 from app.services.technology_finance_mapping_query import (
+    TechnologyFinanceMappingLabel,
     TechnologyFinanceMappingLookupResult,
     lookup_technology_finance_mapping,
 )
@@ -33,6 +37,7 @@ StageAReclassificationCallable = Callable[
     NationalEconomyClassificationResult,
 ]
 MappingLookupCallable = Callable[..., TechnologyFinanceMappingLookupResult]
+LabelSelectionCallable = Callable[..., TechnologyFinanceMappingLabel]
 StageBClassificationCallable = Callable[
     ...,
     TechnologyFinanceStageBResult,
@@ -52,6 +57,9 @@ def classify_technology_finance_case(
     *,
     stage_a_classifier: StageAClassificationCallable = classify_case,
     mapping_lookup: MappingLookupCallable = lookup_technology_finance_mapping,
+    label_selector: LabelSelectionCallable = (
+        select_most_matching_technology_finance_label
+    ),
     stage_b_classifier: StageBClassificationCallable = (
         classify_technology_finance_stage_b
     ),
@@ -68,6 +76,7 @@ def classify_technology_finance_case(
         stage_a_result,
         resolved_settings,
         mapping_lookup=mapping_lookup,
+        label_selector=label_selector,
         stage_b_classifier=stage_b_classifier,
     )
 
@@ -80,6 +89,9 @@ def reclassify_technology_finance_case(
     *,
     stage_a_reclassifier: StageAReclassificationCallable = reclassify_case,
     mapping_lookup: MappingLookupCallable = lookup_technology_finance_mapping,
+    label_selector: LabelSelectionCallable = (
+        select_most_matching_technology_finance_label
+    ),
     stage_b_classifier: StageBClassificationCallable = (
         classify_technology_finance_stage_b
     ),
@@ -99,6 +111,7 @@ def reclassify_technology_finance_case(
         stage_a_result,
         resolved_settings,
         mapping_lookup=mapping_lookup,
+        label_selector=label_selector,
         stage_b_classifier=stage_b_classifier,
     )
 
@@ -110,6 +123,9 @@ def run_technology_finance_stage_b(
     settings: Settings,
     *,
     mapping_lookup: MappingLookupCallable = lookup_technology_finance_mapping,
+    label_selector: LabelSelectionCallable = (
+        select_most_matching_technology_finance_label
+    ),
     stage_b_classifier: StageBClassificationCallable = (
         classify_technology_finance_stage_b
     ),
@@ -149,6 +165,7 @@ def run_technology_finance_stage_b(
             stage_a_result,
             mapping_result,
             settings,
+            label_selector,
             stage_b_classifier,
         )
         return TechnologyFinanceWorkflowResult(
@@ -196,6 +213,7 @@ def _build_stage_b_result(
     stage_a_result: NationalEconomyClassificationResult,
     mapping_result: TechnologyFinanceMappingLookupResult,
     settings: Settings,
+    label_selector: LabelSelectionCallable,
     stage_b_classifier: StageBClassificationCallable,
 ) -> FiveArticlesResult:
     if mapping_result.status == "not_applicable":
@@ -223,11 +241,28 @@ def _build_stage_b_result(
             error_detail=mapping_result.detail,
         )
 
+    loan_direction_labels = mapping_result.loan_direction_labels
+    enterprise_labels = mapping_result.enterprise_labels
+    if len(loan_direction_labels) > 1:
+        # Deterministic mapping may hit multiple independent subjects for the
+        # same code; narrow to the single most-matching one before Stage B.
+        selected_label = label_selector(
+            case.input_payload,
+            stage_a_result,
+            loan_direction_labels,
+            settings,
+        )
+        loan_direction_labels = (selected_label,)
+        if stage_a_result.industry_code == stage_a_result.loan_industry_code:
+            # Same-code Stage B requires enterprise and loan label sets to be
+            # identical; the enterprise side collapses to the same winner.
+            enterprise_labels = loan_direction_labels
+
     decision = stage_b_classifier(
         case.input_payload,
         stage_a_result,
-        mapping_result.enterprise_labels,
-        mapping_result.loan_direction_labels,
+        enterprise_labels,
+        loan_direction_labels,
         settings,
     )
     return _new_result(

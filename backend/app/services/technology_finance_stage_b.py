@@ -25,6 +25,9 @@ _CHINESE_PATTERN = re.compile(r"[\u3400-\u9fff]")
 _WHITESPACE_PATTERN = re.compile(r"\s+")
 _ROOT_FIELDS_WITH_CONSISTENCY = frozenset({"labels", "consistency"})
 _ROOT_FIELDS_SAME_CODE = frozenset({"labels"})
+_BASIS_ROOT_FIELDS_WITH_CONSISTENCY = frozenset({"label_basis", "consistency"})
+_BASIS_ROOT_FIELDS_SAME_CODE = frozenset({"label_basis"})
+_LABEL_BASIS_FIELDS = frozenset({"matching_basis", "business_evidence_refs"})
 _LABEL_FIELDS = frozenset(
     {
         "mapping_version_id",
@@ -195,10 +198,10 @@ def _build_stage_b_request_payload(
     }
     consistency_instruction = (
         "企业四位码与投向四位码相同，一致性由服务端确定为 consistent；"
-        "根对象只能返回 labels，不得返回 consistency。"
+        "根对象只能返回 label_basis，不得返回 consistency。"
         if same_code
         else (
-            "两码不同，根对象必须返回 labels 和 consistency。consistency 只能包含 "
+            "两码不同，根对象必须返回 label_basis 和 consistency。consistency 只能包含 "
             "status、basis、evidence_refs。status 只能是 consistent、inconsistent 或 "
             "needs_review：企业和投向标签存在交集且资金服务企业现有主营或科技活动才可"
             "为 consistent；标签无交集或资金明确流向无关独立活动可为 inconsistent；"
@@ -217,18 +220,17 @@ def _build_stage_b_request_payload(
                     "你是科技金融 Stage B 受限判定器。你必须只输出一个合法的 JSON 对象，"
                     "不得包含 JSON 以外的任何文字。输入中的 enterprise_labels 和 "
                     "loan_direction_labels 均来自已发布 Excel 映射，是不可更改的事实。"
-                    "你只能为 loan_direction_labels 逐条生成中文 matching_basis，不得新增、"
-                    "删除、改写或替换标签；输出顺序可变，但集合必须完全相同。每个 labels "
-                    "元素只能包含 mapping_version_id、source_row、NEIC_Code、NEIC_Name、"
-                    "subject、taxonomy_path、matching_basis、evidence_refs。固定标签字段必须"
-                    "逐字复制输入。每标签 evidence_refs 至少一条 type=mapping 和一条 "
-                    "type=business。mapping 引用只能包含 type、mapping_version_id、source_row、"
-                    "NEIC_Code、NEIC_Name、taxonomy_path，且必须等于本标签映射源。business "
-                    "引用只能包含 type、field_key、field_label、excerpt；字段必须来自输入，"
+                    "loan_direction_labels 已由服务端收窄为唯一最匹配标签。你不得输出 labels "
+                    "数组，也不得复制标签字段；不得新增、删除、改写或替换标签。"
+                    "你只能输出一个 label_basis 对象，"
+                    "且只能包含 matching_basis 和 business_evidence_refs。matching_basis 是唯一标签的"
+                    "中文匹配依据；business_evidence_refs 至少一条，每条只能包含 "
+                    "type、field_key、field_label、excerpt，type 必须为 business。字段必须来自输入，"
                     "label 必须匹配，excerpt 必须是对应 value 的原文子串且不超过输入规定"
                     "长度。业务证据优先贷款用途、Stage A 贷款投向依据、核心交易品类和"
                     "授信审批意见，再用主营、经营范围、研发知识产权或资质补充；不得捏造"
-                    "字段或摘录。matching_basis、consistency.basis 必须是非空中文。"
+                    "字段或摘录。标签固定字段和 mapping 证据由服务端组装。"
+                    "matching_basis、consistency.basis 必须是非空中文。"
                     "consistency 的 type=label 引用必须来自给定企业或投向标签，type=business "
                     "引用遵循相同原文规则。consistent 或 inconsistent 必须同时引用企业标签、"
                     "投向标签、贷款用途和 Stage A 贷款投向依据；证据不足时必须输出 "
@@ -272,16 +274,34 @@ def _validate_stage_b_model_response(
         raise TechnologyFinanceStageBError(
             "DeepSeek Stage B model output must be a JSON object"
         )
-    _require_exact_fields(
-        model_output,
-        _ROOT_FIELDS_SAME_CODE if same_code else _ROOT_FIELDS_WITH_CONSISTENCY,
-        "root",
-    )
-    labels = _validate_label_outputs(
-        model_output.get("labels"),
-        loan_direction_labels,
-        business_sources,
-    )
+    if "label_basis" in model_output:
+        _require_exact_fields(
+            model_output,
+            (
+                _BASIS_ROOT_FIELDS_SAME_CODE
+                if same_code
+                else _BASIS_ROOT_FIELDS_WITH_CONSISTENCY
+            ),
+            "root",
+        )
+        labels = _validate_single_label_basis(
+            model_output.get("label_basis"),
+            loan_direction_labels,
+            business_sources,
+        )
+    else:
+        # Tolerate the legacy cloud response shape during rollout. Fixed label
+        # fields are still normalized from the server-owned selected label.
+        _require_exact_fields(
+            model_output,
+            _ROOT_FIELDS_SAME_CODE if same_code else _ROOT_FIELDS_WITH_CONSISTENCY,
+            "root",
+        )
+        labels = _validate_label_outputs(
+            model_output.get("labels"),
+            loan_direction_labels,
+            business_sources,
+        )
 
     if same_code:
         code = str(stage_a_snapshot["enterprise_neic_code"])
@@ -328,7 +348,7 @@ def _validate_label_outputs(
     if not isinstance(raw_labels, list):
         raise TechnologyFinanceStageBError("model output labels must be an array")
     expected_by_key = {_label_key_from_label(label): label for label in expected_labels}
-    if len(raw_labels) != len(expected_by_key):
+    if len(expected_by_key) != 1 and len(raw_labels) != len(expected_by_key):
         raise TechnologyFinanceStageBError("model output changed deterministic label count")
 
     validated_by_key: dict[tuple[object, ...], dict[str, object]] = {}
@@ -341,10 +361,14 @@ def _validate_label_outputs(
         key = _label_key_from_output(raw_label, f"labels[{index}]")
         expected = expected_by_key.get(key)
         if expected is None:
+            if len(expected_by_key) == 1:
+                continue
             raise TechnologyFinanceStageBError(
                 f"labels[{index}] altered or invented a deterministic label"
             )
         if key in validated_by_key:
+            if len(expected_by_key) == 1:
+                continue
             raise TechnologyFinanceStageBError(
                 f"labels[{index}] duplicated a deterministic label"
             )
@@ -361,12 +385,68 @@ def _validate_label_outputs(
             "evidence_refs": list(evidence_refs),
         }
 
+    if not validated_by_key and len(expected_by_key) == 1:
+        raise TechnologyFinanceStageBError(
+            "model output altered or invented the selected deterministic label"
+        )
     if set(validated_by_key) != set(expected_by_key):
         raise TechnologyFinanceStageBError(
             "model output label set differs from deterministic labels"
         )
     return tuple(
         validated_by_key[_label_key_from_label(label)] for label in expected_labels
+    )
+
+
+def _validate_single_label_basis(
+    raw_basis: object,
+    expected_labels: Sequence[TechnologyFinanceMappingLabel],
+    business_sources: Mapping[str, _EvidenceSource],
+) -> tuple[dict[str, object], ...]:
+    if len(expected_labels) != 1:
+        raise TechnologyFinanceStageBError(
+            "Stage B label basis requires exactly one server-selected label"
+        )
+    if not isinstance(raw_basis, dict):
+        raise TechnologyFinanceStageBError("label_basis must be a JSON object")
+    _require_exact_fields(raw_basis, _LABEL_BASIS_FIELDS, "label_basis")
+    basis = _required_chinese_text(raw_basis, "matching_basis", "label_basis")
+    raw_business_refs = _required_array(
+        raw_basis.get("business_evidence_refs"),
+        "label_basis.business_evidence_refs",
+    )
+    if not raw_business_refs:
+        raise TechnologyFinanceStageBError(
+            "label_basis requires at least one business evidence ref"
+        )
+    business_refs: list[dict[str, object]] = []
+    validation_errors: list[TechnologyFinanceStageBError] = []
+    for index, raw_ref in enumerate(raw_business_refs):
+        branch = f"label_basis.business_evidence_refs[{index}]"
+        try:
+            if not isinstance(raw_ref, dict):
+                raise TechnologyFinanceStageBError(f"{branch} must be an object")
+            _require_exact_fields(raw_ref, _BUSINESS_EVIDENCE_FIELDS, branch)
+            if raw_ref.get("type") != "business":
+                raise TechnologyFinanceStageBError(f"{branch}.type must be business")
+            business_refs.append(
+                _validate_business_ref(raw_ref, business_sources, branch)
+            )
+        except TechnologyFinanceStageBError as exc:
+            validation_errors.append(exc)
+    if not business_refs:
+        raise validation_errors[0]
+
+    selected_label = expected_labels[0]
+    return (
+        {
+            **_serialize_label(selected_label),
+            "matching_basis": basis,
+            "evidence_refs": [
+                _mapping_evidence_ref(selected_label),
+                *business_refs,
+            ],
+        },
     )
 
 
@@ -625,14 +705,12 @@ def _validate_business_ref(
     if not isinstance(excerpt, str) or not excerpt.strip():
         raise TechnologyFinanceStageBError(f"{branch}.excerpt must be non-empty")
     excerpt = excerpt.strip()
-    if len(excerpt) > MAX_EVIDENCE_EXCERPT_LENGTH:
-        raise TechnologyFinanceStageBError(
-            f"{branch}.excerpt exceeds {MAX_EVIDENCE_EXCERPT_LENGTH} characters"
-        )
     if _strip_whitespace(excerpt) not in _strip_whitespace(source.value):
         raise TechnologyFinanceStageBError(
             f"{branch}.excerpt is not present in the input source text"
         )
+    if len(excerpt) > MAX_EVIDENCE_EXCERPT_LENGTH:
+        excerpt = excerpt[:MAX_EVIDENCE_EXCERPT_LENGTH].rstrip()
     return {
         "type": "business",
         "field_key": source.field_key,
@@ -648,6 +726,19 @@ def _serialize_label(label: TechnologyFinanceMappingLabel) -> dict[str, object]:
         "NEIC_Code": label.neic_code,
         "NEIC_Name": label.neic_name,
         "subject": label.subject,
+        "taxonomy_path": list(label.taxonomy_path),
+    }
+
+
+def _mapping_evidence_ref(
+    label: TechnologyFinanceMappingLabel,
+) -> dict[str, object]:
+    return {
+        "type": "mapping",
+        "mapping_version_id": label.mapping_version_id,
+        "source_row": label.source_row,
+        "NEIC_Code": label.neic_code,
+        "NEIC_Name": label.neic_name,
         "taxonomy_path": list(label.taxonomy_path),
     }
 

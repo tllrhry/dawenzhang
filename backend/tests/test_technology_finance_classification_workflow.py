@@ -339,6 +339,141 @@ def test_uncompleted_stage_a_short_circuits_without_mapping_or_stage_b(
     ) == 0
 
 
+def _multi_subject_labels(
+    mapping_version_id: int,
+) -> tuple[TechnologyFinanceMappingLabel, ...]:
+    return (
+        TechnologyFinanceMappingLabel(
+            mapping_version_id=mapping_version_id,
+            scenario_id="technology_finance",
+            neic_code="2710",
+            code_level=4,
+            neic_name="化学药品原料药制造",
+            subject="高技术产业（制造业）",
+            tier1="医药制造业",
+            tier2=None,
+            tier3=None,
+            tier4=None,
+            source_row=11,
+        ),
+        TechnologyFinanceMappingLabel(
+            mapping_version_id=mapping_version_id,
+            scenario_id="technology_finance",
+            neic_code="2710",
+            code_level=4,
+            neic_name="化学药品原料药制造",
+            subject="国家科技重大项目",
+            tier1="重大新药创制",
+            tier2=None,
+            tier3=None,
+            tier4=None,
+            source_row=22,
+        ),
+    )
+
+
+def test_multiple_candidates_are_narrowed_to_one_before_stage_b(
+    workflow_context: tuple[
+        Session, NationalEconomyClassificationCase, FiveArticlesMappingVersion
+    ],
+) -> None:
+    session, case, mapping_version = workflow_context
+    candidates = _multi_subject_labels(mapping_version.id)
+    mapping_result = TechnologyFinanceMappingLookupResult(
+        status="mapping_hit",
+        mapping_version_id=mapping_version.id,
+        mapping_version=1,
+        enterprise_labels=(),
+        loan_direction_labels=candidates,
+        detail="loan_direction_mapping_hit",
+    )
+    mapping_lookup = MagicMock(return_value=mapping_result)
+    label_selector = MagicMock(return_value=candidates[1])
+    stage_b_classifier = MagicMock(return_value=_stage_b_decision())
+
+    outcome = classify_technology_finance_case(
+        session,
+        case,
+        _settings(),
+        stage_a_classifier=lambda session, case, settings: _persist_stage_a(
+            session, case
+        ),
+        mapping_lookup=mapping_lookup,
+        label_selector=label_selector,
+        stage_b_classifier=stage_b_classifier,
+    )
+
+    label_selector.assert_called_once()
+    assert label_selector.call_args.args[2] == candidates
+    stage_b_classifier.assert_called_once()
+    assert stage_b_classifier.call_args.args[3] == (candidates[1],)
+    assert outcome.stage_b_result is not None
+    assert outcome.stage_b_result.status == "completed"
+
+
+def _persist_same_code_stage_a(
+    session: Session, case: NationalEconomyClassificationCase
+) -> NationalEconomyClassificationResult:
+    # enterprise and loan four-digit codes are identical (both 2710).
+    result = NationalEconomyClassificationResult(
+        case_id=case.id,
+        version=1,
+        status="completed",
+        industry_code="2710",
+        industry_major_code="C27",
+        industry_name="化学药品原料药制造",
+        loan_industry_code="2710",
+        loan_industry_major_code="C27",
+        loan_industry_name="化学药品原料药制造",
+        loan_matching_basis="贷款用于化学药品项目",
+        rationale="Stage A 测试依据",
+        candidate_snapshot=[],
+        model_output={"stage": "a", "status": "completed"},
+    )
+    session.add(result)
+    case.status = "completed"
+    session.commit()
+    session.refresh(result)
+    return result
+
+
+def test_same_code_narrows_enterprise_side_to_the_same_winner(
+    workflow_context: tuple[
+        Session, NationalEconomyClassificationCase, FiveArticlesMappingVersion
+    ],
+) -> None:
+    session, case, mapping_version = workflow_context
+    candidates = _multi_subject_labels(mapping_version.id)
+    mapping_result = TechnologyFinanceMappingLookupResult(
+        status="mapping_hit",
+        mapping_version_id=mapping_version.id,
+        mapping_version=1,
+        enterprise_labels=candidates,
+        loan_direction_labels=candidates,
+        detail="loan_direction_mapping_hit",
+    )
+    mapping_lookup = MagicMock(return_value=mapping_result)
+    label_selector = MagicMock(return_value=candidates[0])
+    stage_b_classifier = MagicMock(return_value=_stage_b_decision())
+
+    outcome = classify_technology_finance_case(
+        session,
+        case,
+        _settings(),
+        stage_a_classifier=lambda session, case, settings: _persist_same_code_stage_a(
+            session, case
+        ),
+        mapping_lookup=mapping_lookup,
+        label_selector=label_selector,
+        stage_b_classifier=stage_b_classifier,
+    )
+
+    stage_b_classifier.assert_called_once()
+    assert stage_b_classifier.call_args.args[2] == (candidates[0],)
+    assert stage_b_classifier.call_args.args[3] == (candidates[0],)
+    assert outcome.stage_b_result is not None
+
+
 @pytest.mark.parametrize(
     ("mapping_status", "result_status", "consistency_status"),
     [

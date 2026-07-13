@@ -422,3 +422,125 @@ def test_output_label_order_is_normalized_to_deterministic_input_order() -> None
     result = _run(output, (enterprise,), (first, second))
 
     assert [label["source_row"] for label in result.labels] == [22, 23]
+
+
+def test_single_label_basis_is_attached_to_server_owned_label() -> None:
+    label = _label(code="2710", name="化学药品原料药制造", source_row=11)
+    stage_a = _stage_a(
+        enterprise_code="2710",
+        enterprise_name="化学药品原料药制造",
+        loan_code="2710",
+        loan_name="化学药品原料药制造",
+    )
+    output = {
+        "label_basis": {
+            "matching_basis": "贷款资金用于现有研发平台升级，命中该科技金融类别。",
+            "business_evidence_refs": [_business_ref()],
+        }
+    }
+
+    result = _run(output, (label,), (label,), stage_a=stage_a)
+
+    assert result.labels == (
+        {
+            **_fixed_label(label),
+            "matching_basis": "贷款资金用于现有研发平台升级，命中该科技金融类别。",
+            "evidence_refs": [_mapping_ref(label), _business_ref()],
+        },
+    )
+    assert set(result.model_output) == {"label_basis"}
+
+
+def test_single_label_basis_discards_extra_invalid_business_refs() -> None:
+    label = _label(code="2710", name="化学药品原料药制造", source_row=11)
+    stage_a = _stage_a(
+        enterprise_code="2710",
+        enterprise_name="化学药品原料药制造",
+        loan_code="2710",
+        loan_name="化学药品原料药制造",
+    )
+    invalid_ref = _business_ref(field_key="invented_field")
+    output = {
+        "label_basis": {
+            "matching_basis": "贷款资金用于现有研发平台升级，命中该科技金融类别。",
+            "business_evidence_refs": [_business_ref(), invalid_ref],
+        }
+    }
+
+    result = _run(output, (label,), (label,), stage_a=stage_a)
+
+    assert result.labels[0]["evidence_refs"] == [
+        _mapping_ref(label),
+        _business_ref(),
+    ]
+
+
+def test_single_label_basis_rejects_when_all_business_refs_are_invalid() -> None:
+    label = _label(code="2710", name="化学药品原料药制造", source_row=11)
+    stage_a = _stage_a(
+        enterprise_code="2710",
+        enterprise_name="化学药品原料药制造",
+        loan_code="2710",
+        loan_name="化学药品原料药制造",
+    )
+    output = {
+        "label_basis": {
+            "matching_basis": "贷款资金用于现有研发平台升级，命中该科技金融类别。",
+            "business_evidence_refs": [
+                _business_ref(field_key="invented_field"),
+                _business_ref(excerpt="原始输入中不存在的虚假摘录"),
+            ],
+        }
+    }
+
+    with pytest.raises(TechnologyFinanceStageBError, match="absent"):
+        _run(output, (label,), (label,), stage_a=stage_a)
+
+
+def test_legacy_extra_labels_cannot_expand_single_selected_result() -> None:
+    enterprise = _label(code="2710", name="化学药品原料药制造", source_row=11)
+    selected = _label(code="6311", name="基础软件开发", source_row=22)
+    extra = _label(
+        code="6311",
+        name="基础软件开发",
+        source_row=99,
+        subject="模型额外输出",
+        taxonomy_path=("不应进入正式结果",),
+    )
+    output = _model_output((enterprise,), (selected,), "consistent")
+    output["labels"].append(_label_output(extra))
+
+    result = _run(output, (enterprise,), (selected,))
+
+    assert [label["source_row"] for label in result.labels] == [22]
+
+
+def test_grounded_long_business_excerpt_is_truncated_by_server() -> None:
+    label = _label(code="2710", name="化学药品原料药制造", source_row=11)
+    stage_a = _stage_a(
+        enterprise_code="2710",
+        enterprise_name="化学药品原料药制造",
+        loan_code="2710",
+        loan_name="化学药品原料药制造",
+    )
+    long_excerpt = "采购服务器并建设现有药物研发平台" * 20
+    output = {
+        "label_basis": {
+            "matching_basis": "贷款用于现有药物研发平台升级。",
+            "business_evidence_refs": [
+                _business_ref(excerpt=long_excerpt),
+            ],
+        }
+    }
+
+    result = _run(
+        output,
+        (label,),
+        (label,),
+        stage_a=stage_a,
+        input_payload={**_input_payload(), "loan_purpose": long_excerpt},
+    )
+
+    saved_excerpt = result.labels[0]["evidence_refs"][1]["excerpt"]
+    assert saved_excerpt == long_excerpt[:160]
+    assert len(saved_excerpt) == 160

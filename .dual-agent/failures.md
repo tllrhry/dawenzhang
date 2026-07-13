@@ -18,6 +18,7 @@
 ## 观察中（出现过，盯是否复现）
 
 - **codex-pro 派单收到 `-32000 Connection closed` 不能默认当作「没干活」**：2026-07-11 在 `align-national-economy-classification-rules-and-result-layout` 1.1/1.2 派单中三次复现——`mcp__codex-pro__codex`/`codex-reply` 报错返回，但 `git status`/`git diff` 核实后发现 codex-pro（本机常驻 app，非纯 stdio 子进程）已经把改动真实写完，其中一次甚至全部测试已通过。用 `/usr/bin/log show`（注意 `log` 是 zsh 内建命令，会跟系统 `log` 冲突，需走全路径）核对同一时间窗口，发现 `codex`/`Codex` 进程对外 443 连接反复在建立后 ~0.1-0.2s 内被 RST（`so_error=54`），几秒到十几秒重试一次——是本机网络对 codex 后端连接不稳定，不是 MCP 工具调用超时配置问题。对策：①收到 `-32000` 后先 `git status`/`git diff` 核实是否已落盘，再决定是否重新派单；②不要看到报错就立刻重派，可能造成重复劳动或和仍在跑的会话产生冲突写入；③已将 `MCP_TOOL_TIMEOUT` 设为全局 `~/.claude/settings.json` 3600000（1 小时）兜底给更多完成时间，但这只是保险不是根因修复。
+- **全量测试共用开发 PostgreSQL 会清理真实联调数据**：2026-07-13 修复 Stage B 标签数量漂移后，直接在开发库运行全量 pytest/runner；迁移往返与 fixture 清理删除了已发布科技金融映射版本，前台随后稳定返回 `published_mapping_version_not_found`。对策：①本地真实联调后不得在同一库并行跑两套测试；②全量测试完成后必须复查已发布目录/映射版本，并用正式同步命令恢复联调数据；③后续应将测试库与开发库隔离，在隔离完成前把“测后复查发布版本”作为人工收尾。
 
 ## 脚本化候选（揣兜里，先不写）
 

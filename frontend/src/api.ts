@@ -1,6 +1,18 @@
+import {
+  caseMatchesScenario,
+  scenarioCasesPath,
+  templateScenarioId,
+} from './scenarios'
+import type { ScenarioId } from './scenarios'
+
+export { NATIONAL_ECONOMY_SCENARIO, TECHNOLOGY_FINANCE_SCENARIO } from './scenarios'
+export type { ScenarioId } from './scenarios'
+
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '')
 
-export type ClassificationStatus = 'completed' | 'needs_review'
+export type ClassificationStatus = 'completed' | 'needs_review' | 'classification_failed'
+export type FiveArticlesStatus = ClassificationStatus | 'not_applicable'
+export type ConsistencyStatus = 'consistent' | 'inconsistent' | 'needs_review' | 'not_applicable'
 
 export interface InputField {
   field: string
@@ -24,11 +36,60 @@ export interface ClassificationResult {
   loan_industry_display_code: string | null
   loan_industry_name: string | null
   loan_matching_basis: string | null
-  loan_matches_enterprise: boolean
+  loan_matches_enterprise: boolean | null
   candidate_snapshot: unknown[]
   objection: ResultObjection | null
   created_at: string
 }
+
+export interface EvidenceReference {
+  type?: 'mapping' | 'business' | 'stage_a' | string
+  mapping_version_id?: number
+  source_row?: number
+  NEIC_Code?: string
+  NEIC_Name?: string
+  taxonomy_path?: string[]
+  field_key?: string
+  field_label?: string
+  excerpt?: string
+}
+
+export interface TechnologyFinanceLabel {
+  mapping_version_id: number
+  subject: string
+  taxonomy_path: string[]
+  NEIC_Code: string
+  NEIC_Name: string
+  source_row: number
+  matching_basis: string
+  evidence_refs: EvidenceReference[]
+}
+
+export interface FiveArticlesResult {
+  id: string
+  version: number
+  status: FiveArticlesStatus
+  stage_a_result_id: string
+  mapping_version_id: number | null
+  labels: TechnologyFinanceLabel[]
+  loan_neic_code: string | null
+  loan_neic_name: string | null
+  enterprise_neic_code: string | null
+  enterprise_neic_name: string | null
+  consistency_status: ConsistencyStatus | null
+  consistency_basis: string | null
+  consistency_evidence_refs: EvidenceReference[]
+  error_detail: string | null
+  created_at: string
+}
+
+export interface TechnologyFinanceWorkflowResult {
+  stage_a: ClassificationResult
+  stage_b: FiveArticlesResult | null
+}
+
+export type ClassificationOutcome = ClassificationResult | TechnologyFinanceWorkflowResult
+export type ClassificationHistoryItem = ClassificationResult | FiveArticlesResult
 
 export interface ClassificationCase {
   id: string
@@ -41,15 +102,15 @@ export interface ClassificationCase {
   updated_at: string
 }
 
-interface CreatedCase {
+export interface CreatedCase {
   id: string
   scenario: string
   status: string
   original_filename: string
 }
 
-interface HistoryResponse {
-  items: ClassificationResult[]
+interface HistoryResponse<T> {
+  items: T[]
 }
 
 interface ValidationDetail {
@@ -92,36 +153,41 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 
-export function createCase(file: File): Promise<CreatedCase> {
+export function createCase(scenarioId: ScenarioId, file: File): Promise<CreatedCase> {
   const body = new FormData()
   body.append('file', file)
-  return requestJson<CreatedCase>('/national-economy/cases', { method: 'POST', body })
+  return requestJson<CreatedCase>(scenarioCasesPath(scenarioId), { method: 'POST', body })
 }
 
-export function getCase(caseId: string): Promise<ClassificationCase> {
-  return requestJson<ClassificationCase>(`/national-economy/cases/${caseId}`)
+export function getCase(scenarioId: ScenarioId, caseId: string): Promise<ClassificationCase> {
+  return requestJson<ClassificationCase>(`${scenarioCasesPath(scenarioId)}/${caseId}`).then((caseData) => {
+    if (!caseMatchesScenario(scenarioId, caseData.scenario)) {
+      throw new ApiError(404, '案例与当前场景不匹配')
+    }
+    return caseData
+  })
 }
 
-export function classifyCase(caseId: string): Promise<ClassificationResult> {
-  return requestJson<ClassificationResult>(`/national-economy/cases/${caseId}/classifications`, { method: 'POST' })
+export function classifyCase(scenarioId: ScenarioId, caseId: string): Promise<ClassificationOutcome> {
+  return requestJson<ClassificationOutcome>(`${scenarioCasesPath(scenarioId)}/${caseId}/classifications`, { method: 'POST' })
 }
 
-export function submitObjection(caseId: string, objectionText: string): Promise<ClassificationResult> {
-  return requestJson<ClassificationResult>(`/national-economy/cases/${caseId}/objections`, {
+export function submitObjection(scenarioId: ScenarioId, caseId: string, objectionText: string): Promise<ClassificationOutcome> {
+  return requestJson<ClassificationOutcome>(`${scenarioCasesPath(scenarioId)}/${caseId}/objections`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ objection_text: objectionText }),
   })
 }
 
-export function getHistory(caseId: string): Promise<ClassificationResult[]> {
-  return requestJson<HistoryResponse>(`/national-economy/cases/${caseId}/history`).then(({ items }) => items)
+export function getHistory(scenarioId: ScenarioId, caseId: string): Promise<ClassificationHistoryItem[]> {
+  return requestJson<HistoryResponse<ClassificationHistoryItem>>(`${scenarioCasesPath(scenarioId)}/${caseId}/history`).then(({ items }) => items)
 }
 
-export function templateUrl(): string {
-  return `${apiBaseUrl}/scenarios/national-economy/template`
+export function templateUrl(scenarioId: ScenarioId): string {
+  return `${apiBaseUrl}/scenarios/${templateScenarioId(scenarioId)}/template`
 }
 
-export function exportUrl(caseId: string): string {
-  return `${apiBaseUrl}/national-economy/cases/${caseId}/export`
+export function exportUrl(scenarioId: ScenarioId, caseId: string): string {
+  return `${apiBaseUrl}${scenarioCasesPath(scenarioId)}/${caseId}/export`
 }

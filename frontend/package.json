@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "test": "tsc --noEmit"
+    "test": "tsc -p tsconfig.app.json --noEmit && node --experimental-strip-types --test tests/scenarios.test.ts"
   },
   "dependencies": {
     "@ant-design/icons": "^5.6.1",

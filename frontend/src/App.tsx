@@ -32,6 +32,8 @@ import {
 import { BrowserRouter, NavLink, Route, Routes, useNavigate } from 'react-router-dom'
 import {
   ApiError,
+  NATIONAL_ECONOMY_SCENARIO,
+  TECHNOLOGY_FINANCE_SCENARIO,
   classifyCase,
   createCase,
   exportUrl,
@@ -40,9 +42,61 @@ import {
   submitObjection,
   templateUrl,
 } from './api'
-import type { ClassificationCase, ClassificationResult } from './api'
+import type {
+  ClassificationCase,
+  ClassificationHistoryItem,
+  ClassificationOutcome,
+  ClassificationResult,
+  EvidenceReference,
+  FiveArticlesResult,
+  ScenarioId,
+  TechnologyFinanceWorkflowResult,
+} from './api'
+import { currentCaseStorageKey, scenarioViews } from './scenarios'
 
-const currentCaseStorageKey = 'national-economy-current-case-id'
+function isTechnologyFinanceWorkflow(result: ClassificationOutcome): result is TechnologyFinanceWorkflowResult {
+  return 'stage_a' in result
+}
+
+function isFiveArticlesResult(result: ClassificationHistoryItem): result is FiveArticlesResult {
+  return 'stage_a_result_id' in result
+}
+
+const stageBStatusLabels: Record<FiveArticlesResult['status'], string> = {
+  completed: '判定已完成',
+  not_applicable: '不属于科技金融',
+  needs_review: '待人工复核',
+  classification_failed: '判定失败',
+}
+
+const consistencyLabels: Record<NonNullable<FiveArticlesResult['consistency_status']>, string> = {
+  consistent: '一致',
+  inconsistent: '不一致',
+  needs_review: '待人工复核',
+  not_applicable: '不适用',
+}
+
+function statusColor(status: FiveArticlesResult['status']): string {
+  if (status === 'completed') return 'success'
+  if (status === 'not_applicable') return 'default'
+  if (status === 'classification_failed') return 'error'
+  return 'warning'
+}
+
+function consistencyColor(status: FiveArticlesResult['consistency_status']): string {
+  if (status === 'consistent') return 'success'
+  if (status === 'inconsistent') return 'error'
+  if (status === 'needs_review') return 'warning'
+  return 'default'
+}
+
+function evidenceSummary(reference: EvidenceReference): string {
+  if (reference.type === 'mapping') {
+    const path = reference.taxonomy_path?.filter(Boolean).join(' / ')
+    return `映射版本 ${reference.mapping_version_id ?? '--'} · 源行 ${reference.source_row ?? '--'} · ${reference.NEIC_Code || '--'} ${reference.NEIC_Name || ''}${path ? ` · ${path}` : ''}`
+  }
+  return `${reference.field_label || reference.field_key || '业务证据'}：${reference.excerpt || '--'}`
+}
 
 const flowSteps = [
   ['选择分类', '选择业务分类入口'],
@@ -105,7 +159,7 @@ function HomePage() {
         <div className="hero-skyline" />
         <p className="hero-kicker">INTELLIGENT CLASSIFICATION</p>
         <h1>请选择分类入口</h1>
-        <p>当前仅开放“国民经济行业分类”，涉农分类与“五篇大文章分类”暂未开放。</p>
+        <p>当前开放“国民经济行业分类”和“五篇大文章”下的“科技金融”，其他专题暂未开放。</p>
       </section>
 
       <main className="home-content">
@@ -116,7 +170,7 @@ function HomePage() {
               <h2>国民经济行业分类</h2>
               <p>基于企业经营信息，智能识别唯一四级行业代码与名称。</p>
               <Tag className="available-tag" icon={<CheckCircleFilled />}>已开放</Tag>
-              <Button type="primary" size="large" block icon={<ArrowRightOutlined />} iconPosition="end" onClick={() => navigate('/classify')}>
+              <Button type="primary" size="large" block icon={<ArrowRightOutlined />} iconPosition="end" onClick={() => navigate(scenarioViews[NATIONAL_ECONOMY_SCENARIO].classifyPath)}>
                 进入分类
               </Button>
             </div>
@@ -125,7 +179,7 @@ function HomePage() {
           </Card>
 
           <LockedScenario title="涉农分类" description="面向涉农相关企业或案例的专项分类识别。" />
-          <LockedScenario title="五篇大文章分类" description="包含科技金融、绿色金融、养老金融、数字金融等专题分类识别。" tags={['科技金融', '绿色金融', '养老金融', '数字金融']} />
+          <FiveArticlesScenario onEnter={() => navigate(scenarioViews[TECHNOLOGY_FINANCE_SCENARIO].classifyPath)} />
         </section>
 
         <Alert className="workflow-alert" showIcon icon={<InfoCircleOutlined />} message="请选择业务分类入口，进入后按流程完成模板下载、案例上传与智能判定，获取分类结果。" />
@@ -147,6 +201,25 @@ function HomePage() {
   )
 }
 
+function FiveArticlesScenario({ onEnter }: { onEnter: () => void }) {
+  return (
+    <Card className="scenario-card scenario-card-active" bordered={false}>
+      <div className="scene-icon scene-icon-active"><BankOutlined /></div>
+      <div className="scene-body">
+        <h2>五篇大文章分类</h2>
+        <p>科技金融已开放，按国民经济分类与科技金融映射形成两阶段判定。</p>
+        <Tag className="available-tag" icon={<CheckCircleFilled />}>科技金融已开放</Tag>
+        <Button type="primary" size="large" block icon={<ArrowRightOutlined />} iconPosition="end" onClick={onEnter}>
+          进入科技金融
+        </Button>
+        <div className="topic-tags"><span>绿色金融 · 暂未开放</span><span>普惠金融 · 暂未开放</span><span>养老金融 · 暂未开放</span><span>数字金融 · 暂未开放</span></div>
+      </div>
+      <Divider />
+      <span className="learn-link is-muted"><InfoCircleOutlined /> 其他专题暂未开放 <LockOutlined /></span>
+    </Card>
+  )
+}
+
 function LockedScenario({ title, description, tags = [] }: { title: string; description: string; tags?: string[] }) {
   return (
     <Card className="scenario-card scenario-card-locked" bordered={false}>
@@ -162,28 +235,36 @@ function LockedScenario({ title, description, tags = [] }: { title: string; desc
   )
 }
 
-function ClassifyPage() {
+function ClassifyPage({ scenarioId }: { scenarioId: ScenarioId }) {
   const [stage, setStage] = useState<ClassificationStage>('upload')
   const [selectedFile, setSelectedFile] = useState<File>()
   const [caseData, setCaseData] = useState<ClassificationCase>()
   const [result, setResult] = useState<ClassificationResult>()
+  const [stageBResult, setStageBResult] = useState<FiveArticlesResult | null>()
   const [errorMessage, setErrorMessage] = useState<string>()
   const [isSubmittingReview, setIsSubmittingReview] = useState(false)
   const [showReview, setShowReview] = useState(false)
   const [reviewText, setReviewText] = useState('')
   const navigate = useNavigate()
+  const scenarioView = scenarioViews[scenarioId]
+  const storageKey = currentCaseStorageKey(scenarioId)
 
   useEffect(() => {
-    const caseId = window.sessionStorage.getItem(currentCaseStorageKey)
+    const caseId = window.sessionStorage.getItem(storageKey)
     if (!caseId) return
-    getCase(caseId).then((loadedCase) => {
+    Promise.all([
+      getCase(scenarioId, caseId),
+      scenarioId === TECHNOLOGY_FINANCE_SCENARIO ? getHistory(scenarioId, caseId) : Promise.resolve([]),
+    ]).then(([loadedCase, history]) => {
       setCaseData(loadedCase)
       if (loadedCase.current_result) {
         setResult(loadedCase.current_result)
+        const latestStageB = history.filter(isFiveArticlesResult).at(-1) || null
+        setStageBResult(latestStageB)
         setStage('result')
       }
-    }).catch(() => window.sessionStorage.removeItem(currentCaseStorageKey))
-  }, [])
+    }).catch(() => window.sessionStorage.removeItem(storageKey))
+  }, [scenarioId, storageKey])
 
   const uploadProps: UploadProps = {
     accept: '.docx',
@@ -211,13 +292,23 @@ function ClassifyPage() {
     return error.message
   }
 
+  const applyOutcome = (outcome: ClassificationOutcome) => {
+    if (isTechnologyFinanceWorkflow(outcome)) {
+      setResult(outcome.stage_a)
+      setStageBResult(outcome.stage_b)
+    } else {
+      setResult(outcome)
+      setStageBResult(undefined)
+    }
+  }
+
   const runClassification = async (caseId: string) => {
     setStage('processing')
     setErrorMessage(undefined)
     try {
-      const classification = await classifyCase(caseId)
-      const refreshedCase = await getCase(caseId)
-      setResult(classification)
+      const classification = await classifyCase(scenarioId, caseId)
+      const refreshedCase = await getCase(scenarioId, caseId)
+      applyOutcome(classification)
       setCaseData(refreshedCase)
       setStage('result')
     } catch (error) {
@@ -230,9 +321,9 @@ function ClassifyPage() {
     if (!selectedFile) return
     setErrorMessage(undefined)
     try {
-      const createdCase = await createCase(selectedFile)
-      window.sessionStorage.setItem(currentCaseStorageKey, createdCase.id)
-      setCaseData(await getCase(createdCase.id))
+      const createdCase = await createCase(scenarioId, selectedFile)
+      window.sessionStorage.setItem(storageKey, createdCase.id)
+      setCaseData(await getCase(scenarioId, createdCase.id))
       await runClassification(createdCase.id)
     } catch (error) {
       setErrorMessage(formatError(error))
@@ -245,10 +336,11 @@ function ClassifyPage() {
   }
 
   const backToClassification = () => {
-    window.sessionStorage.removeItem(currentCaseStorageKey)
+    window.sessionStorage.removeItem(storageKey)
     setSelectedFile(undefined)
     setCaseData(undefined)
     setResult(undefined)
+    setStageBResult(undefined)
     setErrorMessage(undefined)
     setReviewText('')
     setShowReview(false)
@@ -261,9 +353,9 @@ function ClassifyPage() {
     setIsSubmittingReview(true)
     setErrorMessage(undefined)
     try {
-      const classification = await submitObjection(caseData.id, reviewText.trim())
-      setResult(classification)
-      setCaseData(await getCase(caseData.id))
+      const classification = await submitObjection(scenarioId, caseData.id, reviewText.trim())
+      applyOutcome(classification)
+      setCaseData(await getCase(scenarioId, caseData.id))
       setReviewText('')
       setShowReview(false)
     } catch (error) {
@@ -274,15 +366,15 @@ function ClassifyPage() {
   }
 
   const downloadTemplate = () => {
-    window.location.assign(templateUrl())
+    window.location.assign(templateUrl(scenarioId))
   }
 
   return (
     <main className="page-content workspace-page">
-      <div className="page-breadcrumb"><button onClick={() => navigate('/')} type="button">首页</button><span>/</span> 国民经济行业分类</div>
+      <div className="page-breadcrumb"><button onClick={() => navigate('/')} type="button">首页</button><span>/</span> {scenarioView.name}</div>
       <div className="workspace-heading">
         <span className="workspace-icon"><AuditOutlined /></span>
-        <div><h1>国民经济行业分类</h1><p>依据企业经营信息，辅助判定 GB/T 4754-2017 四级行业分类。</p></div>
+        <div><h1>{scenarioView.name}</h1><p>{scenarioView.description}</p></div>
       </div>
       <Steps className="workspace-steps" current={stage === 'upload' ? 1 : stage === 'processing' ? 3 : 4} size="small" items={flowSteps.map(([title]) => ({ title }))} />
 
@@ -290,7 +382,7 @@ function ClassifyPage() {
         <section className="workspace-grid">
           <Card className="upload-card" bordered={false} title="上传企业分类案例" extra={<Tag color="blue">单企业 · Word 模板</Tag>}>
             <div className="template-panel">
-              <div><FileTextOutlined /><span><b>国民经济类别模板</b><small>请使用标准模板填写企业信息后上传</small></span></div>
+              <div><FileTextOutlined /><span><b>{scenarioView.templateName}</b><small>请使用标准模板填写企业信息后上传</small></span></div>
               <Button icon={<DownloadOutlined />} onClick={downloadTemplate}>下载模板</Button>
             </div>
             {errorMessage && <Alert type="error" showIcon message={errorMessage} />}
@@ -302,39 +394,48 @@ function ClassifyPage() {
             {selectedFile && <div className="selected-file"><CheckCircleFilled /><span>{selectedFile.name}</span><button type="button" onClick={() => setSelectedFile(undefined)}>移除</button></div>}
             <Button type="primary" size="large" disabled={!selectedFile} onClick={() => void startClassification()} icon={<ArrowRightOutlined />} iconPosition="end">开始智能判定</Button>
           </Card>
-          <AsideGuide />
+          <AsideGuide scenarioId={scenarioId} />
         </section>
       )}
 
-      {stage === 'processing' && <ProcessingPanel fileName={caseData?.original_filename || selectedFile?.name} />}
-      {stage === 'result' && result && caseData && <ResultPanel caseData={caseData} result={result} errorMessage={errorMessage} showReview={showReview} setShowReview={setShowReview} reviewText={reviewText} setReviewText={setReviewText} isSubmittingReview={isSubmittingReview} onBackToClassification={backToClassification} onReclassify={() => void reclassify()} onRetry={() => void retryClassification()} />}
+      {stage === 'processing' && <ProcessingPanel scenarioId={scenarioId} fileName={caseData?.original_filename || selectedFile?.name} />}
+      {stage === 'result' && result && caseData && <ResultPanel scenarioId={scenarioId} caseData={caseData} result={result} stageBResult={stageBResult} errorMessage={errorMessage} showReview={showReview} setShowReview={setShowReview} reviewText={reviewText} setReviewText={setReviewText} isSubmittingReview={isSubmittingReview} onBackToClassification={backToClassification} onReclassify={() => void reclassify()} onRetry={() => void retryClassification()} />}
     </main>
   )
 }
 
-function AsideGuide() {
+function AsideGuide({ scenarioId }: { scenarioId: ScenarioId }) {
+  const isTechnologyFinance = scenarioId === TECHNOLOGY_FINANCE_SCENARIO
   return <Card className="aside-guide" bordered={false} title={<><QuestionCircleOutlined /> 填写说明</>}>
-    <p>模板包含企业名称、主营业务、核心产品/服务、经营范围和贷款用途等 13 项字段。</p>
+    <p>{isTechnologyFinance ? '模板包含国民经济分类所需 13 项字段，以及项目、资质、研发等 7 项科技金融附加字段。' : '模板包含企业名称、主营业务、核心产品/服务、经营范围和贷款用途等 13 项字段。'}</p>
     <ol><li>请勿修改模板中的字段标签。</li><li>主营业务和核心产品越具体，判定依据越充分。</li><li>空白字段会保留，并可能触发证据层逐级降级。</li></ol>
     <Button type="link" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>查看完整使用说明 <ArrowRightOutlined /></Button>
   </Card>
 }
 
-function ProcessingPanel({ fileName }: { fileName?: string }) {
+function ProcessingPanel({ scenarioId, fileName }: { scenarioId: ScenarioId; fileName?: string }) {
+  const isTechnologyFinance = scenarioId === TECHNOLOGY_FINANCE_SCENARIO
   return <section className="processing-panel">
     <div className="processing-orbit"><AuditOutlined /></div>
-    <h2>正在进行智能分类</h2><p>{fileName || '企业分类案例'} 已通过格式校验，系统正检索行业目录并进行智能判定。</p>
+    <h2>正在进行智能分类</h2><p>{fileName || '企业分类案例'} 已通过格式校验，{isTechnologyFinance ? '系统正依次执行国民经济分类与科技金融判定。' : '系统正检索行业目录并进行智能判定。'}</p>
     <Progress percent={78} status="active" showInfo={false} strokeColor={{ from: '#0e63f4', to: '#74a9ff' }} />
     <div className="processing-list"><span><CheckCircleFilled /> 企业信息已解析</span><span><CheckCircleFilled /> 行业候选已召回</span><span className="is-processing">● 正在生成判定结论</span></div>
     <small>分类过程通常需要 1–3 分钟，请勿重复提交。</small>
   </section>
 }
 
-function ResultPanel({ caseData, result, errorMessage, showReview, setShowReview, reviewText, setReviewText, isSubmittingReview, onBackToClassification, onReclassify, onRetry }: {
-  caseData: ClassificationCase; result: ClassificationResult; errorMessage?: string; showReview: boolean; setShowReview: (value: boolean) => void; reviewText: string; setReviewText: (value: string) => void; isSubmittingReview: boolean; onBackToClassification: () => void; onReclassify: () => void; onRetry: () => void
+function ResultPanel({ scenarioId, caseData, result, stageBResult, errorMessage, showReview, setShowReview, reviewText, setReviewText, isSubmittingReview, onBackToClassification, onReclassify, onRetry }: {
+  scenarioId: ScenarioId; caseData: ClassificationCase; result: ClassificationResult; stageBResult?: FiveArticlesResult | null; errorMessage?: string; showReview: boolean; setShowReview: (value: boolean) => void; reviewText: string; setReviewText: (value: string) => void; isSubmittingReview: boolean; onBackToClassification: () => void; onReclassify: () => void; onRetry: () => void
 }) {
   const navigate = useNavigate()
+  const scenarioView = scenarioViews[scenarioId]
+  const isTechnologyFinance = scenarioId === TECHNOLOGY_FINANCE_SCENARIO
   const needsReview = result.status === 'needs_review'
+  const stageAFailed = result.status === 'classification_failed'
+  const stageAStatusLabel = stageAFailed ? '判定失败' : needsReview ? '待人工复核' : '已完成'
+  const loanConsistencyLabel = result.loan_matches_enterprise === null
+    ? '待人工复核'
+    : result.loan_matches_enterprise ? '与企业主营一致' : '与企业主营不一致'
   const toggleReview = () => {
     const shouldShow = !showReview
     setShowReview(shouldShow)
@@ -350,24 +451,56 @@ function ResultPanel({ caseData, result, errorMessage, showReview, setShowReview
         {caseData.input_fields.map((field) => <Descriptions.Item key={field.field} label={field.label}>{field.value || '--'}</Descriptions.Item>)}
       </Descriptions>
     </Card>
-    <Card className="result-card conclusion-result-card" bordered={false} title="AI 判定结论">
-      <div className="result-status"><span><CheckCircleFilled /></span><div><p>{needsReview ? 'AI 判定需人工复核' : 'AI 判定已完成'}</p><h2>{result.industry_name || '待人工复核'}</h2><small>GB/T 4754-2017 · 四级行业分类结果 · 版本 {result.version}</small></div></div>
+    <Card className="result-card conclusion-result-card" bordered={false} title={isTechnologyFinance ? 'Stage A · 国民经济行业分类' : 'AI 判定结论'}>
+      <div className={`result-status ${stageAFailed ? 'is-failed' : needsReview ? 'is-review' : ''}`}><span><CheckCircleFilled /></span><div><p>Stage A {stageAStatusLabel}</p><h2>{result.industry_name || stageAStatusLabel}</h2><small>GB/T 4754-2017 · 四级行业分类结果 · 版本 {result.version}</small></div></div>
       <Descriptions className="result-details" column={1} size="small">
         <Descriptions.Item label="行业代码">{result.industry_display_code || '--'}</Descriptions.Item>
         <Descriptions.Item label="行业名称">{result.industry_name || '--'}</Descriptions.Item>
-        <Descriptions.Item label="案例状态"><Tag color={needsReview ? 'warning' : 'success'}>{needsReview ? '待人工复核' : '已完成'}</Tag></Descriptions.Item>
+        <Descriptions.Item label="案例状态"><Tag color={stageAFailed ? 'error' : needsReview ? 'warning' : 'success'}>{stageAStatusLabel}</Tag></Descriptions.Item>
         <Descriptions.Item label="匹配依据">{result.matching_basis || '--'}</Descriptions.Item>
       </Descriptions>
       <Divider className="loan-direction-divider" orientation="left" plain>贷款投向结论</Divider>
       <Descriptions className="result-details loan-direction-details" column={1} size="small">
         <Descriptions.Item label="贷款投向代码">{result.loan_industry_display_code || '--'}</Descriptions.Item>
         <Descriptions.Item label="贷款投向名称">{result.loan_industry_name || '--'}</Descriptions.Item>
-        <Descriptions.Item label="贷款投向是否一致"><Tag color={result.loan_matches_enterprise ? 'success' : 'warning'}>{result.loan_matches_enterprise ? '与企业主营一致' : '与企业主营不一致'}</Tag></Descriptions.Item>
+        <Descriptions.Item label="贷款投向是否一致"><Tag color={result.loan_matches_enterprise === true ? 'success' : 'warning'}>{loanConsistencyLabel}</Tag></Descriptions.Item>
         <Descriptions.Item label="贷款投向匹配依据">{result.loan_matching_basis || '--'}</Descriptions.Item>
         {result.objection?.description && <Descriptions.Item label="关联异议">{result.objection.description}</Descriptions.Item>}
       </Descriptions>
-      <div className="result-actions"><Button onClick={onBackToClassification}>返回国民经济分类</Button><Button icon={<DownloadOutlined />} onClick={() => window.location.assign(exportUrl(caseData.id))}>导出 Excel</Button><Button icon={<HistoryOutlined />} onClick={() => navigate('/history')}>查看判定历史</Button><Button type="primary" onClick={toggleReview}>提出异议并复核</Button></div>
+      <div className="result-actions"><Button onClick={onBackToClassification}>返回{scenarioView.name}</Button><Button icon={<DownloadOutlined />} onClick={() => window.location.assign(exportUrl(scenarioId, caseData.id))}>导出 Excel</Button><Button icon={<HistoryOutlined />} onClick={() => navigate(scenarioView.historyPath)}>查看判定历史</Button><Button type="primary" onClick={toggleReview}>提出异议并复核</Button></div>
     </Card>
+    {isTechnologyFinance && <Card className="result-card technology-result-card" bordered={false} title="Stage B · 科技金融判定">
+      {stageBResult ? <>
+        <div className="technology-status-row">
+          <div><span>判定状态</span><Tag color={statusColor(stageBResult.status)}>{stageBStatusLabels[stageBResult.status]}</Tag></div>
+          <small>科技金融版本 {stageBResult.version} · Stage A 结果 #{stageBResult.stage_a_result_id}{stageBResult.mapping_version_id ? ` · 映射版本 ${stageBResult.mapping_version_id}` : ''}</small>
+        </div>
+        {stageBResult.labels.length > 0 ? <div className="technology-label-list">
+          {stageBResult.labels.map((label, index) => {
+            const [tier1, tier2, tier3, tier4] = label.taxonomy_path
+            return <section className="technology-label" key={`${label.subject}-${label.source_row}-${index}`}>
+              <div className="technology-label-heading"><Tag color="blue">{label.subject}</Tag><strong>{label.NEIC_Code} · {label.NEIC_Name}</strong></div>
+              <Descriptions column={{ xs: 1, sm: 2 }} size="small">
+                <Descriptions.Item label="第一层名称">{tier1 || '--'}</Descriptions.Item>
+                <Descriptions.Item label="第二层名称">{tier2 || '--'}</Descriptions.Item>
+                <Descriptions.Item label="第三层名称">{tier3 || '--'}</Descriptions.Item>
+                <Descriptions.Item label="第四层名称">{tier4 || '--'}</Descriptions.Item>
+                <Descriptions.Item label="映射来源">版本 {label.mapping_version_id} · 源行 {label.source_row}</Descriptions.Item>
+                <Descriptions.Item label="匹配依据" span={2}>{label.matching_basis || '--'}</Descriptions.Item>
+              </Descriptions>
+              <div className="evidence-summary"><b>映射与业务证据</b>{label.evidence_refs.map((reference, evidenceIndex) => <span key={`${reference.type || 'evidence'}-${evidenceIndex}`}>{evidenceSummary(reference)}</span>)}</div>
+            </section>
+          })}
+        </div> : <Alert className="technology-empty-state" type={stageBResult.status === 'classification_failed' ? 'error' : stageBResult.status === 'needs_review' ? 'warning' : 'info'} showIcon message={stageBStatusLabels[stageBResult.status]} description={stageBResult.error_detail || stageBResult.consistency_basis || (stageBResult.status === 'not_applicable' ? '有效科技金融映射中未命中该贷款投向，因此不属于科技金融。' : '当前没有可展示的正式科技金融标签。')} />}
+        <Divider />
+        <section className="consistency-panel">
+          <h3>贷款对应的五篇大文章类别与企业类别是否一致</h3>
+          <Tag color={consistencyColor(stageBResult.consistency_status)}>{stageBResult.consistency_status ? consistencyLabels[stageBResult.consistency_status] : '待人工复核'}</Tag>
+          <p>{stageBResult.consistency_basis || stageBResult.error_detail || '暂无一致性说明。'}</p>
+          {stageBResult.consistency_evidence_refs.length > 0 && <div className="evidence-summary"><b>一致性证据</b>{stageBResult.consistency_evidence_refs.map((reference, index) => <span key={`consistency-${index}`}>{evidenceSummary(reference)}</span>)}</div>}
+        </section>
+      </> : <Alert className="technology-empty-state" type={stageAFailed ? 'error' : 'warning'} showIcon message="Stage B 未执行" description={`Stage A 当前为“${stageAStatusLabel}”，只有 Stage A 完成后才会进入科技金融判定。`} />}
+    </Card>}
     {showReview && <Card id="classification-review" className="review-card" bordered={false} title="补充异议信息，发起再次判定">
       <p>新的说明会与原始企业资料一同重新检索和判定，原有结论会保留在历史版本中。</p>
       <Input.TextArea value={reviewText} onChange={(event) => setReviewText(event.target.value)} placeholder="例如：企业实际主要收入来自……，请结合以下情况重新判定" autoSize={{ minRows: 4, maxRows: 6 }} />
@@ -383,30 +516,34 @@ function ResultPanel({ caseData, result, errorMessage, showReview, setShowReview
   </section>
 }
 
-function HistoryPage() {
+function HistoryPage({ scenarioId }: { scenarioId: ScenarioId }) {
   const navigate = useNavigate()
-  const [history, setHistory] = useState<ClassificationResult[]>([])
+  const [history, setHistory] = useState<ClassificationHistoryItem[]>([])
   const [caseData, setCaseData] = useState<ClassificationCase>()
   const [errorMessage, setErrorMessage] = useState<string>()
+  const scenarioView = scenarioViews[scenarioId]
+  const storageKey = currentCaseStorageKey(scenarioId)
 
   useEffect(() => {
-    const caseId = window.sessionStorage.getItem(currentCaseStorageKey)
+    const caseId = window.sessionStorage.getItem(storageKey)
     if (!caseId) return
-    Promise.all([getCase(caseId), getHistory(caseId)])
+    Promise.all([getCase(scenarioId, caseId), getHistory(scenarioId, caseId)])
       .then(([loadedCase, items]) => {
         setCaseData(loadedCase)
         setHistory(items)
       })
       .catch(() => setErrorMessage('历史版本加载失败，请稍后重试。'))
-  }, [])
+  }, [scenarioId, storageKey])
 
   return <main className="page-content history-page">
     <div className="page-breadcrumb"><button onClick={() => navigate('/')} type="button">首页</button><span>/</span> 历史记录</div>
-    <section className="history-heading"><div><h1>分类历史记录</h1><p>查看企业案例的判定结果、复核记录与导出状态。</p></div><Button type="primary" onClick={() => navigate('/classify')} icon={<CloudUploadOutlined />}>新建分类</Button></section>
+    <section className="history-heading"><div><h1>{scenarioView.name}历史记录</h1><p>查看企业案例的判定结果、复核记录与导出状态。</p></div><Button type="primary" onClick={() => navigate(scenarioView.classifyPath)} icon={<CloudUploadOutlined />}>新建分类</Button></section>
     <Card className="history-card" bordered={false}>
       <div className="history-row history-row-head"><span>企业名称</span><span>行业结论</span><span>匹配依据</span><span>状态</span><span>最近更新时间</span><span>操作</span></div>
       {errorMessage && <div className="history-row empty-row"><Alert type="error" showIcon message={errorMessage} /></div>}
-      {history.map((item) => <div className="history-row" key={item.id}><b>{caseData?.original_filename || '当前企业案例'}<small>版本 {item.version}{item.objection?.description ? ` · 异议：${item.objection.description}` : ''}</small></b><span className="history-conclusion"><span><strong>{item.industry_display_code || '--'}</strong> {item.industry_name || '待人工复核'}</span><small><span>贷款投向 <strong>{item.loan_industry_display_code || '--'}</strong> {item.loan_industry_name || '--'}</span><Tag color={item.loan_matches_enterprise ? 'success' : 'warning'}>{item.loan_matches_enterprise ? '一致' : '不一致'}</Tag></small></span><span className="history-basis">{item.matching_basis || '--'}<small>贷款投向依据：{item.loan_matching_basis || '--'}</small></span><span><Tag color={item.status === 'needs_review' ? 'warning' : 'success'}>{item.status === 'needs_review' ? '待人工复核' : '已完成'}</Tag></span><span>{new Date(item.created_at).toLocaleString('zh-CN')}</span><button type="button" onClick={() => navigate('/classify')}>查看详情 <ArrowRightOutlined /></button></div>)}
+      {history.map((item) => isFiveArticlesResult(item)
+        ? <div className="history-row" key={`stage-b-${item.id}`}><b>{caseData?.original_filename || '当前企业案例'}<small>科技金融版本 {item.version} · Stage A #{item.stage_a_result_id}</small></b><span className="history-conclusion"><span><strong>{item.loan_neic_code || '--'}</strong> {item.loan_neic_name || '暂无正式标签'}</span><small>{item.labels.length} 个科技金融标签{item.consistency_status ? ` · ${consistencyLabels[item.consistency_status]}` : ''}</small></span><span className="history-basis">{item.consistency_basis || item.error_detail || (item.status === 'not_applicable' ? '有效映射未命中，不属于科技金融。' : '暂无说明')}</span><span><Tag color={statusColor(item.status)}>{stageBStatusLabels[item.status]}</Tag></span><span>{new Date(item.created_at).toLocaleString('zh-CN')}</span><button type="button" onClick={() => navigate(scenarioView.classifyPath)}>查看详情 <ArrowRightOutlined /></button></div>
+        : <div className="history-row" key={item.id}><b>{caseData?.original_filename || '当前企业案例'}<small>版本 {item.version}{item.objection?.description ? ` · 异议：${item.objection.description}` : ''}</small></b><span className="history-conclusion"><span><strong>{item.industry_display_code || '--'}</strong> {item.industry_name || '待人工复核'}</span><small><span>贷款投向 <strong>{item.loan_industry_display_code || '--'}</strong> {item.loan_industry_name || '--'}</span><Tag color={item.loan_matches_enterprise ? 'success' : 'warning'}>{item.loan_matches_enterprise ? '一致' : '不一致'}</Tag></small></span><span className="history-basis">{item.matching_basis || '--'}<small>贷款投向依据：{item.loan_matching_basis || '--'}</small></span><span><Tag color={item.status === 'needs_review' ? 'warning' : 'success'}>{item.status === 'needs_review' ? '待人工复核' : '已完成'}</Tag></span><span>{new Date(item.created_at).toLocaleString('zh-CN')}</span><button type="button" onClick={() => navigate(scenarioView.classifyPath)}>查看详情 <ArrowRightOutlined /></button></div>)}
       {!errorMessage && history.length === 0 && <div className="history-row empty-row"><span>暂无可展示的当前案例版本，请先完成一次分类。</span></div>}
     </Card>
   </main>
@@ -417,7 +554,7 @@ function HelpPage() {
 }
 
 function Platform() {
-  return <div className="app-shell"><AppHeader /><Routes><Route path="/" element={<HomePage />} /><Route path="/classify" element={<ClassifyPage />} /><Route path="/history" element={<HistoryPage />} /><Route path="/help" element={<HelpPage />} /></Routes><AppFooter /></div>
+  return <div className="app-shell"><AppHeader /><Routes><Route path="/" element={<HomePage />} /><Route path="/classify" element={<ClassifyPage scenarioId={NATIONAL_ECONOMY_SCENARIO} />} /><Route path="/history" element={<HistoryPage scenarioId={NATIONAL_ECONOMY_SCENARIO} />} /><Route path="/scenarios/technology_finance/classify" element={<ClassifyPage scenarioId={TECHNOLOGY_FINANCE_SCENARIO} />} /><Route path="/scenarios/technology_finance/history" element={<HistoryPage scenarioId={TECHNOLOGY_FINANCE_SCENARIO} />} /><Route path="/help" element={<HelpPage />} /></Routes><AppFooter /></div>
 }
 
 function App() {

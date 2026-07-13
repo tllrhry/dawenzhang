@@ -242,6 +242,8 @@ def test_prompt_contains_only_whitelisted_inputs_and_immutable_labels() -> None:
     assert user_input["max_excerpt_length"] == 160
     assert "不得新增、删除、改写或替换标签" in system_prompt
     assert "证据不足时必须输出 needs_review" in system_prompt
+    assert "consistency 不得输出 label 引用或复制标签固定字段" in system_prompt
+    assert "status、basis、business_evidence_refs" in system_prompt
 
 
 def test_model_cannot_change_or_reorder_into_a_different_label_set() -> None:
@@ -449,6 +451,42 @@ def test_single_label_basis_is_attached_to_server_owned_label() -> None:
         },
     )
     assert set(result.model_output) == {"label_basis"}
+
+
+def test_consistency_label_refs_are_assembled_from_server_owned_labels() -> None:
+    enterprise = _label(code="2710", name="化学药品原料药制造", source_row=11)
+    loan = _label(code="6311", name="基础软件开发", source_row=22)
+    output = {
+        "label_basis": {
+            "matching_basis": "贷款资金用于现有研发平台升级，命中该科技金融类别。",
+            "business_evidence_refs": [_business_ref()],
+        },
+        "consistency": {
+            "status": "consistent",
+            "basis": "企业和投向科技金融标签有交集，资金用于现有研发活动。",
+            "business_evidence_refs": [
+                _business_ref(),
+                _business_ref(
+                    "stage_a.loan_matching_basis",
+                    "Stage A 贷款投向匹配依据",
+                    "采购服务器并建设基础软件研发平台",
+                ),
+            ],
+        },
+    }
+
+    result = _run(output, (enterprise,), (loan,))
+
+    assert result.consistency_evidence_refs == (
+        _label_ref(enterprise, "enterprise"),
+        _label_ref(loan, "loan_direction"),
+        _business_ref(),
+        _business_ref(
+            "stage_a.loan_matching_basis",
+            "Stage A 贷款投向匹配依据",
+            "采购服务器并建设基础软件研发平台",
+        ),
+    )
 
 
 def test_single_label_basis_discards_extra_invalid_business_refs() -> None:

@@ -519,10 +519,7 @@ def test_scenario_mismatch_is_rejected_before_detail_handler_dispatch(
     "scenario_id",
     [
         "agriculture_related",
-        "green_finance",
         "inclusive_finance",
-        "pension_finance",
-        "digital_finance",
     ],
 )
 def test_coming_soon_scenarios_are_rejected(
@@ -539,7 +536,7 @@ def test_coming_soon_case_upload_is_rejected(client: TestClient) -> None:
     template_path = get_settings().technology_finance_template_path
 
     response = client.post(
-        "/api/v1/scenarios/green_finance/cases",
+        "/api/v1/scenarios/inclusive_finance/cases",
         files={
             "file": (
                 template_path.name,

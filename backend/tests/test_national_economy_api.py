@@ -152,14 +152,11 @@ def test_scenarios_list_available_and_coming_soon_entries(client: TestClient) ->
     assert scenarios["agriculture_related"]["status"] == "coming_soon"
     assert scenarios["five_major_articles"]["status"] == "coming_soon"
     assert scenarios["technology_finance"]["status"] == "available"
-    for scenario_id in (
-        "green_finance",
-        "inclusive_finance",
-        "pension_finance",
-        "digital_finance",
-    ):
-        assert scenarios[scenario_id]["status"] == "coming_soon"
+    for scenario_id in ("green_finance", "pension_finance", "digital_finance"):
+        assert scenarios[scenario_id]["status"] == "available"
         assert scenarios[scenario_id]["parent_id"] == "five_major_articles"
+    assert scenarios["inclusive_finance"]["status"] == "coming_soon"
+    assert scenarios["inclusive_finance"]["parent_id"] == "five_major_articles"
 
 
 def test_template_download_returns_original_docx(client: TestClient) -> None:

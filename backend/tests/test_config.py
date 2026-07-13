@@ -82,6 +82,11 @@ def test_technology_finance_mapping_path_has_default_and_environment_alias() -> 
             "PENSION_FINANCE_MAPPING_PATH",
             "五篇大文章映射/养老金融.xlsx",
         ),
+        (
+            "inclusive_finance_template_path",
+            "INCLUSIVE_FINANCE_TEMPLATE_PATH",
+            "模板文件/五篇大文章/普惠金融模版.docx",
+        ),
     ),
 )
 def test_new_finance_asset_paths_have_defaults_and_environment_aliases(

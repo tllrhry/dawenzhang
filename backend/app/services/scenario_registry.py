@@ -11,6 +11,7 @@ TECHNOLOGY_FINANCE_SCENARIO = "technology_finance"
 GREEN_FINANCE_SCENARIO = "green_finance"
 DIGITAL_FINANCE_SCENARIO = "digital_finance"
 PENSION_FINANCE_SCENARIO = "pension_finance"
+INCLUSIVE_FINANCE_SCENARIO = "inclusive_finance"
 
 
 @dataclass(frozen=True)
@@ -52,7 +53,6 @@ class ScenarioRegistration:
             (
                 self.workflow,
                 self.template_path_setting,
-                self.mapping_path_setting,
                 self.export_sheet_name,
                 self.field_schema,
             )
@@ -161,6 +161,53 @@ GREEN_FINANCE_FIELD_SCHEMA = (*_stage_a_fields(), *GREEN_FINANCE_ADDITIONAL_FIEL
 DIGITAL_FINANCE_FIELD_SCHEMA = (*_stage_a_fields(), *DIGITAL_FINANCE_ADDITIONAL_FIELDS)
 PENSION_FINANCE_FIELD_SCHEMA = (*_stage_a_fields(), *PENSION_FINANCE_ADDITIONAL_FIELDS)
 
+INCLUSIVE_FINANCE_STAGE_A_FIELD_KEYS = tuple(
+    key for key in FIELD_LABELS if key != "main_business"
+)
+
+INCLUSIVE_FINANCE_ADDITIONAL_FIELDS = (
+    ScenarioField("registered_address", "企业注册地址"),
+    ScenarioField("actual_business_address", "实际经营地址"),
+    ScenarioField("entity_type", "主体类型"),
+    ScenarioField(
+        "farmer_long_term_town_resident",
+        "是否指长期（一年以上）居住在乡镇（不包括城关镇）行政管理区域内的住户",
+    ),
+    ScenarioField(
+        "farmer_town_village_resident",
+        "是否长期居住在城关镇所辖行政村范围内的住户",
+    ),
+    ScenarioField(
+        "farmer_nonlocal_resident_over_one_year",
+        "是否户口不在本地而在本地居住一年以上的住户",
+    ),
+    ScenarioField(
+        "farmer_state_farm_employee_or_rural_individual_business",
+        "是否国有农场的职工或农村个体工商户。",
+    ),
+    ScenarioField("enterprise_scale_type", "企业规模类型"),
+    ScenarioField("total_assets", "总资产"),
+    ScenarioField("annual_revenue", "上年度营业收入"),
+    ScenarioField("employee_count", "从业人员数量"),
+    ScenarioField("credit_amount", "本次授信额度"),
+    ScenarioField("credit_variety", "授信品种"),
+    ScenarioField("project_name", "对应项目名称"),
+    ScenarioField("project_content", "项目建设 / 运营内容"),
+    ScenarioField("credit_term", "授信期限"),
+    ScenarioField("transaction_amount", "交易金额"),
+    ScenarioField("certifications", "企业核心资质与认证"),
+    ScenarioField("rd_ip_info", "研发与知识产权情况"),
+)
+
+INCLUSIVE_FINANCE_FIELD_SCHEMA = (
+    *(
+        field
+        for field in _stage_a_fields()
+        if field.key in INCLUSIVE_FINANCE_STAGE_A_FIELD_KEYS
+    ),
+    *INCLUSIVE_FINANCE_ADDITIONAL_FIELDS,
+)
+
 GREEN_FINANCE_REGISTRATION = ScenarioRegistration(
     id=GREEN_FINANCE_SCENARIO,
     name="绿色金融",
@@ -229,16 +276,47 @@ PENSION_FINANCE_REGISTRATION = ScenarioRegistration(
     ),
 )
 
+INCLUSIVE_FINANCE_REGISTRATION = ScenarioRegistration(
+    id=INCLUSIVE_FINANCE_SCENARIO,
+    name="普惠金融",
+    status="available",
+    description="复用国民经济分类并执行普惠金融确定性判定",
+    parent_id="five_major_articles",
+    workflow="inclusive_finance_single_stage",
+    template_path_setting="inclusive_finance_template_path",
+    mapping_path_setting=None,
+    export_sheet_name="普惠金融判定",
+    field_schema=INCLUSIVE_FINANCE_FIELD_SCHEMA,
+    stage_a_field_keys=INCLUSIVE_FINANCE_STAGE_A_FIELD_KEYS,
+    stage_b_evidence_field_keys=_prioritize_evidence_fields(
+        INCLUSIVE_FINANCE_FIELD_SCHEMA,
+        "entity_type",
+        "enterprise_scale_type",
+        "total_assets",
+        "annual_revenue",
+        "employee_count",
+        "credit_amount",
+        "credit_variety",
+        "loan_purpose",
+        "project_name",
+        "project_content",
+        "farmer_long_term_town_resident",
+        "farmer_town_village_resident",
+        "farmer_nonlocal_resident_over_one_year",
+        "farmer_state_farm_employee_or_rural_individual_business",
+    ),
+)
+
 MULTI_SCENARIO_FINANCE_REGISTRATIONS = (
     GREEN_FINANCE_REGISTRATION,
     DIGITAL_FINANCE_REGISTRATION,
     PENSION_FINANCE_REGISTRATION,
+    INCLUSIVE_FINANCE_REGISTRATION,
 )
 
 COMING_SOON_SCENARIO_NAMES = MappingProxyType(
     {
         "agriculture_related": ("涉农业务", None),
-        "inclusive_finance": ("普惠金融", "five_major_articles"),
     }
 )
 

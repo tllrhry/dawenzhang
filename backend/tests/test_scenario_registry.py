@@ -11,6 +11,10 @@ from app.services.scenario_registry import (
     GREEN_FINANCE_ADDITIONAL_FIELDS,
     GREEN_FINANCE_REGISTRATION,
     GREEN_FINANCE_SCENARIO,
+    INCLUSIVE_FINANCE_ADDITIONAL_FIELDS,
+    INCLUSIVE_FINANCE_REGISTRATION,
+    INCLUSIVE_FINANCE_SCENARIO,
+    INCLUSIVE_FINANCE_STAGE_A_FIELD_KEYS,
     PENSION_FINANCE_ADDITIONAL_FIELDS,
     PENSION_FINANCE_REGISTRATION,
     PENSION_FINANCE_SCENARIO,
@@ -255,7 +259,7 @@ def test_new_finance_profiles_resolve_independent_execution_metadata(
 
 
 def test_inclusive_and_unknown_scenarios_are_not_executable_profiles() -> None:
-    inclusive = SCENARIO_REGISTRY["inclusive_finance"]
+    inclusive = SCENARIO_REGISTRY["agriculture_related"]
 
     assert inclusive.status == "coming_soon"
     assert inclusive.workflow is None
@@ -269,3 +273,49 @@ def test_inclusive_and_unknown_scenarios_are_not_executable_profiles() -> None:
         inclusive.template_path(Settings(_env_file=None))
     with pytest.raises(ValueError, match="暂未配置映射"):
         inclusive.mapping_path(Settings(_env_file=None))
+
+
+def test_inclusive_finance_profile_is_mapping_free_and_has_real_stage_a_subset() -> None:
+    registration = SCENARIO_REGISTRY[INCLUSIVE_FINANCE_SCENARIO]
+    fields = {field.key: field.label for field in registration.field_schema}
+    additional_fields = {
+        field.key: field.label for field in INCLUSIVE_FINANCE_ADDITIONAL_FIELDS
+    }
+
+    assert registration is INCLUSIVE_FINANCE_REGISTRATION
+    assert registration.status == "available"
+    assert registration.parent_id == "five_major_articles"
+    assert registration.workflow == "inclusive_finance_single_stage"
+    assert registration.mapping_path_setting is None
+    assert registration.export_sheet_name == "普惠金融判定"
+    assert registration.is_executable_profile is True
+    assert registration.stage_a_field_keys == INCLUSIVE_FINANCE_STAGE_A_FIELD_KEYS
+    assert registration.stage_a_field_keys == tuple(
+        key for key in FIELD_LABELS if key != "main_business"
+    )
+    assert "main_business" not in fields
+    assert len(fields) == 31
+    assert len(fields) == len(registration.field_schema)
+    assert additional_fields == {
+        "registered_address": "企业注册地址",
+        "actual_business_address": "实际经营地址",
+        "entity_type": "主体类型",
+        "farmer_long_term_town_resident": "是否指长期（一年以上）居住在乡镇（不包括城关镇）行政管理区域内的住户",
+        "farmer_town_village_resident": "是否长期居住在城关镇所辖行政村范围内的住户",
+        "farmer_nonlocal_resident_over_one_year": "是否户口不在本地而在本地居住一年以上的住户",
+        "farmer_state_farm_employee_or_rural_individual_business": "是否国有农场的职工或农村个体工商户。",
+        "enterprise_scale_type": "企业规模类型",
+        "total_assets": "总资产",
+        "annual_revenue": "上年度营业收入",
+        "employee_count": "从业人员数量",
+        "credit_amount": "本次授信额度",
+        "credit_variety": "授信品种",
+        "project_name": "对应项目名称",
+        "project_content": "项目建设 / 运营内容",
+        "credit_term": "授信期限",
+        "transaction_amount": "交易金额",
+        "certifications": "企业核心资质与认证",
+        "rd_ip_info": "研发与知识产权情况",
+    }
+    with pytest.raises(ValueError, match="暂未配置映射"):
+        registration.mapping_path(Settings(_env_file=None))

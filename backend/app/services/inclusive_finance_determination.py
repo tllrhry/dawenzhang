@@ -167,7 +167,12 @@ def parse_wan_amount(value: object) -> float | None:
 
 
 def parse_count(value: object) -> float | None:
-    return _parse_amount(value, allow_units=False)
+    parsed = _parse_amount(value, allow_units=False)
+    if parsed is not None:
+        return parsed
+    text = str(value or "").strip()
+    match = re.match(r"^([0-9]+(?:\.[0-9]+)?)\s*(?:人|名|员工)", text)
+    return float(match.group(1)) if match else None
 
 
 def _parse_amount(value: object, *, allow_units: bool) -> float | None:

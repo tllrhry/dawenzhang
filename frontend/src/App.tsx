@@ -479,7 +479,7 @@ function ResultPanel({ scenarioId, caseData, result, stageBResult, errorMessage,
       </Descriptions>
       <div className="result-actions"><Button onClick={onBackToClassification}>返回{scenarioView.name}</Button><Button icon={<DownloadOutlined />} onClick={() => window.location.assign(exportUrl(scenarioId, caseData.id))}>导出 Excel</Button><Button icon={<HistoryOutlined />} onClick={() => navigate(scenarioView.historyPath)}>查看判定历史</Button><Button type="primary" onClick={toggleReview}>提出异议并复核</Button></div>
     </Card>
-    {isFiveArticles && <Card className="result-card technology-result-card" bordered={false} title={`Stage B · ${scenarioView.name}判定`}>
+    {isFiveArticles && scenarioId !== INCLUSIVE_FINANCE_SCENARIO && <Card className="result-card technology-result-card" bordered={false} title={`Stage B · ${scenarioView.name}判定`}>
       {stageBResult && isFiveArticlesResult(stageBResult) ? <>
         <div className="technology-status-row">
           <div><span>判定状态</span><Tag color={statusColor(stageBResult.status)}>{stageBStatusLabel(scenarioId, stageBResult.status)}</Tag></div>

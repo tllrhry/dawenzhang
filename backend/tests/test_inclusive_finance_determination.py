@@ -3,6 +3,7 @@ import pytest
 from app.services.inclusive_finance_determination import (
     determine_inclusive_finance,
     parse_credit_amount_wan,
+    parse_count,
 )
 
 
@@ -89,6 +90,16 @@ def test_credit_amount_parser_uses_wan_and_accepts_billion_and_thousands_separat
     raw_value: str, expected: float
 ) -> None:
     assert parse_credit_amount_wan(raw_value) == expected
+
+
+@pytest.mark.parametrize(
+    ("raw_value", "expected"),
+    (("14 人，其中研发技术人员 4 人", 14.0), ("20名员工", 20.0)),
+)
+def test_employee_count_parser_accepts_a_total_followed_by_explanatory_text(
+    raw_value: str, expected: float
+) -> None:
+    assert parse_count(raw_value) == expected
 
 
 def test_unparseable_credit_amount_needs_review() -> None:

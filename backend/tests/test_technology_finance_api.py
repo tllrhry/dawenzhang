@@ -28,6 +28,7 @@ from app.services.scenario_registry import (
     TECHNOLOGY_FINANCE_REGISTRATION,
     ScenarioRegistration,
 )
+from app.services import scenario_workflow_handlers as workflow_handler_module
 from app.services.technology_finance_classification_workflow import (
     TechnologyFinanceWorkflowResult,
 )
@@ -232,12 +233,17 @@ def test_technology_finance_seven_endpoint_types(
         field.key for field in TECHNOLOGY_FINANCE_FIELD_SCHEMA
     ]
 
-    def fake_classify(session: Session, case: NationalEconomyClassificationCase):
+    def fake_classify(
+        session: Session,
+        case: NationalEconomyClassificationCase,
+        profile: ScenarioRegistration,
+    ):
+        assert profile.id == case.scenario
         return _persist_workflow_result(session, case, version=1)
 
     monkeypatch.setattr(
-        route_module,
-        "classify_technology_finance_case",
+        workflow_handler_module,
+        "classify_five_articles_case",
         fake_classify,
     )
     classification_response = client.post(
@@ -254,7 +260,9 @@ def test_technology_finance_seven_endpoint_types(
         session: Session,
         case: NationalEconomyClassificationCase,
         objection_text: str,
+        profile: ScenarioRegistration,
     ):
+        assert profile.id == case.scenario
         return _persist_workflow_result(
             session,
             case,
@@ -263,8 +271,8 @@ def test_technology_finance_seven_endpoint_types(
         )
 
     monkeypatch.setattr(
-        route_module,
-        "reclassify_technology_finance_case",
+        workflow_handler_module,
+        "reclassify_five_articles_case",
         fake_reclassify,
     )
     objection_response = client.post(
@@ -356,6 +364,113 @@ def test_registered_scenario_upload_and_detail_return_complete_profile_schema(
         (field.key, field.label) for field in registration.field_schema
     ]
     assert len(detail["input_fields"]) == len(registration.field_schema)
+
+
+@pytest.mark.parametrize(
+    "registration",
+    [
+        GREEN_FINANCE_REGISTRATION,
+        DIGITAL_FINANCE_REGISTRATION,
+        PENSION_FINANCE_REGISTRATION,
+    ],
+    ids=lambda registration: registration.id,
+)
+def test_new_finance_scenarios_share_all_seven_registered_endpoints(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    registration: ScenarioRegistration,
+) -> None:
+    available_registration = replace(registration, status="available")
+    monkeypatch.setattr(
+        route_module,
+        "SCENARIO_REGISTRY",
+        {**SCENARIO_REGISTRY, registration.id: available_registration},
+    )
+
+    def fake_classify(
+        session: Session,
+        case: NationalEconomyClassificationCase,
+        profile: ScenarioRegistration,
+    ) -> TechnologyFinanceWorkflowResult:
+        assert profile.id == registration.id == case.scenario
+        return _persist_workflow_result(session, case, version=1)
+
+    def fake_reclassify(
+        session: Session,
+        case: NationalEconomyClassificationCase,
+        objection_text: str,
+        profile: ScenarioRegistration,
+    ) -> TechnologyFinanceWorkflowResult:
+        assert objection_text == "请重新判定"
+        assert profile.id == registration.id == case.scenario
+        return _persist_workflow_result(session, case, version=2, objection_text=objection_text)
+
+    monkeypatch.setattr(
+        workflow_handler_module,
+        "classify_five_articles_case",
+        fake_classify,
+    )
+    monkeypatch.setattr(
+        workflow_handler_module,
+        "reclassify_five_articles_case",
+        fake_reclassify,
+    )
+
+    assert client.get(f"/api/v1/scenarios/{registration.id}/template").status_code == 200
+    created = _upload_registered_scenario(client, available_registration).json()
+    case_id = created["id"]
+    assert client.get(
+        f"/api/v1/scenarios/{registration.id}/cases/{case_id}"
+    ).status_code == 200
+
+    classified = client.post(
+        f"/api/v1/scenarios/{registration.id}/cases/{case_id}/classifications"
+    )
+    assert classified.status_code == 200
+    assert classified.json()["stage_b"]["status"] == "completed"
+
+    objected = client.post(
+        f"/api/v1/scenarios/{registration.id}/cases/{case_id}/objections",
+        json={"objection_text": "请重新判定"},
+    )
+    assert objected.status_code == 200
+    assert objected.json()["stage_a"]["version"] == 2
+
+    history = client.get(
+        f"/api/v1/scenarios/{registration.id}/cases/{case_id}/history"
+    )
+    assert history.status_code == 200
+    assert [item["version"] for item in history.json()["items"]] == [1, 2]
+
+    exported = client.get(
+        f"/api/v1/scenarios/{registration.id}/cases/{case_id}/export"
+    )
+    assert exported.status_code == 200
+    assert exported.headers["content-type"] == route_module.XLSX_MIME
+
+
+def test_cross_scenario_history_is_rejected_before_workflow_dispatch(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    green = replace(GREEN_FINANCE_REGISTRATION, status="available")
+    digital = replace(DIGITAL_FINANCE_REGISTRATION, status="available")
+    monkeypatch.setattr(
+        route_module,
+        "SCENARIO_REGISTRY",
+        {**SCENARIO_REGISTRY, green.id: green, digital.id: digital},
+    )
+    case_id = _upload_registered_scenario(client, green).json()["id"]
+    handler_lookup = MagicMock()
+    monkeypatch.setattr(route_module, "get_scenario_workflow_handler", handler_lookup)
+
+    response = client.get(
+        f"/api/v1/scenarios/{digital.id}/cases/{case_id}/history"
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "案例不存在"
+    handler_lookup.assert_not_called()
 
 
 @pytest.mark.parametrize("scenario_id", ["inclusive_finance", "not_registered"])
@@ -456,14 +571,8 @@ def test_scenario_case_mismatch_is_rejected_before_workflow(
     json: dict[str, str] | None,
 ) -> None:
     national_case_id = _upload_national_economy(client).json()["id"]
-    classifier = MagicMock()
-    reclassifier = MagicMock()
-    monkeypatch.setattr(route_module, "classify_technology_finance_case", classifier)
-    monkeypatch.setattr(
-        route_module,
-        "reclassify_technology_finance_case",
-        reclassifier,
-    )
+    handler_lookup = MagicMock()
+    monkeypatch.setattr(route_module, "get_scenario_workflow_handler", handler_lookup)
 
     response = client.request(
         method,
@@ -473,8 +582,7 @@ def test_scenario_case_mismatch_is_rejected_before_workflow(
 
     assert response.status_code == 404
     assert response.json()["detail"] == "案例不存在"
-    classifier.assert_not_called()
-    reclassifier.assert_not_called()
+    handler_lookup.assert_not_called()
 
 
 def test_unknown_scenario_is_not_treated_as_coming_soon(client: TestClient) -> None:

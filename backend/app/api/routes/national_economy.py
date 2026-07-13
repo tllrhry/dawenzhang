@@ -42,10 +42,11 @@ from app.services.scenario_registry import (
 from app.services.scenario_case_handlers import (
     get_scenario_case_handler,
 )
+from app.services.scenario_workflow_handlers import (
+    get_scenario_workflow_handler,
+)
 from app.services.technology_finance_classification_workflow import (
     TechnologyFinanceWorkflowResult,
-    classify_technology_finance_case,
-    reclassify_technology_finance_case,
 )
 
 
@@ -269,8 +270,10 @@ def classify_scenario_case(
     session: Session = Depends(get_db),
 ) -> TechnologyFinanceWorkflowResponse:
     case = _get_scenario_case(session, scenario_id, case_id)
+    registration = SCENARIO_REGISTRY[scenario_id]
+    handler = get_scenario_workflow_handler(registration)
     try:
-        outcome = classify_technology_finance_case(session, case)
+        outcome = handler.classify(session, case, registration)
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -290,14 +293,17 @@ def object_to_scenario_classification(
     session: Session = Depends(get_db),
 ) -> TechnologyFinanceWorkflowResponse:
     case = _get_scenario_case(session, scenario_id, case_id)
+    registration = SCENARIO_REGISTRY[scenario_id]
+    handler = get_scenario_workflow_handler(registration)
     objection_text = payload.objection_text.strip()
     if not objection_text:
         raise HTTPException(status_code=422, detail="异议说明不能为空")
     try:
-        outcome = reclassify_technology_finance_case(
+        outcome = handler.reclassify(
             session,
             case,
             objection_text,
+            registration,
         )
     except Exception as exc:
         raise HTTPException(
@@ -317,11 +323,12 @@ def get_scenario_history(
     session: Session = Depends(get_db),
 ) -> FiveArticlesHistoryResponse:
     case = _get_scenario_case(session, scenario_id, case_id)
-    results = session.scalars(
-        select(FiveArticlesResult)
-        .where(FiveArticlesResult.case_id == case.id)
-        .order_by(FiveArticlesResult.version, FiveArticlesResult.id)
-    ).all()
+    registration = SCENARIO_REGISTRY[scenario_id]
+    results = get_scenario_workflow_handler(registration).history(
+        session,
+        case,
+        registration,
+    )
     return FiveArticlesHistoryResponse(
         items=[FiveArticlesResultResponse.model_validate(result) for result in results]
     )
@@ -334,15 +341,12 @@ def export_scenario_case(
     session: Session = Depends(get_db),
 ) -> StreamingResponse:
     case = _get_scenario_case(session, scenario_id, case_id)
-    five_articles_results = session.scalars(
-        select(FiveArticlesResult)
-        .where(FiveArticlesResult.case_id == case.id)
-        .order_by(FiveArticlesResult.version, FiveArticlesResult.id)
-    ).all()
+    registration = SCENARIO_REGISTRY[scenario_id]
     return _download_response(
-        export_case_workbook(
+        get_scenario_workflow_handler(registration).export(
+            session,
             case,
-            five_articles_results=five_articles_results,
+            registration,
         ),
         XLSX_MIME,
         f"{scenario_id.replace('_', '-')}-case-{case.id}.xlsx",

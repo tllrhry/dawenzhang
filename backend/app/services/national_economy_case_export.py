@@ -19,6 +19,7 @@ from app.services.national_economy_result_presentation import (
 )
 from app.services.scenario_registry import (
     SCENARIO_REGISTRY,
+    ScenarioRegistration,
     TECHNOLOGY_FINANCE_SCENARIO,
 )
 
@@ -73,6 +74,7 @@ def export_case_workbook(
     case: NationalEconomyClassificationCase,
     *,
     five_articles_results: Sequence[FiveArticlesResult] = (),
+    profile: ScenarioRegistration | None = None,
 ) -> bytes:
     workbook = Workbook()
     input_sheet = workbook.active
@@ -85,14 +87,19 @@ def export_case_workbook(
     history_sheet = workbook.create_sheet(RESULT_HISTORY_SHEET)
     _write_result_history(history_sheet, case)
 
-    if case.scenario == TECHNOLOGY_FINANCE_SCENARIO:
-        technology_finance_sheet = workbook.create_sheet(
-            TECHNOLOGY_FINANCE_RESULT_SHEET
-        )
-        _write_technology_finance_result(
-            technology_finance_sheet,
-            five_articles_results,
-        )
+    resolved_profile = profile or SCENARIO_REGISTRY.get(case.scenario)
+    if resolved_profile is not None and resolved_profile.workflow is not None:
+        if resolved_profile.id != case.scenario:
+            raise ValueError("案例与导出场景 profile 不一致")
+        result_sheet = workbook.create_sheet(resolved_profile.export_sheet_name)
+        if resolved_profile.id == TECHNOLOGY_FINANCE_SCENARIO:
+            _write_technology_finance_result(result_sheet, five_articles_results)
+        else:
+            _write_five_articles_result(
+                result_sheet,
+                five_articles_results,
+                resolved_profile,
+            )
 
     output = BytesIO()
     workbook.save(output)
@@ -182,6 +189,140 @@ def _write_technology_finance_result(
                 consistency_basis,
             )
         )
+
+
+def _write_five_articles_result(
+    sheet: Worksheet,
+    results: Sequence[FiveArticlesResult],
+    profile: ScenarioRegistration,
+) -> None:
+    sheet.append(_five_articles_headers(profile))
+    if not results:
+        sheet.append(
+            (
+                "",
+                "尚未判定",
+                f"尚无{profile.name}判定结果。",
+                *("" for _ in range(15)),
+                "不适用",
+                f"尚无{profile.name}判定结果，一致性不适用。",
+            )
+        )
+        return
+
+    current = max(results, key=lambda result: (result.version, result.id or 0))
+    status_label = _five_articles_status_label(current, profile)
+    status_detail = _five_articles_status_detail(current, profile)
+    consistency_label = _consistency_status_label(current)
+    consistency_basis = _five_articles_consistency_basis(current, profile)
+    common_values = (
+        current.version,
+        status_label,
+        status_detail,
+        current.stage_a_result_id,
+        _cell_value(current.loan_neic_code),
+        _cell_value(current.loan_neic_name),
+        _cell_value(current.enterprise_neic_code),
+        _cell_value(current.enterprise_neic_name),
+    )
+
+    if current.status != "completed" or not current.labels:
+        sheet.append(
+            (
+                *common_values,
+                *("" for _ in range(10)),
+                consistency_label,
+                consistency_basis,
+            )
+        )
+        return
+
+    for label in current.labels:
+        sheet.append(
+            (
+                *common_values,
+                *_label_taxonomy(label),
+                _cell_value(label.get("NEIC_Code", label.get("code"))),
+                _cell_value(label.get("NEIC_Name", label.get("name"))),
+                _cell_value(label.get("source_row")),
+                _cell_value(label.get("matching_basis")),
+                _business_evidence_summary(label.get("evidence_refs")),
+                consistency_label,
+                consistency_basis,
+            )
+        )
+
+
+def _five_articles_headers(profile: ScenarioRegistration) -> tuple[str, ...]:
+    return (
+        "Stage B版本",
+        f"{profile.name}状态",
+        "状态说明",
+        "Stage A结果ID",
+        "贷款投向国民经济行业代码",
+        "贷款投向国民经济行业名称",
+        "企业国民经济行业代码",
+        "企业国民经济行业名称",
+        "主题",
+        "第一层",
+        "第二层",
+        "第三层",
+        "第四层",
+        "映射代码",
+        "映射名称",
+        "映射源行",
+        "匹配依据",
+        "业务证据摘要",
+        "贷款对应的五篇大文章类别与企业类别是否一致",
+        "一致性依据",
+    )
+
+
+def _five_articles_status_label(
+    result: FiveArticlesResult,
+    profile: ScenarioRegistration,
+) -> str:
+    if result.status == "not_applicable":
+        return f"不属于{profile.name}"
+    return _RESULT_STATUS_LABELS.get(result.status, result.status)
+
+
+def _five_articles_status_detail(
+    result: FiveArticlesResult,
+    profile: ScenarioRegistration,
+) -> str:
+    if result.status == "completed":
+        return f"{profile.name}判定完成。"
+    if result.status == "not_applicable":
+        return f"贷款投向未命中已发布{profile.name}映射，不属于{profile.name}。"
+    if result.status == "needs_review":
+        detail = result.error_detail or result.consistency_basis
+        return f"{profile.name}判定需人工复核：{detail or '映射或证据需要人工确认。'}"
+    if result.status == "classification_failed":
+        return f"{profile.name}判定失败：{result.error_detail or '未提供失败详情。'}"
+    return result.error_detail or f"{profile.name}判定状态：{result.status}"
+
+
+def _five_articles_consistency_basis(
+    result: FiveArticlesResult,
+    profile: ScenarioRegistration,
+) -> str:
+    if result.status == "completed":
+        return result.consistency_basis or "未提供一致性依据。"
+    if result.status == "not_applicable":
+        return (
+            result.consistency_basis
+            or f"当前贷款投向不属于{profile.name}，一致性不适用。"
+        )
+    if result.status == "needs_review":
+        detail = result.consistency_basis or result.error_detail
+        return (
+            f"当前无正式{profile.name}标签，一致性比较不适用；"
+            f"{detail or '映射或证据需人工复核。'}"
+        )
+    if result.status == "classification_failed":
+        return f"{profile.name}判定失败，未形成正式标签，一致性不适用。"
+    return f"当前无正式{profile.name}标签，一致性不适用。"
 
 
 def _technology_finance_status_detail(result: FiveArticlesResult) -> str:

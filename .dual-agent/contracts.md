@@ -18,6 +18,7 @@
 |---|---|---|---|
 | 复用 `national_economy_classification_workflow.classify_case` 的组合工作流必须把 Stage A 视为已独立提交，固定并持久化 `stage_a_result_id`；下游失败不得假设可回滚 Stage A，无异议重试不得重复生成 Stage A 版本 | `backend/tests/test_technology_finance_classification_workflow.py`（Stage B 失败保留 Stage A、重试不增加 Stage A 版本、异议双版本 +1、completed 幂等） | 新增/修改任何复用 `classify_case` 的复合分类工作流 | ✅ |
 | 多场景案例详情、前端展示和导出必须按场景注册的字段 schema 枚举字段，不得继续写死国民经济 `FIELD_LABELS` 导致场景附加字段丢失 | `backend/tests/test_technology_finance_api.py`、`backend/tests/test_technology_finance_case_export.py`、`backend/tests/test_national_economy_case_export.py`（科技金融全部字段可读/可导出，国民经济三工作表回归不变） | 新增场景、修改案例响应、输入展示或案例导出 | ✅ |
+| 五篇大文章各子场景的模板、映射版本、案例、Stage B 结果、历史、前端 session 和导出必须按 `scenario_id` 隔离；一个场景未命中或失败不得读取其他场景兜底 | 待在 `add-five-major-articles-green-digital-pension-finance` task 3.2、4.4、5.1、6.2 建立四场景交叉负向测试 | 新增/开放五篇子场景，修改映射查询、结果保存、历史、前端 session 或导出 | ⏳待建 |
 
 ## 维护规则
 - **新发现一条横切契约**（周期性体检 / 评审中撞见）→ 加一行，状态先标「无 gate=挂账」，再排是否 gate 化。

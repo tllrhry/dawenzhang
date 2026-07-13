@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.models import (
+    FiveArticlesMappingVersion,
     FiveArticlesResult,
     NationalEconomyClassificationCase,
     NationalEconomyClassificationResult,
@@ -14,7 +15,12 @@ from app.services.national_economy_classification_workflow import (
     classify_case,
     reclassify_case,
 )
+from app.services.scenario_registry import (
+    ScenarioRegistration,
+    TECHNOLOGY_FINANCE_REGISTRATION,
+)
 from app.services.technology_finance_label_selection import (
+    select_most_matching_five_articles_label,
     select_most_matching_technology_finance_label,
 )
 from app.services.technology_finance_mapping_query import (
@@ -24,6 +30,7 @@ from app.services.technology_finance_mapping_query import (
 )
 from app.services.technology_finance_stage_b import (
     TechnologyFinanceStageBResult,
+    classify_five_articles_stage_b,
     classify_technology_finance_stage_b,
 )
 
@@ -38,10 +45,7 @@ StageAReclassificationCallable = Callable[
 ]
 MappingLookupCallable = Callable[..., FiveArticlesMappingLookupResult]
 LabelSelectionCallable = Callable[..., FiveArticlesMappingLabel]
-StageBClassificationCallable = Callable[
-    ...,
-    TechnologyFinanceStageBResult,
-]
+StageBClassificationCallable = Callable[..., TechnologyFinanceStageBResult]
 
 
 @dataclass(frozen=True)
@@ -57,24 +61,38 @@ def classify_technology_finance_case(
     *,
     stage_a_classifier: StageAClassificationCallable = classify_case,
     mapping_lookup: MappingLookupCallable = lookup_five_articles_mapping,
-    label_selector: LabelSelectionCallable = (
-        select_most_matching_technology_finance_label
-    ),
-    stage_b_classifier: StageBClassificationCallable = (
-        classify_technology_finance_stage_b
-    ),
+    label_selector: LabelSelectionCallable = select_most_matching_technology_finance_label,
+    stage_b_classifier: StageBClassificationCallable = classify_technology_finance_stage_b,
 ) -> TechnologyFinanceWorkflowResult:
-    """Run initial Stage A or retry Stage B against the latest persisted Stage A."""
+    """Compatibility wrapper for the technology-finance workflow profile."""
+    return classify_five_articles_case(
+        session, case, TECHNOLOGY_FINANCE_REGISTRATION, settings,
+        stage_a_classifier=stage_a_classifier,
+        mapping_lookup=mapping_lookup,
+        label_selector=lambda _profile, *args: label_selector(*args),
+        stage_b_classifier=lambda _profile, *args: stage_b_classifier(*args),
+    )
+
+
+def classify_five_articles_case(
+    session: Session,
+    case: NationalEconomyClassificationCase,
+    profile: ScenarioRegistration,
+    settings: Settings | None = None,
+    *,
+    stage_a_classifier: StageAClassificationCallable = classify_case,
+    mapping_lookup: MappingLookupCallable = lookup_five_articles_mapping,
+    label_selector: LabelSelectionCallable = select_most_matching_five_articles_label,
+    stage_b_classifier: StageBClassificationCallable = classify_five_articles_stage_b,
+) -> TechnologyFinanceWorkflowResult:
+    """Run initial Stage A or retry Stage B within one scenario profile."""
+    _validate_case_profile(case, profile)
     resolved_settings = settings or get_settings()
     stage_a_result = _latest_stage_a_result(session, case.id)
     if stage_a_result is None:
-        # classify_case owns and commits the Stage A transaction boundary.
         stage_a_result = stage_a_classifier(session, case, resolved_settings)
-    return run_technology_finance_stage_b(
-        session,
-        case,
-        stage_a_result,
-        resolved_settings,
+    return run_five_articles_stage_b(
+        session, case, stage_a_result, profile, resolved_settings,
         mapping_lookup=mapping_lookup,
         label_selector=label_selector,
         stage_b_classifier=stage_b_classifier,
@@ -89,27 +107,37 @@ def reclassify_technology_finance_case(
     *,
     stage_a_reclassifier: StageAReclassificationCallable = reclassify_case,
     mapping_lookup: MappingLookupCallable = lookup_five_articles_mapping,
-    label_selector: LabelSelectionCallable = (
-        select_most_matching_technology_finance_label
-    ),
-    stage_b_classifier: StageBClassificationCallable = (
-        classify_technology_finance_stage_b
-    ),
+    label_selector: LabelSelectionCallable = select_most_matching_technology_finance_label,
+    stage_b_classifier: StageBClassificationCallable = classify_technology_finance_stage_b,
 ) -> TechnologyFinanceWorkflowResult:
-    """Create a new objection-driven Stage A, then bind a new Stage B to it."""
-    resolved_settings = settings or get_settings()
-    # reclassify_case validates the objection and commits Stage A independently.
-    stage_a_result = stage_a_reclassifier(
-        session,
-        case,
-        objection_text,
-        resolved_settings,
+    """Compatibility wrapper for objection-driven technology-finance reruns."""
+    return reclassify_five_articles_case(
+        session, case, objection_text, TECHNOLOGY_FINANCE_REGISTRATION, settings,
+        stage_a_reclassifier=stage_a_reclassifier,
+        mapping_lookup=mapping_lookup,
+        label_selector=lambda _profile, *args: label_selector(*args),
+        stage_b_classifier=lambda _profile, *args: stage_b_classifier(*args),
     )
-    return run_technology_finance_stage_b(
-        session,
-        case,
-        stage_a_result,
-        resolved_settings,
+
+
+def reclassify_five_articles_case(
+    session: Session,
+    case: NationalEconomyClassificationCase,
+    objection_text: str,
+    profile: ScenarioRegistration,
+    settings: Settings | None = None,
+    *,
+    stage_a_reclassifier: StageAReclassificationCallable = reclassify_case,
+    mapping_lookup: MappingLookupCallable = lookup_five_articles_mapping,
+    label_selector: LabelSelectionCallable = select_most_matching_five_articles_label,
+    stage_b_classifier: StageBClassificationCallable = classify_five_articles_stage_b,
+) -> TechnologyFinanceWorkflowResult:
+    """Create a new objection Stage A, then bind a profile-bounded Stage B."""
+    _validate_case_profile(case, profile)
+    resolved_settings = settings or get_settings()
+    stage_a_result = stage_a_reclassifier(session, case, objection_text, resolved_settings)
+    return run_five_articles_stage_b(
+        session, case, stage_a_result, profile, resolved_settings,
         mapping_lookup=mapping_lookup,
         label_selector=label_selector,
         stage_b_classifier=stage_b_classifier,
@@ -123,14 +151,33 @@ def run_technology_finance_stage_b(
     settings: Settings,
     *,
     mapping_lookup: MappingLookupCallable = lookup_five_articles_mapping,
-    label_selector: LabelSelectionCallable = (
-        select_most_matching_technology_finance_label
-    ),
-    stage_b_classifier: StageBClassificationCallable = (
-        classify_technology_finance_stage_b
-    ),
+    label_selector: LabelSelectionCallable = select_most_matching_technology_finance_label,
+    stage_b_classifier: StageBClassificationCallable = classify_technology_finance_stage_b,
 ) -> TechnologyFinanceWorkflowResult:
-    """Persist an independently committed Stage B bound to one Stage A result."""
+    """Compatibility wrapper for a technology-finance Stage B retry."""
+    return run_five_articles_stage_b(
+        session, case, stage_a_result, TECHNOLOGY_FINANCE_REGISTRATION, settings,
+        mapping_lookup=mapping_lookup,
+        label_selector=lambda _profile, *args: label_selector(*args),
+        stage_b_classifier=lambda _profile, *args: stage_b_classifier(*args),
+    )
+
+
+def run_five_articles_stage_b(
+    session: Session,
+    case: NationalEconomyClassificationCase,
+    stage_a_result: NationalEconomyClassificationResult,
+    profile: ScenarioRegistration,
+    settings: Settings,
+    *,
+    mapping_lookup: MappingLookupCallable = lookup_five_articles_mapping,
+    label_selector: LabelSelectionCallable = select_most_matching_five_articles_label,
+    stage_b_classifier: StageBClassificationCallable = classify_five_articles_stage_b,
+) -> TechnologyFinanceWorkflowResult:
+    """Persist an independently committed, profile-bounded Stage B result."""
+    _validate_case_profile(case, profile)
+    if stage_a_result.case_id != case.id:
+        raise ValueError("Stage A result does not belong to the current case")
     if stage_a_result.status != "completed":
         return TechnologyFinanceWorkflowResult(stage_a_result, None)
 
@@ -138,6 +185,7 @@ def run_technology_finance_stage_b(
         select(FiveArticlesResult)
         .where(
             FiveArticlesResult.case_id == case.id,
+            FiveArticlesResult.scenario_id == profile.id,
             FiveArticlesResult.stage_a_result_id == stage_a_result.id,
             FiveArticlesResult.status == "completed",
         )
@@ -154,55 +202,31 @@ def run_technology_finance_stage_b(
             enterprise_four_digit_code=stage_a_result.industry_code or "",
             enterprise_major_category_code=stage_a_result.industry_major_code or "",
             loan_direction_four_digit_code=stage_a_result.loan_industry_code or "",
-            loan_direction_major_category_code=(
-                stage_a_result.loan_industry_major_code or ""
-            ),
-            scenario_id=case.scenario,
+            loan_direction_major_category_code=stage_a_result.loan_industry_major_code or "",
+            scenario_id=profile.id,
         )
-        stage_b_result = _build_stage_b_result(
-            session,
-            case,
-            stage_a_result,
-            mapping_result,
-            settings,
-            label_selector,
-            stage_b_classifier,
+        _validate_mapping_context(session, mapping_result, profile)
+        result = _build_stage_b_result(
+            session, case, stage_a_result, mapping_result, settings, profile,
+            label_selector, stage_b_classifier,
         )
-        return TechnologyFinanceWorkflowResult(
-            stage_a_result,
-            _commit_stage_b_result(session, stage_b_result),
-        )
+        return TechnologyFinanceWorkflowResult(stage_a_result, _commit_stage_b_result(session, result))
     except Exception as exc:
-        # Stage A was already committed by its own workflow. Roll back only the
-        # current Stage B attempt, then persist a separate failure version.
         session.rollback()
         failed_result = _new_result(
-            session,
-            case=case,
-            stage_a_result=stage_a_result,
+            session, case=case, stage_a_result=stage_a_result,
             status="classification_failed",
-            mapping_version_id=(
-                None if mapping_result is None else mapping_result.mapping_version_id
-            ),
+            mapping_version_id=_failure_mapping_version_id(session, mapping_result, profile),
             error_detail=str(exc) or exc.__class__.__name__,
         )
-        return TechnologyFinanceWorkflowResult(
-            stage_a_result,
-            _commit_stage_b_result(session, failed_result),
-        )
+        return TechnologyFinanceWorkflowResult(stage_a_result, _commit_stage_b_result(session, failed_result))
 
 
-def _latest_stage_a_result(
-    session: Session,
-    case_id: int,
-) -> NationalEconomyClassificationResult | None:
+def _latest_stage_a_result(session: Session, case_id: int) -> NationalEconomyClassificationResult | None:
     return session.scalar(
         select(NationalEconomyClassificationResult)
         .where(NationalEconomyClassificationResult.case_id == case_id)
-        .order_by(
-            NationalEconomyClassificationResult.version.desc(),
-            NationalEconomyClassificationResult.id.desc(),
-        )
+        .order_by(NationalEconomyClassificationResult.version.desc(), NationalEconomyClassificationResult.id.desc())
         .limit(1)
     )
 
@@ -213,70 +237,69 @@ def _build_stage_b_result(
     stage_a_result: NationalEconomyClassificationResult,
     mapping_result: FiveArticlesMappingLookupResult,
     settings: Settings,
+    profile: ScenarioRegistration,
     label_selector: LabelSelectionCallable,
     stage_b_classifier: StageBClassificationCallable,
 ) -> FiveArticlesResult:
     if mapping_result.status == "not_applicable":
         return _new_result(
-            session,
-            case=case,
-            stage_a_result=stage_a_result,
-            status="not_applicable",
+            session, case=case, stage_a_result=stage_a_result, status="not_applicable",
             mapping_version_id=mapping_result.mapping_version_id,
             consistency_status="not_applicable",
-            consistency_basis=(
-                "贷款投向未命中已发布科技金融映射，科技金融一致性判定不适用。"
-            ),
+            consistency_basis=f"贷款投向未命中已发布{profile.name}映射，{profile.name}一致性判定不适用。",
             error_detail=mapping_result.detail,
         )
     if mapping_result.status == "needs_review":
         return _new_result(
-            session,
-            case=case,
-            stage_a_result=stage_a_result,
-            status="needs_review",
+            session, case=case, stage_a_result=stage_a_result, status="needs_review",
             mapping_version_id=mapping_result.mapping_version_id,
             consistency_status="needs_review",
-            consistency_basis="科技金融映射数据异常，需人工复核。",
+            consistency_basis=f"{profile.name}映射数据异常，需人工复核。",
             error_detail=mapping_result.detail,
         )
 
-    loan_direction_labels = mapping_result.loan_direction_labels
+    loan_labels = mapping_result.loan_direction_labels
     enterprise_labels = mapping_result.enterprise_labels
-    if len(loan_direction_labels) > 1:
-        # Deterministic mapping may hit multiple independent subjects for the
-        # same code; narrow to the single most-matching one before Stage B.
-        selected_label = label_selector(
-            case.input_payload,
-            stage_a_result,
-            loan_direction_labels,
-            settings,
-        )
-        loan_direction_labels = (selected_label,)
+    if len(loan_labels) > 1:
+        selected = label_selector(profile, case.input_payload, stage_a_result, loan_labels, settings)
+        loan_labels = (selected,)
         if stage_a_result.industry_code == stage_a_result.loan_industry_code:
-            # Same-code Stage B requires enterprise and loan label sets to be
-            # identical; the enterprise side collapses to the same winner.
-            enterprise_labels = loan_direction_labels
-
+            enterprise_labels = loan_labels
     decision = stage_b_classifier(
-        case.input_payload,
-        stage_a_result,
-        enterprise_labels,
-        loan_direction_labels,
-        settings,
+        profile, case.input_payload, stage_a_result, enterprise_labels, loan_labels, settings
     )
     return _new_result(
-        session,
-        case=case,
-        stage_a_result=stage_a_result,
-        status="completed",
-        mapping_version_id=mapping_result.mapping_version_id,
-        labels=list(decision.labels),
-        consistency_status=decision.consistency_status,
-        consistency_basis=decision.consistency_basis,
-        consistency_evidence_refs=list(decision.consistency_evidence_refs),
-        model_output=dict(decision.model_output),
+        session, case=case, stage_a_result=stage_a_result, status="completed",
+        mapping_version_id=mapping_result.mapping_version_id, labels=list(decision.labels),
+        consistency_status=decision.consistency_status, consistency_basis=decision.consistency_basis,
+        consistency_evidence_refs=list(decision.consistency_evidence_refs), model_output=dict(decision.model_output),
     )
+
+
+def _validate_case_profile(case: NationalEconomyClassificationCase, profile: ScenarioRegistration) -> None:
+    if not profile.is_executable_profile or case.scenario != profile.id:
+        raise ValueError(f"case scenario must match executable profile {profile.id}")
+
+
+def _validate_mapping_context(
+    session: Session, mapping_result: FiveArticlesMappingLookupResult, profile: ScenarioRegistration
+) -> None:
+    if mapping_result.mapping_version_id is not None:
+        version = session.get(FiveArticlesMappingVersion, mapping_result.mapping_version_id)
+        if version is None or version.scenario_id != profile.id:
+            raise ValueError("mapping version does not belong to the current scenario")
+    labels = (*mapping_result.enterprise_labels, *mapping_result.loan_direction_labels)
+    if any(label.scenario_id != profile.id for label in labels):
+        raise ValueError("mapping labels do not belong to the current scenario")
+
+
+def _failure_mapping_version_id(
+    session: Session, mapping_result: FiveArticlesMappingLookupResult | None, profile: ScenarioRegistration
+) -> int | None:
+    if mapping_result is None or mapping_result.mapping_version_id is None:
+        return None
+    version = session.get(FiveArticlesMappingVersion, mapping_result.mapping_version_id)
+    return version.id if version is not None and version.scenario_id == profile.id else None
 
 
 def _new_result(
@@ -293,35 +316,19 @@ def _new_result(
     model_output: dict[str, object] | None = None,
     error_detail: str | None = None,
 ) -> FiveArticlesResult:
-    current_version = session.scalar(
-        select(func.max(FiveArticlesResult.version)).where(
-            FiveArticlesResult.case_id == case.id
-        )
-    )
+    current_version = session.scalar(select(func.max(FiveArticlesResult.version)).where(FiveArticlesResult.case_id == case.id))
     return FiveArticlesResult(
-        case_id=case.id,
-        scenario_id=case.scenario,
-        version=(current_version or 0) + 1,
-        status=status,
-        stage_a_result_id=stage_a_result.id,
-        mapping_version_id=mapping_version_id,
-        labels=labels or [],
-        loan_neic_code=stage_a_result.loan_industry_code,
-        loan_neic_name=stage_a_result.loan_industry_name,
-        enterprise_neic_code=stage_a_result.industry_code,
-        enterprise_neic_name=stage_a_result.industry_name,
-        consistency_status=consistency_status,
-        consistency_basis=consistency_basis,
-        consistency_evidence_refs=consistency_evidence_refs or [],
-        model_output=model_output,
-        error_detail=error_detail,
+        case_id=case.id, scenario_id=case.scenario, version=(current_version or 0) + 1,
+        status=status, stage_a_result_id=stage_a_result.id, mapping_version_id=mapping_version_id,
+        labels=labels or [], loan_neic_code=stage_a_result.loan_industry_code,
+        loan_neic_name=stage_a_result.loan_industry_name, enterprise_neic_code=stage_a_result.industry_code,
+        enterprise_neic_name=stage_a_result.industry_name, consistency_status=consistency_status,
+        consistency_basis=consistency_basis, consistency_evidence_refs=consistency_evidence_refs or [],
+        model_output=model_output, error_detail=error_detail,
     )
 
 
-def _commit_stage_b_result(
-    session: Session,
-    result: FiveArticlesResult,
-) -> FiveArticlesResult:
+def _commit_stage_b_result(session: Session, result: FiveArticlesResult) -> FiveArticlesResult:
     session.add(result)
     session.commit()
     session.refresh(result)

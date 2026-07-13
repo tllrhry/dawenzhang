@@ -6,7 +6,7 @@ from alembic.config import Config
 import pytest
 from sqlalchemy import inspect
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, ProgrammingError
 
 from app.db.session import get_engine, get_sessionmaker
 from app.models import (
@@ -393,6 +393,21 @@ def test_database_enforces_status_version_and_completed_stage_a_idempotency() ->
             )
         )
         with pytest.raises(IntegrityError):
+            session.commit()
+        session.rollback()
+
+        session.add(
+            _result(
+                case_id=case.id,
+                stage_a_result_id=stage_a.id,
+                scenario_id="other_five_articles_scenario",
+                version=3,
+                status="needs_review",
+                mapping_version_id=mapping_version.id,
+                consistency_status="needs_review",
+            )
+        )
+        with pytest.raises(ProgrammingError, match="scenario must match case scenario"):
             session.commit()
         session.rollback()
 

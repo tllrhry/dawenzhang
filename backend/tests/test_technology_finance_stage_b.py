@@ -200,7 +200,7 @@ def _run(
         )
 
 
-def test_deterministic_labels_accept_one_non_technology_scenario() -> None:
+def test_technology_stage_b_rejects_non_technology_candidates() -> None:
     enterprise = replace(
         _label(code="2710", name="化学药品原料药制造", source_row=11),
         scenario_id="green_finance",
@@ -210,14 +210,8 @@ def test_deterministic_labels_accept_one_non_technology_scenario() -> None:
         scenario_id="green_finance",
     )
 
-    result = _run(
-        _model_output((enterprise,), (loan,), "consistent"),
-        (enterprise,),
-        (loan,),
-    )
-
-    assert result.consistency_status == "consistent"
-    assert [label["source_row"] for label in result.labels] == [loan.source_row]
+    with pytest.raises(TechnologyFinanceStageBError, match="technology_finance"):
+        _run(_model_output((enterprise,), (loan,), "consistent"), (enterprise,), (loan,))
 
 
 def test_deterministic_labels_reject_mixed_scenarios() -> None:

@@ -33,7 +33,7 @@ def workflow_context() -> Iterator[
     tuple[Session, NationalEconomyClassificationCase, FiveArticlesMappingVersion]
 ]:
     session = get_sessionmaker()()
-    scenario_id = f"technology_finance_workflow_{uuid4().hex}"
+    scenario_id = "technology_finance"
     case = NationalEconomyClassificationCase(
         scenario=scenario_id,
         input_payload={
@@ -53,18 +53,20 @@ def workflow_context() -> Iterator[
     )
     session.add_all([case, mapping_version])
     session.commit()
+    case_id = case.id
+    mapping_version_id = mapping_version.id
     try:
         yield session, case, mapping_version
     finally:
         session.rollback()
         session.execute(
             delete(NationalEconomyClassificationCase).where(
-                NationalEconomyClassificationCase.scenario == scenario_id
+                NationalEconomyClassificationCase.id == case_id
             )
         )
         session.execute(
             delete(FiveArticlesMappingVersion).where(
-                FiveArticlesMappingVersion.scenario_id == scenario_id
+                FiveArticlesMappingVersion.id == mapping_version_id
             )
         )
         session.commit()

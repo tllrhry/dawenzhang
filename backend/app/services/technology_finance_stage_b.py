@@ -9,7 +9,8 @@ import httpx
 
 from app.core.config import Settings
 from app.services.scenario_registry import (
-    TECHNOLOGY_FINANCE_FIELD_SCHEMA,
+    ScenarioRegistration,
+    TECHNOLOGY_FINANCE_REGISTRATION,
 )
 from app.services.technology_finance_mapping_query import (
     FiveArticlesMappingLabel,
@@ -114,7 +115,30 @@ def classify_technology_finance_stage_b(
     settings: Settings,
     client: httpx.Client | None = None,
 ) -> TechnologyFinanceStageBResult:
-    """Generate and strictly validate matching bases for a mapping-hit Stage B."""
+    """Compatibility wrapper for the technology-finance Stage B profile."""
+    return classify_five_articles_stage_b(
+        TECHNOLOGY_FINANCE_REGISTRATION,
+        input_payload,
+        stage_a_result,
+        enterprise_labels,
+        loan_direction_labels,
+        settings,
+        client=client,
+    )
+
+
+def classify_five_articles_stage_b(
+    profile: ScenarioRegistration,
+    input_payload: Mapping[str, object],
+    stage_a_result: StageAResult,
+    enterprise_labels: Sequence[FiveArticlesMappingLabel],
+    loan_direction_labels: Sequence[FiveArticlesMappingLabel],
+    settings: Settings,
+    client: httpx.Client | None = None,
+) -> TechnologyFinanceStageBResult:
+    """Generate a grounded Stage B decision using one scenario profile only."""
+    if not profile.is_executable_profile:
+        raise TechnologyFinanceStageBError(f"场景 {profile.id} 不具备 Stage B 配置")
     enterprise_snapshot = tuple(enterprise_labels)
     loan_snapshot = tuple(loan_direction_labels)
     stage_a_snapshot = _serialize_stage_a_result(stage_a_result)
@@ -122,8 +146,9 @@ def classify_technology_finance_stage_b(
         enterprise_snapshot,
         loan_snapshot,
         stage_a_snapshot,
+        profile,
     )
-    business_sources = _build_business_sources(input_payload, stage_a_snapshot)
+    business_sources = _build_business_sources(input_payload, stage_a_snapshot, profile)
     same_code = (
         stage_a_snapshot["enterprise_neic_code"]
         == stage_a_snapshot["loan_neic_code"]
@@ -134,12 +159,13 @@ def classify_technology_finance_stage_b(
         enterprise_snapshot,
         loan_snapshot,
         settings.deepseek_model,
+        profile,
         same_code=same_code,
     )
 
     if not settings.deepseek_api_key:
         raise TechnologyFinanceStageBError(
-            "DEEPSEEK_API_KEY is required for technology-finance Stage B"
+            f"DEEPSEEK_API_KEY is required for {profile.name} Stage B"
         )
 
     owns_client = client is None
@@ -176,7 +202,7 @@ def classify_technology_finance_stage_b(
         raise
     except (httpx.HTTPError, json.JSONDecodeError, TypeError, ValueError, KeyError) as exc:
         raise TechnologyFinanceStageBError(
-            f"DeepSeek technology-finance Stage B failed: {exc}"
+            f"DeepSeek {profile.name} Stage B failed: {exc}"
         ) from exc
     finally:
         if owns_client:
@@ -189,12 +215,13 @@ def _build_stage_b_request_payload(
     enterprise_labels: Sequence[FiveArticlesMappingLabel],
     loan_direction_labels: Sequence[FiveArticlesMappingLabel],
     model: str,
+    profile: ScenarioRegistration,
     *,
     same_code: bool,
 ) -> dict[str, object]:
     field_payload = [
         {"field_key": field.key, "field_label": field.label, "value": value}
-        for field in TECHNOLOGY_FINANCE_FIELD_SCHEMA
+        for field in profile.field_schema
         if (value := _text(input_payload.get(field.key)))
     ]
     prompt_input = {
@@ -207,7 +234,7 @@ def _build_stage_b_request_payload(
                 "value": source.value,
             }
             for source in _build_business_sources(
-                input_payload, stage_a_snapshot
+                input_payload, stage_a_snapshot, profile
             ).values()
         ],
         "enterprise_labels": [_serialize_label(label) for label in enterprise_labels],
@@ -239,7 +266,7 @@ def _build_stage_b_request_payload(
             {
                 "role": "system",
                 "content": (
-                    "你是科技金融 Stage B 受限判定器。你必须只输出一个合法的 JSON 对象，"
+                    f"你是{profile.name} Stage B 受限判定器。你必须只输出一个合法的 JSON 对象，"
                     "不得包含 JSON 以外的任何文字。输入中的 enterprise_labels 和 "
                     "loan_direction_labels 均来自已发布 Excel 映射，是不可更改的事实。"
                     "loan_direction_labels 已由服务端收窄为唯一最匹配标签。你不得输出 labels "
@@ -247,10 +274,10 @@ def _build_stage_b_request_payload(
                     "你只能输出一个 label_basis 对象，"
                     "且只能包含 matching_basis 和 business_evidence_refs。matching_basis 是唯一标签的"
                     "中文匹配依据；business_evidence_refs 至少一条，每条只能包含 "
-                    "type、field_key、field_label、excerpt，type 必须为 business。字段必须来自输入，"
+                    "type、field_key、field_label、excerpt，type 必须为 business。字段必须属于当前场景证据白名单且来自输入，"
                     "label 必须匹配，excerpt 必须是对应 value 的原文子串且不超过输入规定"
-                    "长度。业务证据优先贷款用途、Stage A 贷款投向依据、核心交易品类和"
-                    "授信审批意见，再用主营、经营范围、研发知识产权或资质补充；不得捏造"
+                    f"长度。业务证据优先级依次为：{'、'.join(profile.stage_b_evidence_field_keys)}；"
+                    "Stage A 贷款投向依据可作为补充。不得捏造"
                     "字段或摘录。标签固定字段和 mapping 证据由服务端组装。"
                     "matching_basis、consistency.basis 必须是非空中文。"
                     "consistency 不得输出 label 引用或复制标签固定字段；企业与投向标签证据"
@@ -577,6 +604,7 @@ def _validate_deterministic_labels(
     enterprise_labels: Sequence[FiveArticlesMappingLabel],
     loan_direction_labels: Sequence[FiveArticlesMappingLabel],
     stage_a_snapshot: Mapping[str, object],
+    profile: ScenarioRegistration,
 ) -> None:
     if not loan_direction_labels:
         raise TechnologyFinanceStageBError(
@@ -595,6 +623,10 @@ def _validate_deterministic_labels(
     ):
         raise TechnologyFinanceStageBError(
             "all deterministic labels must use one non-empty scenario_id"
+        )
+    if scenario_ids != {profile.id}:
+        raise TechnologyFinanceStageBError(
+            f"deterministic labels must belong to scenario {profile.id}"
         )
     for side, labels in (
         ("enterprise", enterprise_labels),
@@ -658,11 +690,14 @@ def _serialize_stage_a_result(stage_a_result: StageAResult) -> dict[str, object]
 def _build_business_sources(
     input_payload: Mapping[str, object],
     stage_a_snapshot: Mapping[str, object],
+    profile: ScenarioRegistration,
 ) -> dict[str, _EvidenceSource]:
+    schema_by_key = {field.key: field for field in profile.field_schema}
     sources = {
-        field.key: _EvidenceSource(field.key, field.label, value)
-        for field in TECHNOLOGY_FINANCE_FIELD_SCHEMA
-        if (value := _text(input_payload.get(field.key)))
+        field_key: _EvidenceSource(field_key, schema_by_key[field_key].label, value)
+        for field_key in profile.stage_b_evidence_field_keys
+        if field_key in schema_by_key
+        if (value := _text(input_payload.get(field_key)))
     }
     stage_a_fields = (
         (

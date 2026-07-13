@@ -8,6 +8,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
     func,
     text,
@@ -102,3 +103,84 @@ class FiveArticlesMappingRow(Base):
     mapping_version: Mapped[FiveArticlesMappingVersion] = relationship(
         back_populates="rows"
     )
+
+
+class FiveArticlesResult(Base):
+    __tablename__ = "five_articles_results"
+    __table_args__ = (
+        UniqueConstraint(
+            "case_id",
+            "version",
+            name="uq_five_articles_results_case_version",
+        ),
+        CheckConstraint(
+            "status IN ('completed', 'not_applicable', 'needs_review', "
+            "'classification_failed')",
+            name="ck_five_articles_results_status",
+        ),
+        CheckConstraint(
+            "consistency_status IN ('consistent', 'inconsistent', "
+            "'needs_review', 'not_applicable')",
+            name="ck_five_articles_results_consistency_status",
+        ),
+        Index(
+            "uq_five_articles_results_case_stage_a_completed",
+            "case_id",
+            "stage_a_result_id",
+            unique=True,
+            postgresql_where=text("status = 'completed'"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    case_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("national_economy_classification_cases.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    scenario_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    stage_a_result_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("national_economy_classification_results.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    mapping_version_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("five_articles_mapping_versions.id"),
+        nullable=True,
+    )
+    labels: Mapped[list[dict[str, object]]] = mapped_column(
+        JSONB,
+        default=list,
+        server_default=text("'[]'::jsonb"),
+        nullable=False,
+    )
+    loan_neic_code: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    loan_neic_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    enterprise_neic_code: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    enterprise_neic_name: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+    consistency_status: Mapped[str | None] = mapped_column(
+        String(32), nullable=True
+    )
+    consistency_basis: Mapped[str | None] = mapped_column(Text, nullable=True)
+    consistency_evidence_refs: Mapped[list[dict[str, object]]] = mapped_column(
+        JSONB,
+        default=list,
+        server_default=text("'[]'::jsonb"),
+        nullable=False,
+    )
+    model_output: Mapped[dict[str, object] | None] = mapped_column(
+        JSONB, nullable=True
+    )
+    error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    case: Mapped["NationalEconomyClassificationCase"] = relationship()
+    stage_a_result: Mapped["NationalEconomyClassificationResult"] = relationship()
+    mapping_version: Mapped[FiveArticlesMappingVersion | None] = relationship()

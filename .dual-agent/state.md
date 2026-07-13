@@ -14,7 +14,7 @@
 - **关键边界**：Stage A 不改逻辑且独立提交；Stage B 绑定 `stage_a_result_id` 独立重试。首期只用现有科技金融模板与科技金融映射，不改其他四篇资产、不引入五篇映射向量库、不开放其他场景。
 - **映射口径**：同步时以国民经济目录校验同粒度 code/name；运行时匹配 Excel 显式四位行及显式二位大类行；多标签全部输出并保留 mapping version/source row，并按「同主题最具体者优先」剔除同主题祖先大类标签（大类标签仅在该主题无更具体四位命中时作兜底——Claude 终审提出、用户已确认）。正常未命中按 `not_applicable=不属于科技金融`（Claude 终审复核确认正确），数据冲突/证据不足才 needs_review。
 - **一致性**：`consistent / inconsistent / needs_review`，不得因两码不同或有研发资质直接下结论；匹配依据与一致性均保存映射证据、业务字段 key/标签/原文摘录。
-- OpenSpec 已完成业务评审修订并通过 strict validation；实现已完成 task 1.1、1.2、2.1、2.2、2.3、3.1、3.2。
+- OpenSpec 已完成业务评审修订并通过 strict validation；实现已完成 task 1.1、1.2、2.1、2.2、2.3、3.1、3.2、3.3。
 
 ## 当前阶段与下一步
 
@@ -26,12 +26,13 @@
 - ✅ Task 2.3：新增科技金融确定性映射查询；scenario 下选择最大 version 的 published 版本，企业/投向两侧分别只查显式 4 位和显式 2 位行，按完整 taxonomy+code 检查唯一性，并按同主题路径前缀剔除祖先大类；正常投向零命中为 not_applicable，版本报告、行数、code/name、重复键等异常为 needs_review。
 - ✅ Task 3.1：新增 `five_articles_results` 模型与 0008 迁移；字段覆盖版本/状态/`stage_a_result_id`/`mapping_version_id`/两侧 code+name 快照/labels+证据/一致性三态+not_applicable/model_output/error_detail；status 与 consistency_status 双 CHECK、`(case_id,version)` 唯一、`(case_id,stage_a_result_id) WHERE status='completed'` 部分唯一索引防重复 completed、三 FK（case/stage_a/ mapping_version），downgrade/upgrade 往返通过。（Codex 会话中途 MCP 断开，Claude 独立复跑迁移+测试+runner 并补收尾）
 - ✅ Task 3.2：新增受限 Stage B 判定单元；DeepSeek 仅接收科技金融字段、指定 Stage A 与确定性双侧标签，逐投向标签严格校验标签集合、映射版本/source_row/code/name/path、中文依据和真实原文摘录；两码不同时校验三态矩阵与证据完整性，同码由服务端确定 consistent；违约抛专用错误供 3.3 落 classification_failed。
-- ✅ 验证：task 3.2 定向 13 passed（含标签篡改、假字段/假摘录、缺映射证据、三态、同码确定一致、HTTP 失败）；后端全量 201 passed；统一 runner 后端/前端均 PASS。
+- ✅ Task 3.3：新增科技金融两阶段编排；首次分类沿用 `classify_case` 的独立提交，普通重试复用最新 `stage_a_result_id`，异议沿用 `reclassify_case` 生成新 Stage A；Stage B 独立提交，失败先 rollback 再写 classification_failed，未完成 Stage A 短路，not_applicable/needs_review 零模型调用，completed 幂等复用。
+- ✅ 验证：task 3.3 定向 6 passed（Stage B 失败保留 Stage A、重试不增加 Stage A 版本、异议双版本 +1、completed 幂等、未完成短路、not_applicable/needs_review 零模型调用）；后端全量 208 passed；统一 runner 后端/前端均 PASS。
 - ⚠️ 真实科技金融映射资产只读预检：1335 个非空源行中 13 行为三位 code（首例源行 8：`276　`），按 2/4 位源契约会正确判 invalid；task 6.1 前需业务侧修正或确认原始代码，不得由同步器猜测补位。
-- ⏭️ 下一步：task 3.3 两阶段工作流编排（Stage A 独立提交，Stage B 绑定并复用 `stage_a_result_id`，短路/not_applicable/失败重试/异议版本）；修改符号前仍须先跑 GitNexus upstream impact，映射资产只读不提交。
+- ⏭️ 下一步：task 4.1 场景参数化完整端点（科技金融七类路径、scenario/case 一致性、旧国民经济 API 回归）；修改符号前仍须先跑 GitNexus upstream impact，映射资产只读不提交。
 - 📦 上一个 `refine-national-economy-loan-direction-evidence-fusion` 已完成并 commit（`dbfe164`/`bfdfaec`/`547f13e`），仍待用户验收后归档；`4278367..547f13e` 尚未 push origin/main。
 
 ## 常驻注意事项
 
 - 📌 dev 库遗留验证案例未清（大米/养老等历史连跑残留）；真实联调需 db 容器 + 后端起 + 已同步目录 + 真实云端密钥，dev 走 vite proxy 或 `VITE_API_BASE_URL`。
-- 📌 `contracts.md` 已登记 Stage A 独立提交与按场景 schema 展示/导出两条待建 gate；`env-diff.md` 仍空。openspec/ 已 gitignore 并取消跟踪（本地保留供双 Agent 流程）；密钥仅存本地 `.env`，从未上云。
+- 📌 `contracts.md` 的 Stage A 独立提交契约已由 task 3.3 测试 gate 化；按场景 schema 展示/导出契约仍待 4.1/4.2 完成。`env-diff.md` 仍空。openspec/ 已 gitignore 并取消跟踪（本地保留供双 Agent 流程）；密钥仅存本地 `.env`，从未上云。

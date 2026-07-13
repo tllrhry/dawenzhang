@@ -2,6 +2,7 @@ from io import BytesIO
 from pathlib import Path
 
 import pytest
+from docx import Document
 from fastapi.testclient import TestClient
 from openpyxl import load_workbook
 from sqlalchemy import delete, func, select
@@ -16,6 +17,10 @@ from app.models import (
     NationalEconomyClassificationResult,
 )
 from app.services.national_economy_case_ingestion import FIELD_LABELS, SCENARIO
+from app.services.scenario_registry import (
+    TECHNOLOGY_FINANCE_FIELD_SCHEMA,
+    TECHNOLOGY_FINANCE_SCENARIO,
+)
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "national_economy"
@@ -55,6 +60,53 @@ def _upload(client: TestClient, fixture_name: str = "valid.docx"):
     return client.post(
         "/api/v1/national-economy/cases",
         files={"file": (path.name, path.read_bytes(), route_module.DOCX_MIME)},
+    )
+
+
+def _technology_finance_docx(
+    *,
+    table: bool = False,
+    issue: str | None = None,
+) -> bytes:
+    rows = [
+        [field.label, f"测试值-{field.key}"]
+        for field in TECHNOLOGY_FINANCE_FIELD_SCHEMA
+    ]
+    if issue == "missing":
+        rows = [row for row in rows if row[0] != "授信审批意见"]
+    elif issue == "duplicate":
+        rows.append(rows[0].copy())
+    elif issue == "unrecognized":
+        rows[0][0] = "企业全称"
+
+    document = Document()
+    if table:
+        document.add_heading("科技金融企业信息采集表", level=1)
+        document.add_paragraph("请在第二列填写，第三列为填写提示。")
+        word_table = document.add_table(rows=1, cols=3)
+        for cell, value in zip(
+            word_table.rows[0].cells,
+            ("字段名称", "填写内容", "填写提示"),
+            strict=True,
+        ):
+            cell.text = value
+        for label, value in rows:
+            cells = word_table.add_row().cells
+            cells[0].text = label
+            cells[1].text = value
+            cells[2].text = "请按实际情况填写"
+    else:
+        for label, value in rows:
+            document.add_paragraph(f"{label}：{value}")
+    output = BytesIO()
+    document.save(output)
+    return output.getvalue()
+
+
+def _upload_technology_finance(client: TestClient, content: bytes, filename: str):
+    return client.post(
+        "/api/v1/scenarios/technology_finance/cases",
+        files={"file": (filename, content, route_module.DOCX_MIME)},
     )
 
 
@@ -134,6 +186,96 @@ def test_upload_creates_case_and_query_returns_thirteen_fields(client: TestClien
     assert payload["current_result"] is None
     assert len(payload["input_fields"]) == 13
     assert {item["label"] for item in payload["input_fields"]} == set(FIELD_LABELS.values())
+
+
+def test_existing_technology_finance_template_creates_case_and_detail_keeps_all_fields(
+    client: TestClient,
+) -> None:
+    template_path = get_settings().technology_finance_template_path
+
+    upload_response = _upload_technology_finance(
+        client,
+        template_path.read_bytes(),
+        "../科技金融企业.docx",
+    )
+
+    assert upload_response.status_code == 201
+    created = upload_response.json()
+    assert created["scenario"] == TECHNOLOGY_FINANCE_SCENARIO
+    assert created["original_filename"] == "科技金融企业.docx"
+
+    response = client.get(
+        f"/api/v1/scenarios/technology_finance/cases/{created['id']}"
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["scenario"] == TECHNOLOGY_FINANCE_SCENARIO
+    assert payload["current_result"] is None
+    assert [(item["field"], item["label"]) for item in payload["input_fields"]] == [
+        (field.key, field.label) for field in TECHNOLOGY_FINANCE_FIELD_SCHEMA
+    ]
+    assert len(payload["input_fields"]) == 20
+    assert {item["field"] for item in payload["input_fields"]} >= {
+        "entity_type",
+        "annual_revenue",
+        "project_name",
+        "project_content",
+        "employee_count",
+        "certifications",
+        "rd_ip_info",
+    }
+
+
+def test_technology_finance_three_column_template_creates_equivalent_case(
+    client: TestClient,
+) -> None:
+    upload_response = _upload_technology_finance(
+        client,
+        _technology_finance_docx(table=True),
+        "科技金融三列表格.docx",
+    )
+
+    assert upload_response.status_code == 201
+    response = client.get(
+        f"/api/v1/scenarios/technology_finance/cases/{upload_response.json()['id']}"
+    )
+    input_fields = response.json()["input_fields"]
+    assert {item["field"]: item["value"] for item in input_fields} == {
+        field.key: f"测试值-{field.key}"
+        for field in TECHNOLOGY_FINANCE_FIELD_SCHEMA
+    }
+
+
+@pytest.mark.parametrize(
+    ("issue", "issue_name", "problem_label"),
+    [
+        ("missing", "missing", "授信审批意见"),
+        ("duplicate", "duplicate", "企业名称"),
+        ("unrecognized", "unrecognized", "企业全称"),
+    ],
+)
+def test_invalid_technology_finance_labels_return_422_without_creating_case(
+    client: TestClient,
+    db_session: Session,
+    issue: str,
+    issue_name: str,
+    problem_label: str,
+) -> None:
+    before = db_session.scalar(select(func.count(NationalEconomyClassificationCase.id)))
+
+    response = _upload_technology_finance(
+        client,
+        _technology_finance_docx(issue=issue),
+        f"科技金融-{issue}.docx",
+    )
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert problem_label in detail[issue_name]
+    assert {"message", "missing", "duplicate", "unrecognized"} <= detail.keys()
+    db_session.expire_all()
+    after = db_session.scalar(select(func.count(NationalEconomyClassificationCase.id)))
+    assert after == before
 
 
 @pytest.mark.parametrize("fixture_name", ["missing_label.docx", "duplicate_label.docx", "unrecognized_label.docx"])

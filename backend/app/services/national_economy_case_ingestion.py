@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
+from typing import Mapping
 
 from docx import Document
 from docx.opc.exceptions import PackageNotFoundError
@@ -28,7 +29,6 @@ FIELD_LABELS = {
     "industry_position_competitiveness": "企业行业定位与核心竞争力",
     "credit_approval_opinion": "授信审批意见",
 }
-_LABEL_TO_FIELD = {label: field for field, label in FIELD_LABELS.items()}
 
 
 @dataclass(frozen=True)
@@ -57,6 +57,14 @@ def read_template_bytes(settings: Settings | None = None) -> bytes:
 
 
 def parse_template(document_bytes: bytes) -> dict[str, str]:
+    return parse_template_fields(document_bytes, FIELD_LABELS)
+
+
+def parse_template_fields(
+    document_bytes: bytes,
+    field_labels: Mapping[str, str],
+    field_aliases: Mapping[str, tuple[str, ...]] | None = None,
+) -> dict[str, str]:
     try:
         document = Document(BytesIO(document_bytes))
     except (PackageNotFoundError, ValueError, KeyError) as exc:
@@ -64,13 +72,19 @@ def parse_template(document_bytes: bytes) -> dict[str, str]:
             TemplateValidationIssues(unrecognized=("文件不是可解析的 .docx 模板",))
         ) from exc
 
+    aliases = field_aliases or {}
+    label_to_field = {
+        accepted_label: field
+        for field, label in field_labels.items()
+        for accepted_label in (label, *aliases.get(field, ()))
+    }
     values: dict[str, str] = {}
     duplicate_labels: list[str] = []
     unrecognized_labels: list[str] = []
 
     def add_value(label: str, value: str) -> None:
         normalized_label = label.strip()
-        field = _LABEL_TO_FIELD.get(normalized_label)
+        field = label_to_field.get(normalized_label)
         if field is None:
             unrecognized_labels.append(normalized_label)
             return
@@ -105,7 +119,7 @@ def parse_template(document_bytes: bytes) -> dict[str, str]:
             add_value(label, value)
 
     missing_labels = [
-        label for field, label in FIELD_LABELS.items() if field not in values
+        label for field, label in field_labels.items() if field not in values
     ]
     issues = TemplateValidationIssues(
         missing=tuple(missing_labels),
@@ -115,7 +129,7 @@ def parse_template(document_bytes: bytes) -> dict[str, str]:
     if issues.missing or issues.duplicate or issues.unrecognized:
         raise NationalEconomyTemplateError(issues)
 
-    return {field: values[field] for field in FIELD_LABELS}
+    return {field: values[field] for field in field_labels}
 
 
 def create_case_from_template(

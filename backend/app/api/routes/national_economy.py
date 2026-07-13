@@ -30,6 +30,13 @@ from app.services.national_economy_classification_workflow import (
     get_current_completed_result,
     reclassify_case,
 )
+from app.services.scenario_registry import (
+    SCENARIO_REGISTRY,
+    TECHNOLOGY_FINANCE_SCENARIO,
+)
+from app.services.technology_finance_case_ingestion import (
+    create_technology_finance_case_from_template,
+)
 
 
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -116,9 +123,55 @@ async def upload_case(
     return CaseCreatedResponse.model_validate(case, from_attributes=True)
 
 
+@router.post(
+    "/scenarios/technology_finance/cases",
+    response_model=CaseCreatedResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_technology_finance_case(
+    file: UploadFile = File(...),
+    session: Session = Depends(get_db),
+) -> CaseCreatedResponse:
+    filename = Path(file.filename or "").name
+    if not filename.lower().endswith(".docx"):
+        raise HTTPException(status_code=422, detail="请上传单个 .docx 文件")
+    document_bytes = await file.read()
+    try:
+        case = create_technology_finance_case_from_template(
+            session,
+            document_bytes,
+            filename,
+        )
+    except NationalEconomyTemplateError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": str(exc),
+                "missing": list(exc.issues.missing),
+                "duplicate": list(exc.issues.duplicate),
+                "unrecognized": list(exc.issues.unrecognized),
+            },
+        ) from exc
+    return CaseCreatedResponse.model_validate(case, from_attributes=True)
+
+
 @router.get("/national-economy/cases/{case_id}", response_model=CaseResponse)
 def get_case(case_id: int, session: Session = Depends(get_db)) -> CaseResponse:
     return _case_response(_get_case(session, case_id))
+
+
+@router.get(
+    "/scenarios/technology_finance/cases/{case_id}",
+    response_model=CaseResponse,
+)
+def get_technology_finance_case(
+    case_id: int,
+    session: Session = Depends(get_db),
+) -> CaseResponse:
+    case = _get_case(session, case_id)
+    if case.scenario != TECHNOLOGY_FINANCE_SCENARIO:
+        raise HTTPException(status_code=404, detail="案例不存在")
+    return _case_response(case)
 
 
 @router.post(
@@ -198,6 +251,12 @@ def _get_case(session: Session, case_id: int) -> NationalEconomyClassificationCa
 
 def _case_response(case: NationalEconomyClassificationCase) -> CaseResponse:
     current_result = get_current_completed_result(case)
+    registration = SCENARIO_REGISTRY.get(case.scenario)
+    field_labels = (
+        tuple((field.key, field.label) for field in registration.field_schema)
+        if registration is not None
+        else tuple(FIELD_LABELS.items())
+    )
     return CaseResponse(
         id=case.id,
         scenario=case.scenario,
@@ -209,7 +268,7 @@ def _case_response(case: NationalEconomyClassificationCase) -> CaseResponse:
                 label=label,
                 value=case.input_payload.get(field, ""),
             )
-            for field, label in FIELD_LABELS.items()
+            for field, label in field_labels
         ],
         current_result=(
             ClassificationResultResponse.model_validate(current_result)

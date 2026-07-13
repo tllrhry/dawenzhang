@@ -1,5 +1,6 @@
 import json
 import re
+import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal, Protocol
@@ -63,7 +64,10 @@ _LABEL_EVIDENCE_FIELDS = frozenset(
         "taxonomy_path",
     }
 )
-_CONSISTENCY_FIELDS = frozenset({"status", "basis", "business_evidence_refs"})
+_CONSISTENCY_FIELDS = frozenset({"status", "basis"})
+_SERVER_OWNED_CONSISTENCY_FIELDS = frozenset(
+    {"status", "basis", "business_evidence_refs"}
+)
 _LEGACY_CONSISTENCY_FIELDS = frozenset({"status", "basis", "evidence_refs"})
 _CONSISTENCY_STATUSES = frozenset(
     {"consistent", "inconsistent", "needs_review"}
@@ -147,11 +151,18 @@ def classify_technology_finance_stage_b(
         ),
     )
     try:
-        response = http_client.post(
-            "/chat/completions",
-            headers={"Authorization": f"Bearer {settings.deepseek_api_key}"},
-            json=request_payload,
-        )
+        for attempt in range(3):
+            try:
+                response = http_client.post(
+                    "/chat/completions",
+                    headers={"Authorization": f"Bearer {settings.deepseek_api_key}"},
+                    json=request_payload,
+                )
+                break
+            except (httpx.TimeoutException, httpx.NetworkError):
+                if attempt == 2:
+                    raise
+                time.sleep(0.5 * (2**attempt))
         response.raise_for_status()
         return _validate_stage_b_model_response(
             response.json(),
@@ -189,6 +200,16 @@ def _build_stage_b_request_payload(
     prompt_input = {
         "template_fields": field_payload,
         "stage_a_result": dict(stage_a_snapshot),
+        "business_evidence_sources": [
+            {
+                "field_key": source.field_key,
+                "field_label": source.field_label,
+                "value": source.value,
+            }
+            for source in _build_business_sources(
+                input_payload, stage_a_snapshot
+            ).values()
+        ],
         "enterprise_labels": [_serialize_label(label) for label in enterprise_labels],
         "loan_direction_labels": [
             _serialize_label(label) for label in loan_direction_labels
@@ -202,9 +223,8 @@ def _build_stage_b_request_payload(
         if same_code
         else (
             "两码不同，根对象必须返回 label_basis 和 consistency。consistency 只能包含 "
-            "status、basis、business_evidence_refs。business_evidence_refs 必须恰好引用"
-            "贷款用途和 Stage A 贷款投向依据，每条只能包含 type、field_key、field_label、"
-            "excerpt，且 type 必须为 business。status 只能是 consistent、inconsistent 或 "
+            "status、basis，不得返回任何 evidence_refs。status 只能是 consistent、"
+            "inconsistent 或 "
             "needs_review：企业和投向标签存在交集且资金服务企业现有主营或科技活动才可"
             "为 consistent；标签无交集或资金明确流向无关独立活动可为 inconsistent；"
             "企业侧未命中、用途笼统、证据冲突或不足必须为 needs_review。不得仅凭两码"
@@ -235,8 +255,8 @@ def _build_stage_b_request_payload(
                     "matching_basis、consistency.basis 必须是非空中文。"
                     "consistency 不得输出 label 引用或复制标签固定字段；企业与投向标签证据"
                     "由服务端从确定性标签组装。consistent、inconsistent 或 needs_review 的"
-                    "business_evidence_refs 都必须引用贷款用途和 Stage A 贷款投向依据；证据"
-                    "不足时必须输出 needs_review。" + consistency_instruction
+                    "正式一致性证据由服务端根据 business_evidence_sources 组装；证据不足时"
+                    "必须输出 needs_review。" + consistency_instruction
                 ),
             },
             {
@@ -505,12 +525,13 @@ def _validate_consistency_output(
 ]:
     if not isinstance(raw_consistency, dict):
         raise TechnologyFinanceStageBError("model output consistency must be an object")
-    uses_server_owned_label_refs = "business_evidence_refs" in raw_consistency
-    _require_exact_fields(
-        raw_consistency,
-        _CONSISTENCY_FIELDS if uses_server_owned_label_refs else _LEGACY_CONSISTENCY_FIELDS,
-        "consistency",
-    )
+    actual_fields = frozenset(raw_consistency)
+    if actual_fields not in {
+        _CONSISTENCY_FIELDS,
+        _SERVER_OWNED_CONSISTENCY_FIELDS,
+        _LEGACY_CONSISTENCY_FIELDS,
+    }:
+        _require_exact_fields(raw_consistency, _CONSISTENCY_FIELDS, "consistency")
     raw_status = raw_consistency.get("status")
     if raw_status not in _CONSISTENCY_STATUSES:
         raise TechnologyFinanceStageBError(
@@ -518,66 +539,6 @@ def _validate_consistency_output(
         )
     status: TechnologyFinanceConsistencyStatus = raw_status
     basis = _required_chinese_text(raw_consistency, "basis", "consistency")
-    ref_field = (
-        "business_evidence_refs" if uses_server_owned_label_refs else "evidence_refs"
-    )
-    raw_refs = _required_array(
-        raw_consistency.get(ref_field), f"consistency.{ref_field}"
-    )
-    enterprise_by_mapping = {_mapping_key(label): label for label in enterprise_labels}
-    loan_by_mapping = {_mapping_key(label): label for label in loan_direction_labels}
-    validated_refs: list[dict[str, object]] = (
-        [
-            *(
-                _consistency_label_ref(label, "enterprise")
-                for label in enterprise_labels
-            ),
-            *(
-                _consistency_label_ref(label, "loan_direction")
-                for label in loan_direction_labels
-            ),
-        ]
-        if uses_server_owned_label_refs
-        else []
-    )
-    cited_enterprise_label = uses_server_owned_label_refs and bool(enterprise_labels)
-    cited_loan_label = uses_server_owned_label_refs and bool(loan_direction_labels)
-    cited_business_keys: set[str] = set()
-    for index, raw_ref in enumerate(raw_refs):
-        branch = f"consistency.{ref_field}[{index}]"
-        if not isinstance(raw_ref, dict):
-            raise TechnologyFinanceStageBError(f"{branch} must be an object")
-        ref_type = raw_ref.get("type")
-        if uses_server_owned_label_refs:
-            _require_exact_fields(raw_ref, _BUSINESS_EVIDENCE_FIELDS, branch)
-            if ref_type != "business":
-                raise TechnologyFinanceStageBError(f"{branch}.type must be business")
-            validated = _validate_business_ref(raw_ref, business_sources, branch)
-            cited_business_keys.add(str(validated["field_key"]))
-            validated_refs.append(validated)
-        elif ref_type == "label":
-            _require_exact_fields(raw_ref, _LABEL_EVIDENCE_FIELDS, branch)
-            side = raw_ref.get("side")
-            mapping_key = _mapping_ref_key(raw_ref, branch)
-            if side == "enterprise" and mapping_key in enterprise_by_mapping:
-                cited_enterprise_label = True
-            elif side == "loan_direction" and mapping_key in loan_by_mapping:
-                cited_loan_label = True
-            else:
-                raise TechnologyFinanceStageBError(
-                    f"{branch} references a label absent from the declared side"
-                )
-            validated_refs.append(dict(raw_ref))
-        elif ref_type == "business":
-            _require_exact_fields(raw_ref, _BUSINESS_EVIDENCE_FIELDS, branch)
-            validated = _validate_business_ref(raw_ref, business_sources, branch)
-            cited_business_keys.add(str(validated["field_key"]))
-            validated_refs.append(validated)
-        else:
-            raise TechnologyFinanceStageBError(
-                f"{branch}.type must be label or business"
-            )
-
     evidence_is_insufficient = (
         not enterprise_labels
         or "loan_purpose" not in business_sources
@@ -587,29 +548,28 @@ def _validate_consistency_output(
         raise TechnologyFinanceStageBError(
             "insufficient consistency evidence must result in needs_review"
         )
-    if status == "consistent" and not _labels_intersect(
+    if enterprise_labels and not _labels_intersect(
         enterprise_labels, loan_direction_labels
     ):
-        raise TechnologyFinanceStageBError(
-            "consistent requires an enterprise/loan taxonomy intersection"
+        status = "inconsistent"
+        basis = (
+            "企业侧与贷款投向侧科技金融标签不存在主题或层级交集，判定为不一致。"
         )
-    if not cited_loan_label:
-        raise TechnologyFinanceStageBError(
-            f"{status} requires loan label evidence"
-        )
-    if enterprise_labels and not cited_enterprise_label:
-        raise TechnologyFinanceStageBError(
-            f"{status} requires available enterprise label evidence"
-        )
-    required_business_keys = {
-        field_key
-        for field_key in ("loan_purpose", "stage_a.loan_matching_basis")
-        if field_key in business_sources
-    }
-    if not required_business_keys.issubset(cited_business_keys):
-        raise TechnologyFinanceStageBError(
-            f"{status} must cite all available loan-purpose and Stage A loan-basis evidence"
-        )
+    validated_refs = [
+        *(
+            _consistency_label_ref(label, "enterprise")
+            for label in enterprise_labels
+        ),
+        *(
+            _consistency_label_ref(label, "loan_direction")
+            for label in loan_direction_labels
+        ),
+        *(
+            _business_evidence_ref(business_sources[field_key])
+            for field_key in ("loan_purpose", "stage_a.loan_matching_basis")
+            if field_key in business_sources
+        ),
+    ]
     return status, basis, tuple(validated_refs)
 
 
@@ -750,6 +710,15 @@ def _validate_business_ref(
         "field_key": source.field_key,
         "field_label": source.field_label,
         "excerpt": excerpt,
+    }
+
+
+def _business_evidence_ref(source: _EvidenceSource) -> dict[str, object]:
+    return {
+        "type": "business",
+        "field_key": source.field_key,
+        "field_label": source.field_label,
+        "excerpt": source.value[:MAX_EVIDENCE_EXCERPT_LENGTH].rstrip(),
     }
 
 

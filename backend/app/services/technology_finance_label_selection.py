@@ -7,7 +7,10 @@ from dataclasses import dataclass
 import httpx
 
 from app.core.config import Settings
-from app.services.scenario_registry import TECHNOLOGY_FINANCE_FIELD_SCHEMA
+from app.services.scenario_registry import (
+    TECHNOLOGY_FINANCE_REGISTRATION,
+    ScenarioRegistration,
+)
 from app.services.technology_finance_mapping_query import FiveArticlesMappingLabel
 from app.services.technology_finance_stage_b import StageAResult
 
@@ -27,11 +30,34 @@ def select_most_matching_technology_finance_label(
     settings: Settings,
     client: httpx.Client | None = None,
 ) -> FiveArticlesMappingLabel:
+    """Compatibility wrapper for the existing technology-finance workflow."""
+    return select_most_matching_five_articles_label(
+        TECHNOLOGY_FINANCE_REGISTRATION,
+        input_payload,
+        stage_a_result,
+        candidate_labels,
+        settings,
+        client=client,
+    )
+
+
+def select_most_matching_five_articles_label(
+    profile: ScenarioRegistration,
+    input_payload: Mapping[str, object],
+    stage_a_result: StageAResult,
+    candidate_labels: Sequence[FiveArticlesMappingLabel],
+    settings: Settings,
+    client: httpx.Client | None = None,
+) -> FiveArticlesMappingLabel:
     """Narrow multiple deterministic loan-direction candidates to the single
-    most-matching one via a constrained LLM call grounded in business content."""
+    most-matching one within a scenario via a constrained, grounded LLM call."""
     if not candidate_labels:
         raise TechnologyFinanceLabelSelectionError(
             "label selection requires at least one candidate label"
+        )
+    if any(label.scenario_id != profile.id for label in candidate_labels):
+        raise TechnologyFinanceLabelSelectionError(
+            f"candidate labels must all belong to scenario {profile.id}"
         )
     if len(candidate_labels) == 1:
         return candidate_labels[0]
@@ -43,12 +69,16 @@ def select_most_matching_technology_finance_label(
         )
 
     request_payload = _build_request_payload(
-        input_payload, stage_a_result, candidate_labels, settings.deepseek_model
+        profile,
+        input_payload,
+        stage_a_result,
+        candidate_labels,
+        settings.deepseek_model,
     )
 
     if not settings.deepseek_api_key:
         raise TechnologyFinanceLabelSelectionError(
-            "DEEPSEEK_API_KEY is required for technology-finance label selection"
+            f"DEEPSEEK_API_KEY is required for {profile.name} label selection"
         )
 
     owns_client = client is None
@@ -78,7 +108,7 @@ def select_most_matching_technology_finance_label(
         raise
     except (httpx.HTTPError, json.JSONDecodeError, TypeError, ValueError, KeyError) as exc:
         raise TechnologyFinanceLabelSelectionError(
-            f"DeepSeek technology-finance label selection failed: {exc}"
+            f"DeepSeek {profile.name} label selection failed: {exc}"
         ) from exc
     finally:
         if owns_client:
@@ -86,6 +116,7 @@ def select_most_matching_technology_finance_label(
 
 
 def _build_request_payload(
+    profile: ScenarioRegistration,
     input_payload: Mapping[str, object],
     stage_a_result: StageAResult,
     candidate_labels: Sequence[FiveArticlesMappingLabel],
@@ -93,7 +124,7 @@ def _build_request_payload(
 ) -> dict[str, object]:
     field_payload = [
         {"field_key": field.key, "field_label": field.label, "value": value}
-        for field in TECHNOLOGY_FINANCE_FIELD_SCHEMA
+        for field in profile.field_schema
         if (value := _text(input_payload.get(field.key)))
     ]
     candidates_payload = [
@@ -119,13 +150,13 @@ def _build_request_payload(
             {
                 "role": "system",
                 "content": (
-                    "你是科技金融贷款投向标签的最终选择器。candidates 中的每一项都是"
+                    f"你是{profile.name}贷款投向标签的最终选择器。candidates 中的每一项都是"
                     "已通过确定性映射校验的候选主题标签，彼此是相互独立的主题，不是"
                     "层级祖先关系。你必须只输出一个合法 JSON 对象，不得包含 JSON 以外"
                     "任何文字，只能包含 selected_source_row 和 selection_basis 两个字段。"
                     "selected_source_row 必须原样等于 candidates 中某一项的 source_row，"
-                    "不得新增、修改或臆造。你需要结合模板字段（尤其是贷款用途、核心交易"
-                    "品类/服务内容、企业产业链定位）和 Stage A 贷款投向匹配依据，判断这笔"
+                    "不得新增、修改或臆造。你需要结合当前场景 schema 提供的模板字段和 "
+                    "Stage A 贷款投向匹配依据，判断这笔"
                     "贷款的实际业务内容与哪一个候选主题最匹配，只能从 candidates 中选择"
                     "唯一一个。selection_basis 必须是非空中文，说明选择该主题而非其余"
                     "候选主题的理由。"

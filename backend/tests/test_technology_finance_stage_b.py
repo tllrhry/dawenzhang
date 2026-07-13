@@ -281,11 +281,18 @@ def test_prompt_contains_only_whitelisted_inputs_and_immutable_labels() -> None:
     assert user_input["stage_a_result"]["stage_a_result_id"] == 41
     assert user_input["enterprise_labels"] == [_fixed_label(enterprise)]
     assert user_input["loan_direction_labels"] == [_fixed_label(loan)]
+    assert {
+        source["field_key"] for source in user_input["business_evidence_sources"]
+    } == {
+        *_input_payload(),
+        "stage_a.enterprise_matching_basis",
+        "stage_a.loan_matching_basis",
+    }
     assert user_input["max_excerpt_length"] == 160
     assert "不得新增、删除、改写或替换标签" in system_prompt
     assert "证据不足时必须输出 needs_review" in system_prompt
     assert "consistency 不得输出 label 引用或复制标签固定字段" in system_prompt
-    assert "status、basis、business_evidence_refs" in system_prompt
+    assert "status、basis，不得返回任何 evidence_refs" in system_prompt
 
 
 def test_model_cannot_change_or_reorder_into_a_different_label_set() -> None:
@@ -382,13 +389,19 @@ def test_missing_enterprise_mapping_requires_and_accepts_needs_review() -> None:
     assert "证据不足" in result.consistency_basis
 
 
-def test_needs_review_must_cite_all_available_consistency_evidence() -> None:
+def test_legacy_consistency_refs_are_ignored_and_rebuilt_by_server() -> None:
     loan = _label(code="6311", name="基础软件开发", source_row=22)
     output = _model_output((), (loan,), "needs_review")
-    output["consistency"]["evidence_refs"].pop()
+    output["consistency"]["evidence_refs"] = [
+        {"type": "business", "field_key": "invented_field"}
+    ]
 
-    with pytest.raises(TechnologyFinanceStageBError, match="cite all available"):
-        _run(output, (), (loan,))
+    result = _run(output, (), (loan,))
+
+    assert [ref["field_key"] for ref in result.consistency_evidence_refs[1:]] == [
+        "loan_purpose",
+        "stage_a.loan_matching_basis",
+    ]
 
 
 def test_insufficient_evidence_cannot_be_forced_to_consistent() -> None:
@@ -451,6 +464,84 @@ def test_http_failure_is_reported_without_real_cloud_call() -> None:
             )
 
 
+def test_transient_network_failures_are_retried_before_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    label = _label(code="2710", name="化学药品原料药制造", source_row=11)
+    stage_a = _stage_a(
+        enterprise_code="2710",
+        enterprise_name="化学药品原料药制造",
+        loan_code="2710",
+        loan_name="化学药品原料药制造",
+    )
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise httpx.ConnectTimeout("temporary TLS timeout", request=request)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {"label_basis": {
+                                    "matching_basis": "贷款用于现有研发平台升级。",
+                                    "business_evidence_refs": [_business_ref()],
+                                }},
+                                ensure_ascii=False,
+                            )
+                        }
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setattr(
+        "app.services.technology_finance_stage_b.time.sleep", lambda _seconds: None
+    )
+    settings = _settings()
+    with httpx.Client(
+        transport=httpx.MockTransport(handler), base_url=settings.deepseek_base_url
+    ) as client:
+        result = classify_technology_finance_stage_b(
+            _input_payload(), stage_a, (label,), (label,), settings, client=client
+        )
+
+    assert attempts == 3
+    assert result.consistency_status == "consistent"
+
+
+def test_http_status_failure_is_not_retried() -> None:
+    label = _label(code="2710", name="化学药品原料药制造", source_row=11)
+    stage_a = _stage_a(
+        enterprise_code="2710",
+        enterprise_name="化学药品原料药制造",
+        loan_code="2710",
+        loan_name="化学药品原料药制造",
+    )
+    attempts = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(503, json={"error": "unavailable"})
+
+    settings = _settings()
+    with httpx.Client(
+        transport=httpx.MockTransport(handler), base_url=settings.deepseek_base_url
+    ) as client:
+        with pytest.raises(TechnologyFinanceStageBError, match="503"):
+            classify_technology_finance_stage_b(
+                _input_payload(), stage_a, (label,), (label,), settings, client=client
+            )
+
+    assert attempts == 1
+
+
 def test_output_label_order_is_normalized_to_deterministic_input_order() -> None:
     enterprise = _label(code="2710", name="化学药品原料药制造", source_row=11)
     first = _label(code="6311", name="基础软件开发", source_row=22)
@@ -506,14 +597,6 @@ def test_consistency_label_refs_are_assembled_from_server_owned_labels() -> None
         "consistency": {
             "status": "consistent",
             "basis": "企业和投向科技金融标签有交集，资金用于现有研发活动。",
-            "business_evidence_refs": [
-                _business_ref(),
-                _business_ref(
-                    "stage_a.loan_matching_basis",
-                    "Stage A 贷款投向匹配依据",
-                    "采购服务器并建设基础软件研发平台",
-                ),
-            ],
         },
     }
 
@@ -526,9 +609,32 @@ def test_consistency_label_refs_are_assembled_from_server_owned_labels() -> None
         _business_ref(
             "stage_a.loan_matching_basis",
             "Stage A 贷款投向匹配依据",
-            "采购服务器并建设基础软件研发平台",
+            "贷款用于采购服务器并建设基础软件研发平台。",
         ),
     )
+
+
+def test_no_taxonomy_intersection_overrides_model_consistent_status() -> None:
+    enterprise = _label(
+        code="2710",
+        name="化学药品原料药制造",
+        source_row=11,
+        subject="高技术制造业",
+        taxonomy_path=("高技术制造业", "医药制造"),
+    )
+    loan = _label(
+        code="6311",
+        name="基础软件开发",
+        source_row=22,
+        subject="数字产品服务",
+        taxonomy_path=("数字产品服务", "软件服务"),
+    )
+    output = _model_output((enterprise,), (loan,), "consistent")
+
+    result = _run(output, (enterprise,), (loan,))
+
+    assert result.consistency_status == "inconsistent"
+    assert "不存在主题或层级交集" in result.consistency_basis
 
 
 def test_single_label_basis_discards_extra_invalid_business_refs() -> None:

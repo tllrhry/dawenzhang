@@ -24,12 +24,14 @@ class ScenarioRegistration:
     status: Literal["available", "coming_soon"]
     description: str
     parent_id: str | None
-    workflow: str
-    template_path_setting: str
+    workflow: str | None
+    template_path_setting: str | None
     field_schema: tuple[ScenarioField, ...]
     stage_a_field_keys: tuple[str, ...]
 
     def template_path(self, settings: Settings | None = None) -> Path:
+        if self.template_path_setting is None:
+            raise ValueError(f"场景 {self.id} 暂未配置模板")
         return getattr(settings or get_settings(), self.template_path_setting)
 
 
@@ -72,6 +74,34 @@ TECHNOLOGY_FINANCE_REGISTRATION = ScenarioRegistration(
     stage_a_field_keys=tuple(FIELD_LABELS),
 )
 
+COMING_SOON_SCENARIO_NAMES = MappingProxyType(
+    {
+        "agriculture_related": ("涉农业务", None),
+        "green_finance": ("绿色金融", "five_major_articles"),
+        "inclusive_finance": ("普惠金融", "five_major_articles"),
+        "pension_finance": ("养老金融", "five_major_articles"),
+        "digital_finance": ("数字金融", "five_major_articles"),
+    }
+)
+
+COMING_SOON_REGISTRATIONS = tuple(
+    ScenarioRegistration(
+        id=scenario_id,
+        name=name,
+        status="coming_soon",
+        description="暂未开放",
+        parent_id=parent_id,
+        workflow=None,
+        template_path_setting=None,
+        field_schema=(),
+        stage_a_field_keys=(),
+    )
+    for scenario_id, (name, parent_id) in COMING_SOON_SCENARIO_NAMES.items()
+)
+
 SCENARIO_REGISTRY: Mapping[str, ScenarioRegistration] = MappingProxyType(
-    {TECHNOLOGY_FINANCE_SCENARIO: TECHNOLOGY_FINANCE_REGISTRATION}
+    {
+        TECHNOLOGY_FINANCE_SCENARIO: TECHNOLOGY_FINANCE_REGISTRATION,
+        **{registration.id: registration for registration in COMING_SOON_REGISTRATIONS},
+    }
 )

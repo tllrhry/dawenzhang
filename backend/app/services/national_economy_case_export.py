@@ -15,6 +15,7 @@ from app.services.national_economy_classification_workflow import (
 from app.services.national_economy_result_presentation import (
     format_industry_display_code,
 )
+from app.services.scenario_registry import SCENARIO_REGISTRY
 
 
 CASE_INPUT_SHEET = "案例输入"
@@ -44,7 +45,13 @@ def _write_case_input(sheet: Worksheet, case: NationalEconomyClassificationCase)
     sheet.append(("业务场景", case.scenario))
     sheet.append(("原始文件名", case.original_filename or ""))
     sheet.append(("案例状态", case.status))
-    for field, label in FIELD_LABELS.items():
+    registration = SCENARIO_REGISTRY.get(case.scenario)
+    field_labels = (
+        tuple((field.key, field.label) for field in registration.field_schema)
+        if registration is not None
+        else tuple(FIELD_LABELS.items())
+    )
+    for field, label in field_labels:
         sheet.append((label, _cell_value(case.input_payload.get(field))))
 
 

@@ -14,7 +14,7 @@
 - **关键边界**：Stage A 不改逻辑且独立提交；Stage B 绑定 `stage_a_result_id` 独立重试。首期只用现有科技金融模板与科技金融映射，不改其他四篇资产、不引入五篇映射向量库、不开放其他场景。
 - **映射口径**：同步时以国民经济目录校验同粒度 code/name；运行时匹配 Excel 显式四位行及显式二位大类行；多标签全部输出并保留 mapping version/source row，并按「同主题最具体者优先」剔除同主题祖先大类标签（大类标签仅在该主题无更具体四位命中时作兜底——Claude 终审提出、用户已确认）。正常未命中按 `not_applicable=不属于科技金融`（Claude 终审复核确认正确），数据冲突/证据不足才 needs_review。
 - **一致性**：`consistent / inconsistent / needs_review`，不得因两码不同或有研发资质直接下结论；匹配依据与一致性均保存映射证据、业务字段 key/标签/原文摘录。
-- OpenSpec 已完成业务评审修订并通过 strict validation；实现已完成 task 1.1、1.2、2.1、2.2、2.3、3.1、3.2、3.3。
+- OpenSpec 已完成业务评审修订并通过 strict validation；实现已完成 task 1.1、1.2、2.1、2.2、2.3、3.1、3.2、3.3、4.1。
 
 ## 当前阶段与下一步
 
@@ -28,8 +28,10 @@
 - ✅ Task 3.2：新增受限 Stage B 判定单元；DeepSeek 仅接收科技金融字段、指定 Stage A 与确定性双侧标签，逐投向标签严格校验标签集合、映射版本/source_row/code/name/path、中文依据和真实原文摘录；两码不同时校验三态矩阵与证据完整性，同码由服务端确定 consistent；违约抛专用错误供 3.3 落 classification_failed。
 - ✅ Task 3.3：新增科技金融两阶段编排；首次分类沿用 `classify_case` 的独立提交，普通重试复用最新 `stage_a_result_id`，异议沿用 `reclassify_case` 生成新 Stage A；Stage B 独立提交，失败先 rollback 再写 classification_failed，未完成 Stage A 短路，not_applicable/needs_review 零模型调用，completed 幂等复用。
 - ✅ 验证：task 3.3 定向 6 passed（Stage B 失败保留 Stage A、重试不增加 Stage A 版本、异议双版本 +1、completed 幂等、未完成短路、not_applicable/needs_review 零模型调用）；后端全量 208 passed；统一 runner 后端/前端均 PASS。
+- ✅ Task 4.1：用 `{scenario_id}` 替换 1.2 遗留的科技金融硬编码上传/详情路由，补齐模板、分类、异议、历史、导出共七类端点；注册科技金融 available 与涉农/绿色/普惠/养老/数字 coming_soon，统一拒绝未知、未开放和 scenario/case 错配；分类响应分离 stage_a/stage_b，历史关联 stage_a_result_id；4.1 导出复用既有三工作表且案例输入按注册 schema 输出，不前移 4.2 科技金融判定工作表。
+- ✅ 验证：科技金融 API + 国民经济回归定向 35 passed；后端全量 221 passed；`git diff --check`、Python compileall、统一 runner（BackendPytest/FrontendTypecheck）与 OpenSpec strict validation 均 PASS。GitNexus detect_changes 因同文件路由行位移及用户既有 AGENTS/CLAUDE 改动保守报 HIGH，实际 diff 与回归测试确认旧国民经济处理器内容未变。
 - ⚠️ 真实科技金融映射资产只读预检：1335 个非空源行中 13 行为三位 code（首例源行 8：`276　`），按 2/4 位源契约会正确判 invalid；task 6.1 前需业务侧修正或确认原始代码，不得由同步器猜测补位。
-- ⏭️ 下一步：task 4.1 场景参数化完整端点（科技金融七类路径、scenario/case 一致性、旧国民经济 API 回归）；修改符号前仍须先跑 GitNexus upstream impact，映射资产只读不提交。
+- ⏭️ 下一步：task 4.2 科技金融响应与 Excel 导出（逐标签“科技金融判定”工作表、无标签状态可读说明、历史关联细化）；修改符号前仍须先跑 GitNexus upstream impact，映射资产只读不提交。
 - 📦 上一个 `refine-national-economy-loan-direction-evidence-fusion` 已完成并 commit（`dbfe164`/`bfdfaec`/`547f13e`），仍待用户验收后归档；`4278367..547f13e` 尚未 push origin/main。
 
 ## 常驻注意事项

@@ -151,9 +151,10 @@ def test_scenarios_list_available_and_coming_soon_entries(client: TestClient) ->
     assert scenarios[SCENARIO]["status"] == "available"
     assert scenarios["agriculture_related"]["status"] == "coming_soon"
     assert scenarios["five_major_articles"]["status"] == "coming_soon"
+    assert scenarios["technology_finance"]["status"] == "available"
     for scenario_id in (
-        "technology_finance",
         "green_finance",
+        "inclusive_finance",
         "pension_finance",
         "digital_finance",
     ):

@@ -1,4 +1,0 @@
-interface:
-  display_name: "Dispatch OpenSpec Task"
-  short_description: "Dispatch one metadata-complete OpenSpec task to Codex"
-  default_prompt: "Use $dispatch to dispatch an OpenSpec change task to a fresh Codex session."

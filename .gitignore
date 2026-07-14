@@ -28,5 +28,9 @@ CLAUDE.local.md
 # OpenSpec 业务规格为本地敏感文档，不入库（含手填的接口/密钥线索）
 /openspec/
 
+# 双 Agent 协议/派单文件为本地迭代产物，避免并发会话的 git diff/终审误判为越权改动，不入库
+/.dual-agent/
+/.claude/skills/dispatch/
+
 # 本地个人 Claude Code 配置（含 MCP 超时等个人调优），不入库
 /.claude/settings.local.json

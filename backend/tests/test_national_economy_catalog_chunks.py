@@ -22,19 +22,21 @@ def test_build_industry_chunks_preserves_types_and_character_limit() -> None:
     chunks = build_industry_chunks(rows)
 
     assert [chunk.chunk_type for chunk in chunks] == [
+        "catalog",
         "definition",
         "definition",
         "include",
         "exclude",
     ]
     assert all(0 < len(chunk.text) <= MAX_CHUNK_CHARACTERS for chunk in chunks)
-    assert chunks[0].source_row == 2
-    assert chunks[0].major_category_code == "A01"
-    assert chunks[0].major_category_name == "大类"
-    assert chunks[0].category_name == "农、林、牧、渔业"
-    assert chunks[0].middle_category_code == "A011"
-    assert chunks[0].middle_category_name == "谷物种植"
-    assert chunks[0].industry_code == "0111"
+    catalog_fact = chunks[0]
+    assert catalog_fact.source_row == 2
+    assert catalog_fact.major_category_code == "A01"
+    assert catalog_fact.major_category_name == "大类"
+    assert catalog_fact.category_name == "农、林、牧、渔业"
+    assert catalog_fact.middle_category_code == "A011"
+    assert catalog_fact.middle_category_name == "谷物种植"
+    assert catalog_fact.industry_code == "0111"
 
 
 def test_build_industry_chunks_normalizes_catalog_prefixed_code() -> None:
@@ -132,8 +134,13 @@ def test_full_resync_batches_embedding_and_builds_idempotent_upsert() -> None:
     session = Mock()
     full_resync_catalog(session, version, rows, settings, embedding_request)
 
-    assert [len(batch) for batch in requested_batches] == [2, 2]
-    statement = session.execute.call_args.args[0]
+    assert [len(batch) for batch in requested_batches] == [2, 2, 2]
+    delete_statement, statement = [
+        call.args[0] for call in session.execute.call_args_list
+    ]
+    assert "DELETE FROM national_economy_industry_chunks" in str(
+        delete_statement.compile(dialect=postgresql.dialect())
+    )
     sql = str(statement.compile(dialect=postgresql.dialect()))
     assert "ON CONFLICT ON CONSTRAINT uq_national_economy_industry_chunk_source DO UPDATE" in sql
     assert "embedding = excluded.embedding" in sql
@@ -174,5 +181,17 @@ def test_build_industry_chunks_uses_the_most_specific_available_v2_level() -> No
 
     assert [(chunk.industry_code, chunk.industry_name) for chunk in chunks] == [
         ("011", "谷物种植"),
+        ("011", "谷物种植"),
         ("01", "农业"),
+        ("01", "农业"),
+    ]
+
+
+def test_build_industry_chunks_keeps_a_v2_directory_fact_without_explanatory_text() -> None:
+    rows = (("制造业", "医药制造业", "C27", "药用辅料及包装材料制造", "C278", "药用辅料及包装材料制造", "C2780", None, None, None),)
+
+    chunks = build_industry_chunks(rows)
+
+    assert [(chunk.chunk_type, chunk.industry_code, chunk.industry_name) for chunk in chunks] == [
+        ("catalog", "2780", "药用辅料及包装材料制造")
     ]

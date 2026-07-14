@@ -22,7 +22,10 @@ from app.services.scenario_registry import (
     TECHNOLOGY_FINANCE_REGISTRATION,
     ScenarioRegistration,
 )
-from app.services.technology_finance_mapping_sync import synchronize_scenario_mapping
+from app.services.technology_finance_mapping_sync import (
+    _normalize_neic_code,
+    synchronize_scenario_mapping,
+)
 
 
 SCENARIO_PROFILES = (
@@ -372,3 +375,108 @@ def test_scenario_profile_mapping_publishes_valid_three_digit_middle_class_row(
     )
     assert row is not None
     assert (row.neic_code, row.code_level, row.neic_name) == ("271", 3, "化学药品制造")
+
+
+@pytest.mark.parametrize(
+    ("raw_code", "expected"),
+    (("A12", "12"), ("B123", "123"), ("Z1234", "1234")),
+)
+def test_mapping_code_normalization_accepts_any_v2_letter_prefix(
+    raw_code: str, expected: str
+) -> None:
+    assert _normalize_neic_code(raw_code) == expected
+
+
+def test_mapping_publishes_a_prefixed_v2_code_and_canonicalizes_a_business_name(
+    tmp_path: Path,
+    scenario_mapping_context: tuple[Session, str],
+) -> None:
+    session, embedding_model = scenario_mapping_context
+    catalog = session.scalar(select(NationalEconomyCatalogVersion))
+    assert catalog is not None
+    session.add(
+        NationalEconomyIndustryChunk(
+            catalog_version_id=catalog.id,
+            major_category_code="R87",
+            major_category_name="广播、电视、电影和影视录音制作业",
+            middle_category_code="R871",
+            middle_category_name="广播",
+            industry_code="8710",
+            industry_name="广播",
+            source_row=4,
+            text="广播目录事实",
+            chunk_type="catalog",
+            embedding=[0.0] * 4096,
+        )
+    )
+    session.flush()
+    path = tmp_path / "canonicalized-name.xlsx"
+    _write_mapping(
+        path,
+        (_mapping_row("R8710", "互联网广播"),),
+        category=TECHNOLOGY_FINANCE_REGISTRATION.name,
+    )
+
+    result = synchronize_scenario_mapping(
+        session,
+        TECHNOLOGY_FINANCE_REGISTRATION,
+        _settings_for(TECHNOLOGY_FINANCE_REGISTRATION, path, embedding_model),
+    )
+
+    assert result.version.status == "published"
+    row = session.scalar(
+        select(FiveArticlesMappingRow).where(
+            FiveArticlesMappingRow.mapping_version_id == result.version.id
+        )
+    )
+    assert row is not None
+    assert (row.neic_code, row.neic_name) == ("8710", "广播")
+    assert result.version.validation_report["normalizations"][-1] == {
+        "type": "catalog_name_normalized",
+        "source_row": 2,
+        "field": "NEIC_Name",
+        "original": "互联网广播",
+        "normalized": "广播",
+        "neic_code": "8710",
+    }
+
+
+def test_invalid_same_source_hash_is_revalidated_after_catalog_repair(
+    tmp_path: Path,
+    scenario_mapping_context: tuple[Session, str],
+) -> None:
+    session, embedding_model = scenario_mapping_context
+    path = tmp_path / "retry-invalid-source.xlsx"
+    _write_mapping(
+        path,
+        (_mapping_row("9999", "新增目录行业"),),
+        category=GREEN_FINANCE_REGISTRATION.name,
+    )
+    settings = _settings_for(GREEN_FINANCE_REGISTRATION, path, embedding_model)
+    first = synchronize_scenario_mapping(session, GREEN_FINANCE_REGISTRATION, settings)
+    assert first.version.status == "invalid"
+
+    catalog = session.scalar(select(NationalEconomyCatalogVersion))
+    assert catalog is not None
+    session.add(
+        NationalEconomyIndustryChunk(
+            catalog_version_id=catalog.id,
+            major_category_code="Z99",
+            major_category_name="新增大类",
+            middle_category_code="Z999",
+            middle_category_name="新增中类",
+            industry_code="9999",
+            industry_name="新增目录行业",
+            source_row=5,
+            text="新增目录事实",
+            chunk_type="catalog",
+            embedding=[0.0] * 4096,
+        )
+    )
+    session.flush()
+
+    second = synchronize_scenario_mapping(session, GREEN_FINANCE_REGISTRATION, settings)
+
+    assert second.reused is False
+    assert second.version.id == first.version.id
+    assert second.version.status == "published"

@@ -5,6 +5,7 @@ import time
 from typing import Any
 
 import httpx
+from sqlalchemy import delete
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -14,6 +15,7 @@ from app.models import NationalEconomyCatalogVersion, NationalEconomyIndustryChu
 
 MAX_CHUNK_CHARACTERS = 1000
 CHUNK_COLUMNS = (("definition", 7), ("include", 8), ("exclude", 9))
+CATALOG_FACT_CHUNK_TYPE = "catalog"
 INDUSTRY_CODE_PATTERN = re.compile(r"(?:[A-Z])?(\d{2,4})")
 
 
@@ -72,6 +74,31 @@ def build_industry_chunks(
         if middle_category_code and not middle_category_name:
             raise ValueError(f"missing middle category name at source row {source_row}")
         industry_code = _normalize_industry_code(raw_industry_code, source_row)
+        # Every V2 row is a directory fact, even when its explanatory cells are
+        # empty.  Besides making that fact retrievable, this guarantees mapping
+        # publication can validate every official code/name pair from V2.
+        chunks.append(
+            IndustryChunk(
+                category_name=category_name,
+                major_category_code=major_category_code,
+                major_category_name=major_category_name,
+                middle_category_code=middle_category_code,
+                middle_category_name=middle_category_name,
+                industry_code=industry_code,
+                industry_name=industry_name,
+                source_row=source_row,
+                text=_catalog_fact_text(
+                    category_name=category_name,
+                    major_category_code=major_category_code,
+                    major_category_name=major_category_name,
+                    middle_category_code=middle_category_code,
+                    middle_category_name=middle_category_name,
+                    industry_code=industry_code,
+                    industry_name=industry_name,
+                ),
+                chunk_type=CATALOG_FACT_CHUNK_TYPE,
+            )
+        )
         for chunk_type, column_index in CHUNK_COLUMNS:
             content = _cell_text(row, column_index)
             for text in split_bounded_text(content, max_characters):
@@ -151,6 +178,13 @@ def full_resync_catalog(
     chunks = build_industry_chunks(rows)
     if not chunks:
         return
+    # A forced resync must also add newly introduced chunk types.  Upsert alone
+    # cannot do that when the old version contains only explanatory chunks.
+    session.execute(
+        delete(NationalEconomyIndustryChunk).where(
+            NationalEconomyIndustryChunk.catalog_version_id == version.id
+        )
+    )
     shared_client = None
     if embedding_request is None:
         shared_client = httpx.Client(
@@ -218,6 +252,26 @@ def _normalize_industry_code(value: str, source_row: int) -> str:
     if match is None:
         raise ValueError(f"invalid 2/3/4-digit industry code at source row {source_row}: {value}")
     return match.group(1)
+
+
+def _catalog_fact_text(
+    *,
+    category_name: str,
+    major_category_code: str,
+    major_category_name: str,
+    middle_category_code: str | None,
+    middle_category_name: str | None,
+    industry_code: str,
+    industry_name: str,
+) -> str:
+    parts = [
+        f"门类：{category_name}",
+        f"大类：{major_category_code} {major_category_name}",
+    ]
+    if middle_category_code and middle_category_name:
+        parts.append(f"中类：{middle_category_code} {middle_category_name}")
+    parts.append(f"行业：{industry_code} {industry_name}")
+    return "\n".join(parts)
 
 
 def _batched(values: Sequence[Any], batch_size: int) -> Iterable[Sequence[Any]]:

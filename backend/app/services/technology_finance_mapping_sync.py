@@ -1,5 +1,6 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from dataclasses import replace
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 import json
@@ -237,7 +238,7 @@ def _synchronize_mapping(
             FiveArticlesMappingVersion.source_hash == source.source_hash,
         )
     )
-    if existing is not None:
+    if existing is not None and existing.status == "published":
         return MappingSyncResult(version=existing, reused=True)
 
     normalized_rows, normalization_errors, normalizations = _normalize_rows(
@@ -245,25 +246,37 @@ def _synchronize_mapping(
         expected_category=expected_category,
     )
     catalog = load_current_catalog_facts(session, settings)
+    normalized_rows, catalog_name_normalizations = _canonicalize_catalog_names(
+        normalized_rows, catalog
+    )
+    normalizations.extend(catalog_name_normalizations)
     validation_errors = [*normalization_errors, *catalog.errors]
     if catalog.version is not None:
         validation_errors.extend(_validate_against_catalog(normalized_rows, catalog))
     validation_errors.extend(_find_duplicate_rows(normalized_rows))
 
-    version_number = session.scalar(
-        select(func.max(FiveArticlesMappingVersion.version)).where(
-            FiveArticlesMappingVersion.scenario_id == scenario_id
+    if existing is None:
+        version_number = session.scalar(
+            select(func.max(FiveArticlesMappingVersion.version)).where(
+                FiveArticlesMappingVersion.scenario_id == scenario_id
+            )
         )
-    )
-    version = FiveArticlesMappingVersion(
-        scenario_id=scenario_id,
-        version=(version_number or 0) + 1,
-        source_hash=source.source_hash,
-        status="draft",
-        validation_report={},
-    )
-    session.add(version)
-    session.flush()
+        version = FiveArticlesMappingVersion(
+            scenario_id=scenario_id,
+            version=(version_number or 0) + 1,
+            source_hash=source.source_hash,
+            status="draft",
+            validation_report={},
+        )
+        session.add(version)
+        session.flush()
+    else:
+        # Keep the source-hash audit identity while allowing an invalid report
+        # to be retried after catalog facts or validation logic are repaired.
+        version = existing
+        version.status = "draft"
+        version.validation_report = {}
+        session.flush()
 
     is_valid = bool(normalized_rows) and not validation_errors
     report: dict[str, object] = {
@@ -563,6 +576,60 @@ def _validate_against_catalog(
     return errors
 
 
+def _canonicalize_catalog_names(
+    rows: Sequence[NormalizedMappingRow], catalog: CatalogFacts
+) -> tuple[tuple[NormalizedMappingRow, ...], list[dict[str, object]]]:
+    """Use V2's official name when a mapping's code is unambiguous.
+
+    Mapping taxonomy names are business labels and may use a narrower or older
+    wording than V2.  The numeric code remains the identity.  A source name
+    that exactly identifies another catalog code remains an error, which keeps
+    the guard against accidental code/name swaps.
+    """
+    canonical_rows: list[NormalizedMappingRow] = []
+    normalizations: list[dict[str, object]] = []
+    for row in rows:
+        if row.code_level == 4:
+            names = catalog.four_digit_names
+            name_codes = catalog.four_digit_name_codes
+        elif row.code_level == 3:
+            names = catalog.three_digit_names
+            name_codes = catalog.three_digit_name_codes
+        else:
+            names = catalog.two_digit_names
+            name_codes = catalog.two_digit_name_codes
+
+        expected_names = names.get(row.neic_code)
+        if (
+            expected_names is None
+            or len(expected_names) != 1
+            or row.neic_name in expected_names
+            or name_codes.get(row.neic_name)
+        ):
+            canonical_rows.append(row)
+            continue
+
+        canonical_name = next(iter(expected_names))
+        canonical_rows.append(
+            replace(
+                row,
+                neic_name=canonical_name,
+                comparison_name=canonical_name,
+            )
+        )
+        normalizations.append(
+            {
+                "type": "catalog_name_normalized",
+                "source_row": row.source_row,
+                "field": "NEIC_Name",
+                "original": row.neic_name,
+                "normalized": canonical_name,
+                "neic_code": row.neic_code,
+            }
+        )
+    return tuple(canonical_rows), normalizations
+
+
 def _find_duplicate_rows(
     rows: Sequence[NormalizedMappingRow],
 ) -> list[dict[str, object]]:
@@ -608,7 +675,8 @@ def _normalize_neic_code(value: Any) -> str | None:
             except (InvalidOperation, ValueError):
                 return None
         else:
-            digits = compact
+            match = re.fullmatch(r"[A-Za-z](\d{2,4})", compact)
+            digits = match.group(1) if match is not None else compact
     if not digits.isdigit():
         return None
     if len(digits) == 1:

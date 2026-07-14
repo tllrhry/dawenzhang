@@ -180,7 +180,6 @@ function HomePage() {
         <div className="hero-skyline" />
         <p className="hero-kicker">INTELLIGENT CLASSIFICATION</p>
         <h1>请选择分类入口</h1>
-        <p>当前开放“国民经济行业分类”、涉农分类和“五篇大文章”下的科技、绿色、养老、数字金融。</p>
       </section>
 
       <main className="home-content">
@@ -190,7 +189,6 @@ function HomePage() {
             <div className="scene-body">
               <h2>国民经济行业分类</h2>
               <p>基于企业经营信息，智能识别唯一四级行业代码与名称。</p>
-              <Tag className="available-tag" icon={<CheckCircleFilled />}>已开放</Tag>
               <Button type="primary" size="large" block icon={<ArrowRightOutlined />} iconPosition="end" onClick={() => navigate(scenarioViews[NATIONAL_ECONOMY_SCENARIO].classifyPath)}>
                 进入分类
               </Button>
@@ -203,7 +201,6 @@ function HomePage() {
             <div className="scene-icon scene-icon-active"><AuditOutlined /></div>
             <div className="scene-body">
               <h2>涉农分类</h2><p>{scenarioViews[AGRICULTURE_RELATED_SCENARIO].description}</p>
-              <Tag className="available-tag" icon={<CheckCircleFilled />}>已开放</Tag>
               <Button type="primary" size="large" block icon={<ArrowRightOutlined />} iconPosition="end" onClick={() => navigate(scenarioViews[AGRICULTURE_RELATED_SCENARIO].classifyPath)}>进入分类</Button>
             </div>
             <Divider />
@@ -238,8 +235,7 @@ function FiveArticlesScenario() {
       <div className="scene-icon scene-icon-active"><BankOutlined /></div>
       <div className="scene-body">
         <h2>五篇大文章分类</h2>
-        <p>科技、绿色、普惠、养老、数字金融均已开放；普惠金融采用独立的确定性判定规则。</p>
-        <Tag className="available-tag" icon={<CheckCircleFilled />}>五个子场景已开放</Tag>
+        <p>涵盖科技、绿色、普惠、养老、数字金融；普惠金融采用独立的确定性判定规则。</p>
         {fiveArticlesScenarioIds.map((scenarioId) => <Button key={scenarioId} type="primary" size="middle" block icon={<ArrowRightOutlined />} iconPosition="end" onClick={() => navigate(scenarioViews[scenarioId].classifyPath)}>进入{scenarioViews[scenarioId].name}</Button>)}
       </div>
       <Divider />

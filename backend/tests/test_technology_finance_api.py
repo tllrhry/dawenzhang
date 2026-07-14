@@ -515,24 +515,15 @@ def test_scenario_mismatch_is_rejected_before_detail_handler_dispatch(
     handler_lookup.assert_not_called()
 
 
-@pytest.mark.parametrize(
-    "scenario_id",
-    [
-        "agriculture_related",
-    ],
-)
-def test_coming_soon_scenarios_are_rejected(
-    client: TestClient,
-    scenario_id: str,
-) -> None:
-    response = client.get(f"/api/v1/scenarios/{scenario_id}/template")
+def test_agriculture_related_template_is_available(client: TestClient) -> None:
+    response = client.get("/api/v1/scenarios/agriculture_related/template")
 
-    assert response.status_code == 409
-    assert response.json()["detail"] == "场景暂未开放"
+    assert response.status_code == 200
+    assert response.content == get_settings().agriculture_related_template_path.read_bytes()
 
 
-def test_agriculture_related_case_upload_is_rejected(client: TestClient) -> None:
-    template_path = get_settings().technology_finance_template_path
+def test_agriculture_related_case_upload_is_available(client: TestClient) -> None:
+    template_path = get_settings().agriculture_related_template_path
 
     response = client.post(
         "/api/v1/scenarios/agriculture_related/cases",
@@ -545,8 +536,8 @@ def test_agriculture_related_case_upload_is_rejected(client: TestClient) -> None
         },
     )
 
-    assert response.status_code == 409
-    assert response.json()["detail"] == "场景暂未开放"
+    assert response.status_code == 201
+    assert response.json()["scenario"] == "agriculture_related"
 
 
 @pytest.mark.parametrize(

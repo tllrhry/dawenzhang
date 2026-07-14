@@ -143,13 +143,14 @@ def _loan_result(
     return result
 
 
-def test_scenarios_list_available_and_coming_soon_entries(client: TestClient) -> None:
+def test_scenarios_list_includes_available_agriculture_entry(client: TestClient) -> None:
     response = client.get("/api/v1/scenarios")
 
     assert response.status_code == 200
     scenarios = {item["id"]: item for item in response.json()["items"]}
     assert scenarios[SCENARIO]["status"] == "available"
-    assert scenarios["agriculture_related"]["status"] == "coming_soon"
+    assert scenarios["agriculture_related"]["status"] == "available"
+    assert scenarios["agriculture_related"]["parent_id"] is None
     assert scenarios["five_major_articles"]["status"] == "coming_soon"
     assert scenarios["technology_finance"]["status"] == "available"
     assert scenarios["inclusive_finance"]["status"] == "available"

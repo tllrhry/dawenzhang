@@ -265,21 +265,19 @@ def test_new_finance_profiles_resolve_independent_execution_metadata(
     assert registration.name in export_sheet_name
 
 
-def test_inclusive_and_unknown_scenarios_are_not_executable_profiles() -> None:
+def test_agriculture_and_unknown_scenarios_resolve_correctly() -> None:
     agriculture = SCENARIO_REGISTRY[AGRICULTURE_RELATED_SCENARIO]
 
-    assert agriculture is not AGRICULTURE_RELATED_REGISTRATION
-    assert agriculture.status == "coming_soon"
+    assert agriculture is AGRICULTURE_RELATED_REGISTRATION
+    assert agriculture.status == "available"
     assert agriculture.parent_id is None
-    assert agriculture.workflow is None
-    assert agriculture.template_path_setting is None
+    assert agriculture.workflow == "agriculture_related_single_stage"
+    assert agriculture.template_path_setting == "agriculture_related_template_path"
     assert agriculture.uses_five_articles_mapping is False
-    assert agriculture.export_sheet_name is None
-    assert agriculture.is_executable_profile is False
+    assert agriculture.export_sheet_name == "涉农判定"
+    assert agriculture.is_executable_profile is True
     assert SCENARIO_REGISTRY.get("not_registered") is None
 
-    with pytest.raises(ValueError, match="暂未配置模板"):
-        agriculture.template_path(Settings(_env_file=None))
     with pytest.raises(ValueError, match="暂未配置映射"):
         agriculture.mapping_path(Settings(_env_file=None))
 

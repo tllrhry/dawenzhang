@@ -14,6 +14,7 @@ from app.schemas.five_articles import (
     TechnologyFinanceWorkflowResponse,
 )
 from app.schemas.inclusive_finance import InclusiveFinanceHistoryResponse, InclusiveFinanceResultResponse, InclusiveFinanceWorkflowResponse
+from app.schemas.agriculture_related import AgricultureRelatedHistoryResponse, AgricultureRelatedResultResponse, AgricultureRelatedWorkflowResponse
 from app.schemas.national_economy import (
     CaseCreatedResponse,
     CaseInputField,
@@ -50,6 +51,7 @@ from app.services.technology_finance_classification_workflow import (
     TechnologyFinanceWorkflowResult,
 )
 from app.services.inclusive_finance_workflow import InclusiveFinanceWorkflowResult
+from app.services.agriculture_related_workflow import AgricultureRelatedWorkflowResult
 
 
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -71,8 +73,8 @@ def list_scenarios() -> dict[str, object]:
             {
                 "id": "agriculture_related",
                 "name": "涉农业务",
-                "status": "coming_soon",
-                "description": "暂未开放",
+                "status": "available",
+                "description": "复用国民经济分类并执行全口径涉农贷款判定",
             },
             {
                 "id": "five_major_articles",
@@ -333,6 +335,8 @@ def get_scenario_history(
     )
     if case.scenario == "inclusive_finance":
         return InclusiveFinanceHistoryResponse(items=[InclusiveFinanceResultResponse.model_validate(result) for result in results])
+    if case.scenario == "agriculture_related":
+        return AgricultureRelatedHistoryResponse(items=[AgricultureRelatedResultResponse.model_validate(result) for result in results])
     return FiveArticlesHistoryResponse(
         items=[FiveArticlesResultResponse.model_validate(result) for result in results]
     )
@@ -404,6 +408,8 @@ def _technology_finance_workflow_response(
 def _workflow_response(outcome: object) -> object:
     if isinstance(outcome, InclusiveFinanceWorkflowResult):
         return InclusiveFinanceWorkflowResponse(stage_a=ClassificationResultResponse.model_validate(outcome.stage_a_result), stage_b=InclusiveFinanceResultResponse.model_validate(outcome.stage_b_result) if outcome.stage_b_result else None)
+    if isinstance(outcome, AgricultureRelatedWorkflowResult):
+        return AgricultureRelatedWorkflowResponse(stage_a=ClassificationResultResponse.model_validate(outcome.stage_a_result), stage_b=AgricultureRelatedResultResponse.model_validate(outcome.stage_b_result) if outcome.stage_b_result else None)
     return _technology_finance_workflow_response(outcome)
 
 

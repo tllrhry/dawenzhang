@@ -423,11 +423,7 @@ MULTI_SCENARIO_FINANCE_REGISTRATIONS = (
     INCLUSIVE_FINANCE_REGISTRATION,
 )
 
-COMING_SOON_SCENARIO_NAMES = MappingProxyType(
-    {
-        AGRICULTURE_RELATED_SCENARIO: ("涉农业务", None),
-    }
-)
+COMING_SOON_SCENARIO_NAMES = MappingProxyType({})
 
 COMING_SOON_REGISTRATIONS = tuple(
     ScenarioRegistration(
@@ -450,6 +446,7 @@ COMING_SOON_REGISTRATIONS = tuple(
 SCENARIO_REGISTRY: Mapping[str, ScenarioRegistration] = MappingProxyType(
     {
         TECHNOLOGY_FINANCE_SCENARIO: TECHNOLOGY_FINANCE_REGISTRATION,
+        AGRICULTURE_RELATED_SCENARIO: AGRICULTURE_RELATED_REGISTRATION,
         **{
             registration.id: registration
             for registration in MULTI_SCENARIO_FINANCE_REGISTRATIONS

@@ -6,9 +6,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import (
+    AgricultureRelatedResult,
     FiveArticlesResult,
     InclusiveFinanceResult,
     NationalEconomyClassificationCase,
+)
+from app.services.agriculture_related_workflow import (
+    AgricultureRelatedWorkflowResult,
+    classify_agriculture_related_case,
+    reclassify_agriculture_related_case,
 )
 from app.services.inclusive_finance_workflow import (
     InclusiveFinanceWorkflowResult,
@@ -30,19 +36,21 @@ class ScenarioWorkflowHandler:
 
     classify_callable: Callable | None = None
     reclassify_callable: Callable | None = None
-    result_model: type[FiveArticlesResult] | type[InclusiveFinanceResult] | None = None
+    result_model: type[FiveArticlesResult] | type[InclusiveFinanceResult] | type[AgricultureRelatedResult] | None = None
 
     def classify(
         self,
         session: Session,
         case: NationalEconomyClassificationCase,
         profile: ScenarioRegistration,
-    ) -> TechnologyFinanceWorkflowResult | InclusiveFinanceWorkflowResult:
+    ) -> TechnologyFinanceWorkflowResult | InclusiveFinanceWorkflowResult | AgricultureRelatedWorkflowResult:
         self._validate_case_profile(case, profile)
         if self.classify_callable is not None:
             return self.classify_callable(session, case)
         if profile.workflow == "inclusive_finance_single_stage":
             return classify_inclusive_finance_case(session, case)
+        if profile.workflow == "agriculture_related_single_stage":
+            return classify_agriculture_related_case(session, case)
         return classify_five_articles_case(session, case, profile)
 
     def reclassify(
@@ -51,12 +59,14 @@ class ScenarioWorkflowHandler:
         case: NationalEconomyClassificationCase,
         objection_text: str,
         profile: ScenarioRegistration,
-    ) -> TechnologyFinanceWorkflowResult | InclusiveFinanceWorkflowResult:
+    ) -> TechnologyFinanceWorkflowResult | InclusiveFinanceWorkflowResult | AgricultureRelatedWorkflowResult:
         self._validate_case_profile(case, profile)
         if self.reclassify_callable is not None:
             return self.reclassify_callable(session, case, objection_text)
         if profile.workflow == "inclusive_finance_single_stage":
             return reclassify_inclusive_finance_case(session, case, objection_text)
+        if profile.workflow == "agriculture_related_single_stage":
+            return reclassify_agriculture_related_case(session, case, objection_text)
         return reclassify_five_articles_case(session, case, objection_text, profile)
 
     def history(
@@ -64,11 +74,13 @@ class ScenarioWorkflowHandler:
         session: Session,
         case: NationalEconomyClassificationCase,
         profile: ScenarioRegistration,
-    ) -> list[FiveArticlesResult] | list[InclusiveFinanceResult]:
+    ) -> list[FiveArticlesResult] | list[InclusiveFinanceResult] | list[AgricultureRelatedResult]:
         self._validate_case_profile(case, profile)
         result_model = self.result_model or (
             InclusiveFinanceResult
             if profile.workflow == "inclusive_finance_single_stage"
+            else AgricultureRelatedResult
+            if profile.workflow == "agriculture_related_single_stage"
             else FiveArticlesResult
         )
         return list(
@@ -95,6 +107,11 @@ class ScenarioWorkflowHandler:
                 inclusive_finance_results=results,
                 profile=profile,
             )
+        if profile.workflow == "agriculture_related_single_stage":
+            return export_case_workbook(
+                case,
+                profile=profile,
+            )
         return export_case_workbook(
             case,
             five_articles_results=results,
@@ -116,11 +133,17 @@ INCLUSIVE_FINANCE_WORKFLOW_HANDLER = ScenarioWorkflowHandler(
     reclassify_inclusive_finance_case,
     InclusiveFinanceResult,
 )
+AGRICULTURE_RELATED_WORKFLOW_HANDLER = ScenarioWorkflowHandler(
+    classify_agriculture_related_case,
+    reclassify_agriculture_related_case,
+    AgricultureRelatedResult,
+)
 
 SCENARIO_WORKFLOW_HANDLERS: Mapping[str, ScenarioWorkflowHandler] = MappingProxyType(
     {
         "technology_finance_two_stage": FIVE_ARTICLES_WORKFLOW_HANDLER,
         "inclusive_finance_single_stage": INCLUSIVE_FINANCE_WORKFLOW_HANDLER,
+        "agriculture_related_single_stage": AGRICULTURE_RELATED_WORKFLOW_HANDLER,
     }
 )
 

@@ -79,6 +79,10 @@ class Settings(BaseSettings):
         default=Path("模板文件/五篇大文章/普惠金融模版.docx"),
         validation_alias=AliasChoices("INCLUSIVE_FINANCE_TEMPLATE_PATH"),
     )
+    agriculture_related_template_path: Path = Field(
+        default=Path("模板文件/涉农/涉农类别模版.docx"),
+        validation_alias=AliasChoices("AGRICULTURE_RELATED_TEMPLATE_PATH"),
+    )
 
     # Shared HTTP connect timeout for the cloud model clients.
     http_connect_timeout_seconds: float = Field(

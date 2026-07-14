@@ -12,6 +12,7 @@ GREEN_FINANCE_SCENARIO = "green_finance"
 DIGITAL_FINANCE_SCENARIO = "digital_finance"
 PENSION_FINANCE_SCENARIO = "pension_finance"
 INCLUSIVE_FINANCE_SCENARIO = "inclusive_finance"
+AGRICULTURE_RELATED_SCENARIO = "agriculture_related"
 
 
 @dataclass(frozen=True)
@@ -208,6 +209,114 @@ INCLUSIVE_FINANCE_FIELD_SCHEMA = (
     *INCLUSIVE_FINANCE_ADDITIONAL_FIELDS,
 )
 
+AGRICULTURE_RELATED_STAGE_A_FIELD_KEYS = (
+    "enterprise_name",
+    "unified_social_credit_code",
+    "main_business",
+    "business_scope",
+    "main_business_revenue_share",
+    "loan_purpose",
+    "counterparty_name",
+    "counterparty_business_industry",
+    "trade_goods_services",
+    "credit_approval_opinion",
+)
+
+_AGRICULTURE_RELATED_STAGE_A_TEMPLATE_LABELS = {
+    "counterparty_name": "本次交易对手名称",
+    "trade_goods_services": "核心交易品类 / 服务内容",
+}
+
+AGRICULTURE_RELATED_ADDITIONAL_FIELDS = (
+    ScenarioField("registered_address", "企业注册地址"),
+    ScenarioField("actual_business_address", "实际经营地址"),
+    ScenarioField("farmer_long_term_town_resident", "是否为乡镇（不含城关镇）长期住户"),
+    ScenarioField("farmer_town_village_resident", "是否为城关镇所辖行政村住户"),
+    ScenarioField("farmer_nonlocal_resident_over_one_year", "是否为户籍不在本地的常住住户"),
+    ScenarioField(
+        "farmer_state_farm_employee_or_rural_individual_business",
+        "是否为国有农场职工或农村个体工商户",
+    ),
+    ScenarioField("entity_type", "主体类型"),
+    ScenarioField("annual_revenue", "上年度营业收入"),
+    ScenarioField("project_name", "对应项目名称"),
+    ScenarioField("project_content", "项目建设 / 运营内容"),
+)
+
+_AGRICULTURE_RELATED_FIELDS_BY_KEY = {
+    field.key: field for field in AGRICULTURE_RELATED_ADDITIONAL_FIELDS
+}
+_AGRICULTURE_RELATED_FIELDS_BY_KEY.update(
+    {
+        key: ScenarioField(
+            key=key,
+            label=_AGRICULTURE_RELATED_STAGE_A_TEMPLATE_LABELS.get(
+                key, FIELD_LABELS[key]
+            ),
+            aliases=tuple(
+                dict.fromkeys(
+                    (
+                        *_MULTI_SCENARIO_STAGE_A_ALIASES.get(key, ()),
+                        FIELD_LABELS[key],
+                    )
+                )
+            ),
+        )
+        for key in AGRICULTURE_RELATED_STAGE_A_FIELD_KEYS
+    }
+)
+AGRICULTURE_RELATED_FIELD_SCHEMA = tuple(
+    _AGRICULTURE_RELATED_FIELDS_BY_KEY[key]
+    for key in (
+        "enterprise_name",
+        "unified_social_credit_code",
+        "registered_address",
+        "actual_business_address",
+        "farmer_long_term_town_resident",
+        "farmer_town_village_resident",
+        "farmer_nonlocal_resident_over_one_year",
+        "farmer_state_farm_employee_or_rural_individual_business",
+        "entity_type",
+        "main_business",
+        "annual_revenue",
+        "business_scope",
+        "main_business_revenue_share",
+        "loan_purpose",
+        "project_name",
+        "project_content",
+        "counterparty_name",
+        "counterparty_business_industry",
+        "trade_goods_services",
+        "credit_approval_opinion",
+    )
+)
+
+AGRICULTURE_RELATED_REGISTRATION = ScenarioRegistration(
+    id=AGRICULTURE_RELATED_SCENARIO,
+    name="涉农业务",
+    status="available",
+    description="复用国民经济分类并执行全口径涉农贷款判定",
+    parent_id=None,
+    workflow="agriculture_related_single_stage",
+    template_path_setting="agriculture_related_template_path",
+    uses_five_articles_mapping=False,
+    export_sheet_name="涉农判定",
+    field_schema=AGRICULTURE_RELATED_FIELD_SCHEMA,
+    stage_a_field_keys=AGRICULTURE_RELATED_STAGE_A_FIELD_KEYS,
+    stage_b_evidence_field_keys=_prioritize_evidence_fields(
+        AGRICULTURE_RELATED_FIELD_SCHEMA,
+        "registered_address",
+        "actual_business_address",
+        "farmer_long_term_town_resident",
+        "farmer_town_village_resident",
+        "farmer_nonlocal_resident_over_one_year",
+        "farmer_state_farm_employee_or_rural_individual_business",
+        "loan_purpose",
+        "project_content",
+        "trade_goods_services",
+    ),
+)
+
 GREEN_FINANCE_REGISTRATION = ScenarioRegistration(
     id=GREEN_FINANCE_SCENARIO,
     name="绿色金融",
@@ -316,7 +425,7 @@ MULTI_SCENARIO_FINANCE_REGISTRATIONS = (
 
 COMING_SOON_SCENARIO_NAMES = MappingProxyType(
     {
-        "agriculture_related": ("涉农业务", None),
+        AGRICULTURE_RELATED_SCENARIO: ("涉农业务", None),
     }
 )
 

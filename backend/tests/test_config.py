@@ -26,6 +26,20 @@ def test_default_settings() -> None:
     assert settings.national_economy_template_path == Path(
         "模板文件/国民经济/国民经济类别模版.docx"
     )
+    assert settings.agriculture_related_template_path == Path(
+        "模板文件/涉农/涉农类别模版.docx"
+    )
+
+
+def test_agriculture_related_template_path_has_environment_alias() -> None:
+    settings = Settings(
+        _env_file=None,
+        AGRICULTURE_RELATED_TEMPLATE_PATH="/mnt/assets/agriculture-related.docx",
+    )
+
+    assert settings.agriculture_related_template_path == Path(
+        "/mnt/assets/agriculture-related.docx"
+    )
 
 
 def test_rejects_non_postgres_database() -> None:

@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from docx import Document
 
 from app.core.config import Settings
 from app.services.national_economy_case_ingestion import FIELD_LABELS
@@ -8,6 +9,11 @@ from app.services.scenario_registry import (
     DIGITAL_FINANCE_ADDITIONAL_FIELDS,
     DIGITAL_FINANCE_REGISTRATION,
     DIGITAL_FINANCE_SCENARIO,
+    AGRICULTURE_RELATED_ADDITIONAL_FIELDS,
+    AGRICULTURE_RELATED_FIELD_SCHEMA,
+    AGRICULTURE_RELATED_REGISTRATION,
+    AGRICULTURE_RELATED_SCENARIO,
+    AGRICULTURE_RELATED_STAGE_A_FIELD_KEYS,
     GREEN_FINANCE_ADDITIONAL_FIELDS,
     GREEN_FINANCE_REGISTRATION,
     GREEN_FINANCE_SCENARIO,
@@ -260,20 +266,77 @@ def test_new_finance_profiles_resolve_independent_execution_metadata(
 
 
 def test_inclusive_and_unknown_scenarios_are_not_executable_profiles() -> None:
-    inclusive = SCENARIO_REGISTRY["agriculture_related"]
+    agriculture = SCENARIO_REGISTRY[AGRICULTURE_RELATED_SCENARIO]
 
-    assert inclusive.status == "coming_soon"
-    assert inclusive.workflow is None
-    assert inclusive.template_path_setting is None
-    assert inclusive.uses_five_articles_mapping is False
-    assert inclusive.export_sheet_name is None
-    assert inclusive.is_executable_profile is False
+    assert agriculture is not AGRICULTURE_RELATED_REGISTRATION
+    assert agriculture.status == "coming_soon"
+    assert agriculture.parent_id is None
+    assert agriculture.workflow is None
+    assert agriculture.template_path_setting is None
+    assert agriculture.uses_five_articles_mapping is False
+    assert agriculture.export_sheet_name is None
+    assert agriculture.is_executable_profile is False
     assert SCENARIO_REGISTRY.get("not_registered") is None
 
     with pytest.raises(ValueError, match="暂未配置模板"):
-        inclusive.template_path(Settings(_env_file=None))
+        agriculture.template_path(Settings(_env_file=None))
     with pytest.raises(ValueError, match="暂未配置映射"):
-        inclusive.mapping_path(Settings(_env_file=None))
+        agriculture.mapping_path(Settings(_env_file=None))
+
+
+def test_agriculture_related_schema_matches_template_and_reuses_existing_keys() -> None:
+    expected_stage_a = {
+        "enterprise_name": "企业名称",
+        "unified_social_credit_code": "统一社会信用代码",
+        "main_business": "主营业务",
+        "business_scope": "营业执照经营范围（全文）",
+        "main_business_revenue_share": "主营业务及营收占比",
+        "loan_purpose": "贷款用途详细描述",
+        "counterparty_name": "本次交易对手名称",
+        "counterparty_business_industry": "交易对手主营业务 / 所属行业",
+        "trade_goods_services": "核心交易品类 / 服务内容",
+        "credit_approval_opinion": "授信审批意见",
+    }
+    expected_additional = {
+        field.key: field.label for field in AGRICULTURE_RELATED_ADDITIONAL_FIELDS
+    }
+    fields = {field.key: field.label for field in AGRICULTURE_RELATED_FIELD_SCHEMA}
+
+    assert AGRICULTURE_RELATED_REGISTRATION.status == "available"
+    assert AGRICULTURE_RELATED_REGISTRATION.parent_id is None
+    assert AGRICULTURE_RELATED_REGISTRATION.workflow == "agriculture_related_single_stage"
+    assert AGRICULTURE_RELATED_REGISTRATION.template_path_setting == (
+        "agriculture_related_template_path"
+    )
+    assert AGRICULTURE_RELATED_REGISTRATION.template_path(Settings(_env_file=None)).is_file()
+    assert len(AGRICULTURE_RELATED_FIELD_SCHEMA) == 20
+    assert len(fields) == 20
+    template = Document(
+        AGRICULTURE_RELATED_REGISTRATION.template_path(Settings(_env_file=None))
+    )
+    assert tuple(field.label for field in AGRICULTURE_RELATED_FIELD_SCHEMA) == tuple(
+        row.cells[0].text.strip() for row in template.tables[0].rows[1:]
+    )
+    assert AGRICULTURE_RELATED_STAGE_A_FIELD_KEYS == tuple(expected_stage_a)
+    assert {key: fields[key] for key in expected_stage_a} == expected_stage_a
+    assert expected_additional == {
+        "registered_address": "企业注册地址",
+        "actual_business_address": "实际经营地址",
+        "farmer_long_term_town_resident": "是否为乡镇（不含城关镇）长期住户",
+        "farmer_town_village_resident": "是否为城关镇所辖行政村住户",
+        "farmer_nonlocal_resident_over_one_year": "是否为户籍不在本地的常住住户",
+        "farmer_state_farm_employee_or_rural_individual_business": "是否为国有农场职工或农村个体工商户",
+        "entity_type": "主体类型",
+        "annual_revenue": "上年度营业收入",
+        "project_name": "对应项目名称",
+        "project_content": "项目建设 / 运营内容",
+    }
+    assert set(fields).issubset(set(FIELD_LABELS) | set(INCLUSIVE_FINANCE_ADDITIONAL_FIELDS[i].key for i in range(len(INCLUSIVE_FINANCE_ADDITIONAL_FIELDS))))
+    assert not {
+        "core_products_services",
+        "industry_chain_position",
+        "industry_position_competitiveness",
+    } & set(fields)
 
 
 def test_inclusive_finance_profile_is_mapping_free_and_has_real_stage_a_subset() -> None:

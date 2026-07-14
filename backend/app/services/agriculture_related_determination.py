@@ -28,6 +28,12 @@ FARMER_IDENTITY_FIELD_KEYS = (
     "farmer_nonlocal_resident_over_one_year",
     "farmer_state_farm_employee_or_rural_individual_business",
 )
+FARMER_IDENTITY_FIELD_LABELS = {
+    "farmer_long_term_town_resident": "是否为乡镇（不含城关镇）长期住户",
+    "farmer_town_village_resident": "是否为城关镇所辖行政村住户",
+    "farmer_nonlocal_resident_over_one_year": "是否为户籍不在本地的常住住户",
+    "farmer_state_farm_employee_or_rural_individual_business": "是否为国有农场职工或农村个体工商户",
+}
 AGRICULTURE_CATEGORY_TWO = "农村企业及各类组织贷款"
 AGRICULTURE_CATEGORY_FOUR = "城市企业及各类组织涉农贷款"
 URBAN_AGRICULTURE_SUBCATEGORIES = (
@@ -120,7 +126,7 @@ def determine_farmer_loan_category(
         for key in matched_fields
     ]
     if matched_fields:
-        labels = "、".join(matched_fields)
+        labels = "、".join(FARMER_IDENTITY_FIELD_LABELS[key] for key in matched_fields)
         basis = f"农户身份字段 {labels} 的填写值为“是”，命中农户贷款类别。"
         result = "matched"
     else:

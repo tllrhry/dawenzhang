@@ -33,6 +33,10 @@ def test_farmer_category_matches_single_identity_field() -> None:
     assert result["category_name"] == "农户贷款"
     assert result["result"] == "matched"
     assert result["method"] == "rule"
+    assert result["basis"] == (
+        "农户身份字段 是否为城关镇所辖行政村住户 的填写值为“是”，命中农户贷款类别。"
+    )
+    assert FARMER_FIELDS[1] not in result["basis"]
     assert result["evidence_refs"] == [
         {"type": "field", "field_key": FARMER_FIELDS[1], "raw_value": "是"}
     ]

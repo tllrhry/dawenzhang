@@ -1,12 +1,11 @@
 from hashlib import sha256
 from pathlib import Path
-import shutil
-
 from openpyxl import Workbook
 import pytest
 
 from scripts.preflight_five_articles_mapping_assets import (
     ASSET_SPECS,
+    MAPPING_SOURCE_FILENAME,
     MappingAssetValidationError,
     REQUIRED_HEADERS,
     discover_mapping_assets,
@@ -50,7 +49,8 @@ def _write_workbook(
 
 @pytest.mark.parametrize("spec", ASSET_SPECS, ids=lambda spec: spec.scenario_id)
 def test_formal_mapping_asset_has_unified_headers_and_metadata(spec) -> None:
-    report = validate_mapping_asset(spec.path, spec)
+    path = Path("五篇大文章映射") / MAPPING_SOURCE_FILENAME
+    report = validate_mapping_asset(path, spec)
 
     assert set(REQUIRED_HEADERS).issubset(report.headers)
     assert report.source_hash == sha256(report.path.read_bytes()).hexdigest()
@@ -76,22 +76,21 @@ def test_mapping_asset_preflight_rejects_normalized_duplicate_header(
         validate_mapping_asset(path, _spec("pension_finance"))
 
 
-def test_green_mapping_asset_preflight_rejects_category_mismatch(
+def test_mapping_asset_preflight_rejects_missing_category_data(
     tmp_path: Path,
 ) -> None:
     path = tmp_path / "绿色金融.xlsx"
     _write_workbook(path, category="数字金融")
 
-    with pytest.raises(MappingAssetValidationError, match="第 2 行属于类别错配"):
+    with pytest.raises(MappingAssetValidationError, match="未找到属于类别“绿色金融”的数据"):
         validate_mapping_asset(path, _spec("green_finance"))
 
 
 def test_mapping_asset_discovery_ignores_lock_file_and_ds_store(
     tmp_path: Path,
 ) -> None:
-    for spec in ASSET_SPECS:
-        source = Path("五篇大文章映射") / spec.filename
-        shutil.copyfile(source, tmp_path / spec.filename)
+    source = Path("五篇大文章映射") / MAPPING_SOURCE_FILENAME
+    (tmp_path / MAPPING_SOURCE_FILENAME).write_bytes(source.read_bytes())
     (tmp_path / "~$绿色金融.xlsx").write_bytes(b"not an xlsx")
     (tmp_path / ".DS_Store").write_bytes(b"filesystem metadata")
 
@@ -99,3 +98,4 @@ def test_mapping_asset_discovery_ignores_lock_file_and_ds_store(
 
     assert set(discovered) == {spec.scenario_id for spec in ASSET_SPECS}
     assert all(not path.name.startswith("~$") for path in discovered.values())
+    assert set(discovered.values()) == {tmp_path / MAPPING_SOURCE_FILENAME}

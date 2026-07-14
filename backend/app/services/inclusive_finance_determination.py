@@ -25,6 +25,12 @@ FARMER_FIELD_KEYS = (
     "farmer_nonlocal_resident_over_one_year",
     "farmer_state_farm_employee_or_rural_individual_business",
 )
+BORROWER_TYPE_LABELS = {
+    "farmer": "农户",
+    "individual_business": "个体工商户",
+    "small_micro_owner": "小微企业主",
+    "enterprise": "企业",
+}
 _OPERATING_KEYWORDS = ("经营性", "经营", "流动资金", "流贷", "生产", "周转")
 _NON_OPERATING_KEYWORDS = ("个人消费", "消费", "按揭", "住房", "车贷")
 _OPERATING_EVIDENCE_FIELDS = (

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the local green, digital, and pension finance mapping assets."""
+"""Validate the local unified five-articles mapping workbook."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ from openpyxl.utils.exceptions import InvalidFileException
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSET_DIR = ROOT / "五篇大文章映射"
+MAPPING_SOURCE_FILENAME = "贷款投向-五篇大文章映射表.xlsx"
 
 REQUIRED_HEADERS = (
     "主题",
@@ -45,12 +46,7 @@ HEADER_ALIASES = {
 @dataclass(frozen=True)
 class MappingAssetSpec:
     scenario_id: str
-    filename: str
     category_name: str
-
-    @property
-    def path(self) -> Path:
-        return ASSET_DIR / self.filename
 
 
 @dataclass(frozen=True)
@@ -63,9 +59,10 @@ class MappingAssetReport:
 
 
 ASSET_SPECS = (
-    MappingAssetSpec("green_finance", "绿色金融.xlsx", "绿色金融"),
-    MappingAssetSpec("digital_finance", "数字金融.xlsx", "数字金融"),
-    MappingAssetSpec("pension_finance", "养老金融.xlsx", "养老金融"),
+    MappingAssetSpec("technology_finance", "科技金融"),
+    MappingAssetSpec("green_finance", "绿色金融"),
+    MappingAssetSpec("digital_finance", "数字金融"),
+    MappingAssetSpec("pension_finance", "养老金融"),
 )
 
 
@@ -102,23 +99,13 @@ def _is_ignored_asset(path: Path) -> bool:
 
 
 def discover_mapping_assets(asset_dir: Path = ASSET_DIR) -> dict[str, Path]:
-    """Find the three formal workbooks while ignoring filesystem noise."""
+    """Resolve every executable scenario to the one formal mapping workbook."""
     if not asset_dir.is_dir():
         raise MappingAssetValidationError(f"映射资产目录不存在: {asset_dir}")
-
-    expected = {spec.filename: spec for spec in ASSET_SPECS}
-    discovered: dict[str, Path] = {}
-    for path in asset_dir.iterdir():
-        if _is_ignored_asset(path) or not path.is_file():
-            continue
-        spec = expected.get(path.name)
-        if spec is not None:
-            discovered[spec.scenario_id] = path
-
-    missing = [spec.filename for spec in ASSET_SPECS if spec.scenario_id not in discovered]
-    if missing:
-        raise MappingAssetValidationError(f"映射资产缺失: {', '.join(missing)}")
-    return discovered
+    source = asset_dir / MAPPING_SOURCE_FILENAME
+    if not source.is_file():
+        raise MappingAssetValidationError(f"映射资产缺失: {MAPPING_SOURCE_FILENAME}")
+    return {spec.scenario_id: source for spec in ASSET_SPECS}
 
 
 def validate_mapping_asset(path: Path, spec: MappingAssetSpec) -> MappingAssetReport:
@@ -164,6 +151,11 @@ def validate_mapping_asset(path: Path, spec: MappingAssetSpec) -> MappingAssetRe
 
         data_row_count = 0
         category_position = positions.get(OPTIONAL_CATEGORY_HEADER)
+        if category_position is None:
+            raise MappingAssetValidationError(
+                f"{spec.scenario_id}: 缺少表头: {OPTIONAL_CATEGORY_HEADER}"
+            )
+        observed_categories: set[str] = set()
         for source_row, row in enumerate(rows, start=2):
             if not any(
                 index < len(row) and _clean_value(row[index])
@@ -171,15 +163,18 @@ def validate_mapping_asset(path: Path, spec: MappingAssetSpec) -> MappingAssetRe
                 if header in REQUIRED_HEADERS
             ):
                 continue
-            data_row_count += 1
-            if category_position is None or category_position >= len(row):
+            if category_position >= len(row):
                 continue
             category = _clean_value(row[category_position])
-            if category and category != spec.category_name:
-                raise MappingAssetValidationError(
-                    f"{spec.scenario_id}: 第 {source_row} 行属于类别错配，"
-                    f"应为 {spec.category_name}，实际为 {category}"
-                )
+            if category:
+                observed_categories.add(category)
+            if category == spec.category_name:
+                data_row_count += 1
+        if data_row_count == 0:
+            actual = "、".join(sorted(observed_categories)) or "无"
+            raise MappingAssetValidationError(
+                f"{spec.scenario_id}: 未找到属于类别“{spec.category_name}”的数据，实际类别: {actual}"
+            )
     finally:
         workbook.close()
 

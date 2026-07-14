@@ -14,6 +14,7 @@ data/
 *.log
 .DS_Store
 .~*
+/.catpaw/
 
 # 本地双 Agent 私有入口（Claude 本地覆盖，不入库）
 CLAUDE.local.md

@@ -26,7 +26,7 @@ from app.services.technology_finance_label_selection import (
 from app.services.technology_finance_mapping_query import (
     FiveArticlesMappingLabel,
     FiveArticlesMappingLookupResult,
-    lookup_five_articles_mapping,
+    lookup_five_articles_hierarchy_mapping,
 )
 from app.services.technology_finance_stage_b import (
     TechnologyFinanceStageBResult,
@@ -60,7 +60,7 @@ def classify_technology_finance_case(
     settings: Settings | None = None,
     *,
     stage_a_classifier: StageAClassificationCallable = classify_case,
-    mapping_lookup: MappingLookupCallable = lookup_five_articles_mapping,
+    mapping_lookup: MappingLookupCallable = lookup_five_articles_hierarchy_mapping,
     label_selector: LabelSelectionCallable = select_most_matching_technology_finance_label,
     stage_b_classifier: StageBClassificationCallable = classify_technology_finance_stage_b,
 ) -> TechnologyFinanceWorkflowResult:
@@ -81,7 +81,7 @@ def classify_five_articles_case(
     settings: Settings | None = None,
     *,
     stage_a_classifier: StageAClassificationCallable = classify_case,
-    mapping_lookup: MappingLookupCallable = lookup_five_articles_mapping,
+    mapping_lookup: MappingLookupCallable = lookup_five_articles_hierarchy_mapping,
     label_selector: LabelSelectionCallable = select_most_matching_five_articles_label,
     stage_b_classifier: StageBClassificationCallable = classify_five_articles_stage_b,
 ) -> TechnologyFinanceWorkflowResult:
@@ -106,7 +106,7 @@ def reclassify_technology_finance_case(
     settings: Settings | None = None,
     *,
     stage_a_reclassifier: StageAReclassificationCallable = reclassify_case,
-    mapping_lookup: MappingLookupCallable = lookup_five_articles_mapping,
+    mapping_lookup: MappingLookupCallable = lookup_five_articles_hierarchy_mapping,
     label_selector: LabelSelectionCallable = select_most_matching_technology_finance_label,
     stage_b_classifier: StageBClassificationCallable = classify_technology_finance_stage_b,
 ) -> TechnologyFinanceWorkflowResult:
@@ -128,7 +128,7 @@ def reclassify_five_articles_case(
     settings: Settings | None = None,
     *,
     stage_a_reclassifier: StageAReclassificationCallable = reclassify_case,
-    mapping_lookup: MappingLookupCallable = lookup_five_articles_mapping,
+    mapping_lookup: MappingLookupCallable = lookup_five_articles_hierarchy_mapping,
     label_selector: LabelSelectionCallable = select_most_matching_five_articles_label,
     stage_b_classifier: StageBClassificationCallable = classify_five_articles_stage_b,
 ) -> TechnologyFinanceWorkflowResult:
@@ -150,7 +150,7 @@ def run_technology_finance_stage_b(
     stage_a_result: NationalEconomyClassificationResult,
     settings: Settings,
     *,
-    mapping_lookup: MappingLookupCallable = lookup_five_articles_mapping,
+    mapping_lookup: MappingLookupCallable = lookup_five_articles_hierarchy_mapping,
     label_selector: LabelSelectionCallable = select_most_matching_technology_finance_label,
     stage_b_classifier: StageBClassificationCallable = classify_technology_finance_stage_b,
 ) -> TechnologyFinanceWorkflowResult:
@@ -170,7 +170,7 @@ def run_five_articles_stage_b(
     profile: ScenarioRegistration,
     settings: Settings,
     *,
-    mapping_lookup: MappingLookupCallable = lookup_five_articles_mapping,
+    mapping_lookup: MappingLookupCallable = lookup_five_articles_hierarchy_mapping,
     label_selector: LabelSelectionCallable = select_most_matching_five_articles_label,
     stage_b_classifier: StageBClassificationCallable = classify_five_articles_stage_b,
 ) -> TechnologyFinanceWorkflowResult:
@@ -199,10 +199,12 @@ def run_five_articles_stage_b(
     try:
         mapping_result = mapping_lookup(
             session,
-            enterprise_four_digit_code=stage_a_result.industry_code or "",
+            enterprise_industry_code=stage_a_result.industry_code or "",
             enterprise_major_category_code=stage_a_result.industry_major_code or "",
-            loan_direction_four_digit_code=stage_a_result.loan_industry_code or "",
+            enterprise_middle_category_code=stage_a_result.industry_middle_code,
+            loan_direction_industry_code=stage_a_result.loan_industry_code or "",
             loan_direction_major_category_code=stage_a_result.loan_industry_major_code or "",
+            loan_direction_middle_category_code=stage_a_result.loan_industry_middle_code,
             scenario_id=profile.id,
         )
         _validate_mapping_context(session, mapping_result, profile)

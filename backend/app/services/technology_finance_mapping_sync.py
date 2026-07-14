@@ -174,7 +174,7 @@ def _source_hash(
         "headers": list(headers),
         "rows": [
             [
-                _audit_value(row.values.get(header))
+                _source_hash_value(row.values.get(header))
                 for header in ALL_HEADERS
                 if header in headers
             ]
@@ -648,7 +648,7 @@ def _normalize_name(value: Any) -> str:
 def _normalize_text(value: Any) -> str:
     if value is None:
         return ""
-    normalized = unicodedata.normalize("NFKC", str(value))
+    normalized = unicodedata.normalize("NFKC", str(value)).replace("\ufeff", "")
     return re.sub(r"\s+", " ", normalized).strip()
 
 
@@ -663,6 +663,11 @@ def _is_blank(value: Any) -> bool:
 
 def _audit_value(value: Any) -> str:
     return "" if value is None else str(value)
+
+
+def _source_hash_value(value: Any) -> str:
+    """Ignore a BOM because it is transport noise, not mapping content."""
+    return _audit_value(value).replace("\ufeff", "")
 
 
 def _freeze_sets(values: Mapping[str, set[str]]) -> dict[str, frozenset[str]]:

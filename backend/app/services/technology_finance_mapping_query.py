@@ -2,7 +2,7 @@ from dataclasses import dataclass
 import re
 from typing import Literal
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import FiveArticlesMappingRow, FiveArticlesMappingVersion
@@ -14,6 +14,8 @@ from app.services.technology_finance_mapping_sync import (
 MappingLookupStatus = Literal["mapping_hit", "not_applicable", "needs_review"]
 FOUR_DIGIT_CODE_PATTERN = re.compile(r"^\d{4}$")
 MAJOR_CATEGORY_CODE_PATTERN = re.compile(r"^[A-Za-z]?(\d{2})$")
+INDUSTRY_CODE_PATTERN = re.compile(r"^[A-Za-z]?(\d{2,4})$")
+MIDDLE_CATEGORY_CODE_PATTERN = re.compile(r"^[A-Za-z]?(\d{3})$")
 
 
 @dataclass(frozen=True)
@@ -69,6 +71,31 @@ def lookup_five_articles_mapping(
     loan_direction_major_category_code: str,
     scenario_id: str,
 ) -> FiveArticlesMappingLookupResult:
+    """Compatibility wrapper for the original four-digit lookup contract."""
+    return lookup_five_articles_hierarchy_mapping(
+        session,
+        enterprise_industry_code=enterprise_four_digit_code,
+        enterprise_major_category_code=enterprise_major_category_code,
+        enterprise_middle_category_code=None,
+        loan_direction_industry_code=loan_direction_four_digit_code,
+        loan_direction_major_category_code=loan_direction_major_category_code,
+        loan_direction_middle_category_code=None,
+        scenario_id=scenario_id,
+    )
+
+
+def lookup_five_articles_hierarchy_mapping(
+    session: Session,
+    *,
+    enterprise_industry_code: str,
+    enterprise_major_category_code: str,
+    enterprise_middle_category_code: str | None,
+    loan_direction_industry_code: str,
+    loan_direction_major_category_code: str,
+    loan_direction_middle_category_code: str | None,
+    scenario_id: str,
+) -> FiveArticlesMappingLookupResult:
+    """Look up one scenario's labels at the highest mapped Stage A granularity."""
     versions = tuple(
         session.scalars(
             select(FiveArticlesMappingVersion)
@@ -99,27 +126,27 @@ def lookup_five_articles_mapping(
         return _review_result(version=version, detail=version_issue)
 
     normalized_codes = _normalize_lookup_codes(
-        enterprise_four_digit_code=enterprise_four_digit_code,
+        enterprise_industry_code=enterprise_industry_code,
         enterprise_major_category_code=enterprise_major_category_code,
-        loan_direction_four_digit_code=loan_direction_four_digit_code,
+        enterprise_middle_category_code=enterprise_middle_category_code,
+        loan_direction_industry_code=loan_direction_industry_code,
         loan_direction_major_category_code=loan_direction_major_category_code,
+        loan_direction_middle_category_code=loan_direction_middle_category_code,
     )
     if isinstance(normalized_codes, str):
         return _review_result(version=version, detail=normalized_codes)
 
-    enterprise_rows = _query_explicit_rows(
+    enterprise_rows = _query_preferred_rows(
         session,
         version_id=version.id,
         scenario_id=scenario_id,
-        four_digit_code=normalized_codes[0],
-        two_digit_code=normalized_codes[1],
+        codes=normalized_codes[0],
     )
-    loan_direction_rows = _query_explicit_rows(
+    loan_direction_rows = _query_preferred_rows(
         session,
         version_id=version.id,
         scenario_id=scenario_id,
-        four_digit_code=normalized_codes[2],
-        two_digit_code=normalized_codes[3],
+        codes=normalized_codes[1],
     )
 
     enterprise_issue = _validate_query_rows(enterprise_rows)
@@ -128,8 +155,8 @@ def lookup_five_articles_mapping(
         issue = enterprise_issue or loan_direction_issue
         return _review_result(version=version, detail=issue or "mapping_query_conflict")
 
-    enterprise_labels = _prefer_most_specific_labels(enterprise_rows)
-    loan_direction_labels = _prefer_most_specific_labels(loan_direction_rows)
+    enterprise_labels = tuple(_row_to_label(row) for row in enterprise_rows)
+    loan_direction_labels = tuple(_row_to_label(row) for row in loan_direction_rows)
     if not loan_direction_labels:
         return FiveArticlesMappingLookupResult(
             status="not_applicable",
@@ -202,64 +229,86 @@ def _validate_published_version(
 
 def _normalize_lookup_codes(
     *,
-    enterprise_four_digit_code: str,
+    enterprise_industry_code: str,
     enterprise_major_category_code: str,
-    loan_direction_four_digit_code: str,
+    enterprise_middle_category_code: str | None,
+    loan_direction_industry_code: str,
     loan_direction_major_category_code: str,
-) -> tuple[str, str, str, str] | str:
-    values = (
-        ("enterprise_four_digit_code", enterprise_four_digit_code, "four"),
-        ("enterprise_major_category_code", enterprise_major_category_code, "major"),
-        ("loan_direction_four_digit_code", loan_direction_four_digit_code, "four"),
-        (
-            "loan_direction_major_category_code",
-            loan_direction_major_category_code,
-            "major",
-        ),
+    loan_direction_middle_category_code: str | None,
+) -> tuple[tuple[tuple[int, str], ...], tuple[tuple[int, str], ...]] | str:
+    enterprise_codes = _normalize_side_codes(
+        side="enterprise",
+        industry_code=enterprise_industry_code,
+        major_category_code=enterprise_major_category_code,
+        middle_category_code=enterprise_middle_category_code,
     )
-    normalized: list[str] = []
-    for field, raw_value, code_type in values:
-        value = str(raw_value).strip()
-        if code_type == "four":
-            if FOUR_DIGIT_CODE_PATTERN.fullmatch(value) is None:
-                return f"invalid_stage_a_code:{field}"
-            normalized.append(value)
-            continue
-        match = MAJOR_CATEGORY_CODE_PATTERN.fullmatch(value)
-        if match is None:
-            return f"invalid_stage_a_code:{field}"
-        normalized.append(match.group(1))
-    return normalized[0], normalized[1], normalized[2], normalized[3]
+    if isinstance(enterprise_codes, str):
+        return enterprise_codes
+    loan_direction_codes = _normalize_side_codes(
+        side="loan_direction",
+        industry_code=loan_direction_industry_code,
+        major_category_code=loan_direction_major_category_code,
+        middle_category_code=loan_direction_middle_category_code,
+    )
+    if isinstance(loan_direction_codes, str):
+        return loan_direction_codes
+    return enterprise_codes, loan_direction_codes
 
 
-def _query_explicit_rows(
+def _normalize_side_codes(
+    *,
+    side: str,
+    industry_code: str,
+    major_category_code: str,
+    middle_category_code: str | None,
+) -> tuple[tuple[int, str], ...] | str:
+    industry_match = INDUSTRY_CODE_PATTERN.fullmatch(str(industry_code).strip())
+    if industry_match is None:
+        return f"invalid_stage_a_code:{side}_industry_code"
+    major_match = MAJOR_CATEGORY_CODE_PATTERN.fullmatch(str(major_category_code).strip())
+    if major_match is None:
+        return f"invalid_stage_a_code:{side}_major_category_code"
+
+    actual_code = industry_match.group(1)
+    major_code = major_match.group(1)
+    if len(actual_code) == 2:
+        return ((2, actual_code),)
+    if len(actual_code) == 3:
+        return ((3, actual_code), (2, major_code))
+
+    if middle_category_code is None:
+        return ((4, actual_code), (2, major_code))
+    middle_match = MIDDLE_CATEGORY_CODE_PATTERN.fullmatch(
+        str(middle_category_code).strip()
+    )
+    if middle_match is None:
+        return f"invalid_stage_a_code:{side}_middle_category_code"
+    return ((4, actual_code), (3, middle_match.group(1)), (2, major_code))
+
+
+def _query_preferred_rows(
     session: Session,
     *,
     version_id: int,
     scenario_id: str,
-    four_digit_code: str,
-    two_digit_code: str,
+    codes: tuple[tuple[int, str], ...],
 ) -> tuple[FiveArticlesMappingRow, ...]:
-    return tuple(
-        session.scalars(
-            select(FiveArticlesMappingRow)
-            .where(
-                FiveArticlesMappingRow.mapping_version_id == version_id,
-                FiveArticlesMappingRow.scenario_id == scenario_id,
-                or_(
-                    and_(
-                        FiveArticlesMappingRow.code_level == 4,
-                        FiveArticlesMappingRow.neic_code == four_digit_code,
-                    ),
-                    and_(
-                        FiveArticlesMappingRow.code_level == 2,
-                        FiveArticlesMappingRow.neic_code == two_digit_code,
-                    ),
-                ),
-            )
-            .order_by(FiveArticlesMappingRow.source_row, FiveArticlesMappingRow.id)
-        ).all()
-    )
+    for code_level, code in codes:
+        rows = tuple(
+            session.scalars(
+                select(FiveArticlesMappingRow)
+                .where(
+                    FiveArticlesMappingRow.mapping_version_id == version_id,
+                    FiveArticlesMappingRow.scenario_id == scenario_id,
+                    FiveArticlesMappingRow.code_level == code_level,
+                    FiveArticlesMappingRow.neic_code == code,
+                )
+                .order_by(FiveArticlesMappingRow.source_row, FiveArticlesMappingRow.id)
+            ).all()
+        )
+        if rows:
+            return rows
+    return ()
 
 
 def _validate_query_rows(rows: tuple[FiveArticlesMappingRow, ...]) -> str | None:

@@ -168,7 +168,7 @@ def test_valid_mapping_uses_headers_normalizes_values_and_publishes_all_rows(
         path,
         (
             _mapping_row("27\u3000", " 医药制造业 ", tier2="", tier3=None),
-            _mapping_row(2710.0, "化学药品原料药制造"),
+            _mapping_row(2710.0, "\ufeff化学药品原料药制造"),
             _mapping_row(
                 "2710",
                 "化学药品原料药制造",
@@ -220,6 +220,26 @@ def test_valid_mapping_uses_headers_normalizes_values_and_publishes_all_rows(
         "NEIC_Code",
         "NEIC_Name",
     }
+
+
+def test_bom_is_ignored_for_mapping_content_hash_and_catalog_name_matching(
+    tmp_path: Path,
+    mapping_sync_context: tuple[Session, Settings, str, int],
+) -> None:
+    session, settings, scenario_id, _ = mapping_sync_context
+    clean_path = tmp_path / "clean.xlsx"
+    bom_path = tmp_path / "bom.xlsx"
+    _write_mapping(clean_path, (_mapping_row("2710", "化学药品原料药制造"),))
+    _write_mapping(bom_path, (_mapping_row("2710", "\ufeff化学药品原料药制造"),))
+
+    clean_source = read_mapping_source(clean_path)
+    bom_source = read_mapping_source(bom_path)
+    result = synchronize_technology_finance_mapping(
+        session, bom_source, settings, scenario_id=scenario_id
+    )
+
+    assert bom_source.source_hash == clean_source.source_hash
+    assert result.version.status == "published"
 
 
 def test_four_digit_name_code_conflict_creates_invalid_version(

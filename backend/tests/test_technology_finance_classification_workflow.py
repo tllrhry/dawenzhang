@@ -100,9 +100,11 @@ def _persist_stage_a(
         status=status,
         industry_code="3011" if status == "completed" else None,
         industry_major_code="C30" if status == "completed" else None,
+        industry_middle_code="C301" if status == "completed" else None,
         industry_name="工业设备制造" if status == "completed" else None,
         loan_industry_code="2710" if status == "completed" else None,
         loan_industry_major_code="C27" if status == "completed" else None,
+        loan_industry_middle_code="C271" if status == "completed" else None,
         loan_industry_name="化学药品原料药制造" if status == "completed" else None,
         loan_matching_basis=("贷款用于化学药品项目" if status == "completed" else None),
         rationale="Stage A 测试依据",
@@ -209,6 +211,8 @@ def test_stage_b_failure_preserves_stage_a_and_retry_reuses_it_idempotently(
             NationalEconomyClassificationResult.case_id == case.id
         )
     ) == 1
+    assert mapping_lookup.call_args.kwargs["enterprise_middle_category_code"] == "C301"
+    assert mapping_lookup.call_args.kwargs["loan_direction_middle_category_code"] == "C271"
 
     successful_stage_b = MagicMock(return_value=_stage_b_decision())
     retry = classify_technology_finance_case(

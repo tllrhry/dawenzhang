@@ -9,6 +9,7 @@ from app.db.session import get_sessionmaker
 from app.models import FiveArticlesMappingRow, FiveArticlesMappingVersion
 from app.services.technology_finance_mapping_query import (
     FiveArticlesMappingLookupResult,
+    lookup_five_articles_hierarchy_mapping,
     lookup_five_articles_mapping,
 )
 
@@ -121,6 +122,29 @@ def _lookup(
         enterprise_major_category_code=enterprise_major_category_code,
         loan_direction_four_digit_code=loan_direction_four_digit_code,
         loan_direction_major_category_code=loan_direction_major_category_code,
+    )
+
+
+def _lookup_hierarchy(
+    session: Session,
+    scenario_id: str,
+    *,
+    enterprise_industry_code: str = "3011",
+    enterprise_major_category_code: str = "C30",
+    enterprise_middle_category_code: str | None = "C301",
+    loan_direction_industry_code: str = "2710",
+    loan_direction_major_category_code: str = "C27",
+    loan_direction_middle_category_code: str | None = "C271",
+) -> FiveArticlesMappingLookupResult:
+    return lookup_five_articles_hierarchy_mapping(
+        session,
+        scenario_id=scenario_id,
+        enterprise_industry_code=enterprise_industry_code,
+        enterprise_major_category_code=enterprise_major_category_code,
+        enterprise_middle_category_code=enterprise_middle_category_code,
+        loan_direction_industry_code=loan_direction_industry_code,
+        loan_direction_major_category_code=loan_direction_major_category_code,
+        loan_direction_middle_category_code=loan_direction_middle_category_code,
     )
 
 
@@ -326,7 +350,7 @@ def test_explicit_two_digit_row_is_a_valid_mapping_hit(
     ]
 
 
-def test_both_levels_and_multiple_themes_preserve_all_distinct_paths(
+def test_four_digit_mapping_takes_precedence_over_lower_granularity_rows(
     mapping_query_context: tuple[Session, str],
 ) -> None:
     session, scenario_id = mapping_query_context
@@ -358,13 +382,10 @@ def test_both_levels_and_multiple_themes_preserve_all_distinct_paths(
         ),
     )
 
-    result = _lookup(session, scenario_id)
+    result = _lookup_hierarchy(session, scenario_id)
 
     assert result.status == "mapping_hit"
-    assert {
-        (label.subject, label.neic_code) for label in result.loan_direction_labels
-    } == {
-        ("大类整体主题", "27"),
+    assert {(label.subject, label.neic_code) for label in result.loan_direction_labels} == {
         ("高技术产业（制造业）", "2710"),
         ("国家科技重大项目", "2710"),
     }
@@ -403,7 +424,7 @@ def test_same_theme_ancestor_two_digit_label_is_removed(
     ]
 
 
-def test_two_digit_label_is_kept_as_fallback_for_a_theme_without_four_digit_hit(
+def test_lower_granularity_rows_are_not_combined_with_a_four_digit_hit(
     mapping_query_context: tuple[Session, str],
 ) -> None:
     session, scenario_id = mapping_query_context
@@ -428,12 +449,105 @@ def test_two_digit_label_is_kept_as_fallback_for_a_theme_without_four_digit_hit(
         ),
     )
 
-    result = _lookup(session, scenario_id)
+    result = _lookup_hierarchy(session, scenario_id)
 
     assert {(label.subject, label.neic_code) for label in result.loan_direction_labels} == {
-        ("大类兜底主题", "27"),
         ("四位独立主题", "2710"),
     }
+
+
+def test_three_digit_mapping_is_used_when_four_digit_mapping_is_absent(
+    mapping_query_context: tuple[Session, str],
+) -> None:
+    session, scenario_id = mapping_query_context
+    _add_version(
+        session,
+        scenario_id,
+        rows=(
+            _mapping_row(
+                neic_code="27",
+                neic_name="医药制造业",
+                subject="大类兜底主题",
+                tier1="医药制造业整体",
+                source_row=2,
+            ),
+            _mapping_row(
+                neic_code="271",
+                neic_name="化学药品原料药制造",
+                subject="中类主题",
+                tier1="化学药品制造",
+                source_row=3,
+            ),
+        ),
+    )
+
+    result = _lookup_hierarchy(session, scenario_id)
+
+    assert [(label.neic_code, label.code_level) for label in result.loan_direction_labels] == [
+        ("271", 3)
+    ]
+
+
+def test_two_digit_mapping_is_the_final_fallback(
+    mapping_query_context: tuple[Session, str],
+) -> None:
+    session, scenario_id = mapping_query_context
+    _add_version(
+        session,
+        scenario_id,
+        rows=(
+            _mapping_row(
+                neic_code="27",
+                neic_name="医药制造业",
+                subject="大类兜底主题",
+                tier1="医药制造业整体",
+                source_row=2,
+            ),
+        ),
+    )
+
+    result = _lookup_hierarchy(session, scenario_id)
+
+    assert [(label.neic_code, label.code_level) for label in result.loan_direction_labels] == [
+        ("27", 2)
+    ]
+
+
+def test_three_digit_stage_a_result_uses_its_own_mapping_before_major_fallback(
+    mapping_query_context: tuple[Session, str],
+) -> None:
+    session, scenario_id = mapping_query_context
+    _add_version(
+        session,
+        scenario_id,
+        rows=(
+            _mapping_row(
+                neic_code="27",
+                neic_name="医药制造业",
+                subject="大类兜底主题",
+                tier1="医药制造业整体",
+                source_row=2,
+            ),
+            _mapping_row(
+                neic_code="271",
+                neic_name="化学药品制造",
+                subject="中类主题",
+                tier1="化学药品制造",
+                source_row=3,
+            ),
+        ),
+    )
+
+    result = _lookup_hierarchy(
+        session,
+        scenario_id,
+        loan_direction_industry_code="C271",
+        loan_direction_middle_category_code=None,
+    )
+
+    assert [(label.neic_code, label.code_level) for label in result.loan_direction_labels] == [
+        ("271", 3)
+    ]
 
 
 def test_normal_loan_direction_miss_is_not_applicable(

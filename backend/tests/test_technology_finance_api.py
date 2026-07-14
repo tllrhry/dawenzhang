@@ -522,6 +522,23 @@ def test_agriculture_related_template_is_available(client: TestClient) -> None:
     assert response.content == get_settings().agriculture_related_template_path.read_bytes()
 
 
+def test_scenario_template_returns_service_unavailable_when_asset_is_missing(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        ScenarioRegistration,
+        "template_path",
+        lambda self: tmp_path / "missing.docx",
+    )
+
+    response = client.get("/api/v1/scenarios/agriculture_related/template")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "场景模板暂未就绪，请联系管理员配置模板资产"
+
+
 def test_agriculture_related_case_upload_is_available(client: TestClient) -> None:
     template_path = get_settings().agriculture_related_template_path
 

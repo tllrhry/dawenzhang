@@ -109,8 +109,14 @@ def download_template() -> StreamingResponse:
 @router.get("/scenarios/{scenario_id}/template")
 def download_scenario_template(scenario_id: str) -> StreamingResponse:
     registration = _get_available_scenario(scenario_id)
+    template_path = registration.template_path()
+    if not template_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="场景模板暂未就绪，请联系管理员配置模板资产",
+        )
     return _download_response(
-        registration.template_path().read_bytes(),
+        template_path.read_bytes(),
         DOCX_MIME,
         f"{scenario_id.replace('_', '-')}-template.docx",
     )

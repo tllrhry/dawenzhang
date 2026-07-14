@@ -25,8 +25,13 @@ FARMER_FIELD_KEYS = (
     "farmer_nonlocal_resident_over_one_year",
     "farmer_state_farm_employee_or_rural_individual_business",
 )
-_OPERATING_KEYWORDS = ("经营性", "经营", "流动资金", "生产", "周转")
+_OPERATING_KEYWORDS = ("经营性", "经营", "流动资金", "流贷", "生产", "周转")
 _NON_OPERATING_KEYWORDS = ("个人消费", "消费", "按揭", "住房", "车贷")
+_OPERATING_EVIDENCE_FIELDS = (
+    "credit_variety",
+    "loan_purpose",
+    "credit_approval_opinion",
+)
 
 
 def determine_inclusive_finance(
@@ -210,12 +215,27 @@ def _determine_borrower_type(raw: Mapping[str, str]) -> str:
 
 
 def _determine_operating_loan(raw: Mapping[str, str]) -> tuple[bool | None, str | None]:
-    variety_result = _classify_operating_text(raw["credit_variety"])
-    if variety_result is not None:
-        return variety_result, "credit_variety"
-    purpose_result = _classify_operating_text(raw["loan_purpose"])
-    if purpose_result is not None:
-        return purpose_result, "loan_purpose"
+    """Determine operating nature from all structured loan evidence.
+
+    A document may abbreviate the product type (for example, ``流贷``) or only
+    state the nature in the approval opinion.  One explicit positive source is
+    sufficient; contradictory positive and non-operating evidence is preserved
+    for manual review rather than resolved by field order.
+    """
+    operating_sources: list[str] = []
+    non_operating_sources: list[str] = []
+    for field in _OPERATING_EVIDENCE_FIELDS:
+        result = _classify_operating_text(raw[field])
+        if result is True:
+            operating_sources.append(field)
+        elif result is False:
+            non_operating_sources.append(field)
+    if operating_sources and non_operating_sources:
+        return None, None
+    if operating_sources:
+        return True, ",".join(operating_sources)
+    if non_operating_sources:
+        return False, ",".join(non_operating_sources)
     return None, None
 
 
@@ -270,7 +290,8 @@ def _result(**values: object) -> dict[str, object]:
 def _evidence_keys() -> tuple[str, ...]:
     return (
         "entity_type", "enterprise_scale_type", "total_assets", "annual_revenue",
-        "employee_count", "credit_amount", "credit_variety", "loan_purpose", *FARMER_FIELD_KEYS,
+        "employee_count", "credit_amount", "credit_variety", "loan_purpose",
+        "credit_approval_opinion", *FARMER_FIELD_KEYS,
     )
 
 

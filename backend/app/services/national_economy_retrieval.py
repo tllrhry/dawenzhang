@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.models import NationalEconomyIndustryChunk
+from app.models import NationalEconomyCatalogVersion, NationalEconomyIndustryChunk
 from app.services.national_economy_catalog_chunks import embed_texts
 from app.services.national_economy_decision_policy import (
     EvidenceFact,
@@ -107,6 +107,7 @@ EmbeddingRequest = Callable[[Sequence[str]], Sequence[Sequence[float]]]
 def recall_industry_chunks(
     session: Session,
     query_embedding: Sequence[float],
+    catalog_version_id: int,
 ) -> tuple[RecallHit, ...]:
     distance = NationalEconomyIndustryChunk.embedding.cosine_distance(list(query_embedding))
     statement = (
@@ -123,6 +124,7 @@ def recall_industry_chunks(
             NationalEconomyIndustryChunk.source_row,
             distance.label("distance"),
         )
+        .where(NationalEconomyIndustryChunk.catalog_version_id == catalog_version_id)
         .order_by(distance)
         .limit(RECALL_LIMIT)
     )
@@ -297,6 +299,7 @@ def rerank_candidates(
 def complete_finalist_catalog_fragments(
     session: Session,
     snapshots: Sequence[EvidenceSnapshot],
+    catalog_version_id: int,
 ) -> tuple[EvidenceSnapshot, ...]:
     if not snapshots:
         return ()
@@ -313,7 +316,10 @@ def complete_finalist_catalog_fragments(
         NationalEconomyIndustryChunk.text,
         NationalEconomyIndustryChunk.chunk_type,
         NationalEconomyIndustryChunk.source_row,
-    ).where(NationalEconomyIndustryChunk.industry_code.in_(finalist_codes))
+    ).where(
+        NationalEconomyIndustryChunk.catalog_version_id == catalog_version_id,
+        NationalEconomyIndustryChunk.industry_code.in_(finalist_codes),
+    )
     rows = session.execute(statement).all()
 
     catalog_hits: dict[str, list[RecallHit]] = {}
@@ -382,6 +388,7 @@ def retrieve_industry_evidence(
     embedding_request: EmbeddingRequest | None = None,
     rerank_client: httpx.Client | None = None,
 ) -> tuple[EvidenceSnapshot, ...]:
+    catalog_version_id = _current_catalog_version_id(session, settings)
     ordered_evidence = _ordered_available_layers(evidence_layers)
     if not ordered_evidence:
         raise ValueError("at least one usable evidence layer is required")
@@ -393,7 +400,7 @@ def retrieve_industry_evidence(
     if any(len(embedding) != settings.embedding_dimension for embedding in embeddings):
         raise ValueError("query embedding dimension does not match configuration")
     layer_hits = tuple(
-        (layer, recall_industry_chunks(session, embedding))
+        (layer, recall_industry_chunks(session, embedding, catalog_version_id))
         for layer, embedding in zip(ordered_evidence, embeddings, strict=True)
     )
     candidates = aggregate_layer_recall_hits(layer_hits)
@@ -406,6 +413,7 @@ def retrieve_industry_evidence(
             top_n=top_n,
             client=rerank_client,
         ),
+        catalog_version_id,
     )
 
 
@@ -417,6 +425,7 @@ def retrieve_loan_direction_evidence(
     embedding_request: EmbeddingRequest | None = None,
     rerank_client: httpx.Client | None = None,
 ) -> tuple[EvidenceSnapshot, ...]:
+    catalog_version_id = _current_catalog_version_id(session, settings)
     ordered_evidence = _ordered_available_layers(evidence_layers)
     loan_purpose_layer = next(
         (
@@ -498,7 +507,7 @@ def retrieve_loan_direction_evidence(
         raise ValueError("query embedding dimension does not match configuration")
 
     layer_hits = tuple(
-        (layer, recall_industry_chunks(session, embedding))
+        (layer, recall_industry_chunks(session, embedding, catalog_version_id))
         for layer, embedding in zip(query_layers, embeddings, strict=True)
     )
     candidates = aggregate_layer_recall_hits(layer_hits)
@@ -511,6 +520,7 @@ def retrieve_loan_direction_evidence(
             top_n=top_n,
             client=rerank_client,
         ),
+        catalog_version_id,
     )
 
 
@@ -533,6 +543,26 @@ def serialize_evidence_layer(layer: EvidenceLayer) -> str:
         )
     facts = "\n".join(serialized_facts)
     return f"priority={int(layer.level)} level={layer.level.name}\n{facts}"
+
+
+def _current_catalog_version_id(session: Session, settings: Settings) -> int:
+    version = session.scalar(
+        select(NationalEconomyCatalogVersion.id)
+        .where(
+            NationalEconomyCatalogVersion.embedding_model
+            == settings.siliconflow_embedding_model,
+            NationalEconomyCatalogVersion.embedding_dimension
+            == settings.embedding_dimension,
+        )
+        .order_by(
+            NationalEconomyCatalogVersion.created_at.desc(),
+            NationalEconomyCatalogVersion.id.desc(),
+        )
+        .limit(1)
+    )
+    if version is None:
+        raise RuntimeError("current national-economy catalog version not found")
+    return version
 
 
 def serialize_ordered_evidence(evidence_layers: Sequence[EvidenceLayer]) -> str:

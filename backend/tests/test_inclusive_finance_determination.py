@@ -17,6 +17,7 @@ def _payload(**overrides: object) -> dict[str, object]:
         "credit_amount": "1000万元",
         "credit_variety": "流动资金贷款",
         "loan_purpose": "采购原材料用于生产经营",
+        "credit_approval_opinion": "",
         "farmer_long_term_town_resident": "否",
         "farmer_town_village_resident": "否",
         "farmer_nonlocal_resident_over_one_year": "否",
@@ -80,6 +81,64 @@ def test_unknown_operating_nature_needs_review() -> None:
 
     assert result["status"] == "needs_review"
     assert "经营性贷款判定" in result["basis"]
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_source"),
+    (
+        ({"credit_variety": "流贷", "loan_purpose": "购买种子"}, "credit_variety"),
+        (
+            {
+                "credit_variety": "一般贷款",
+                "loan_purpose": "购买种子",
+                "credit_approval_opinion": "本笔为流动资金贷款，用于生产农资",
+            },
+            "credit_approval_opinion",
+        ),
+    ),
+)
+def test_operating_loan_uses_all_structured_loan_evidence(
+    payload: dict[str, object], expected_source: str
+) -> None:
+    result = determine_inclusive_finance(
+        _payload(entity_type="农户", credit_amount="100万元", **payload), _stage_a()
+    )
+
+    assert result["status"] == "completed"
+    assert result["inclusive_category"] == "农户经营性贷款"
+    assert result["determination"]["operating_determination_source"] == expected_source
+
+
+def test_conflicting_operating_evidence_needs_review() -> None:
+    result = determine_inclusive_finance(
+        _payload(
+            entity_type="农户",
+            credit_variety="个人消费贷款",
+            loan_purpose="采购原材料用于生产",
+        ),
+        _stage_a(),
+    )
+
+    assert result["status"] == "needs_review"
+    assert result["is_operating_loan"] is None
+
+
+def test_medium_software_enterprise_is_not_inclusive_after_operating_loan_is_confirmed() -> None:
+    result = determine_inclusive_finance(
+        _payload(
+            entity_type="企业",
+            annual_revenue="5000万",
+            employee_count="2025",
+            total_assets="10000万",
+            credit_amount="900万",
+            credit_variety="流贷",
+        ),
+        _stage_a("6510", "I65"),
+    )
+
+    assert result["computed_size"] == "中型"
+    assert result["status"] == "not_applicable"
+    assert "不属于小微企业" in result["basis"]
 
 
 @pytest.mark.parametrize(

@@ -63,11 +63,12 @@ def test_recall_uses_pgvector_cosine_distance_and_top_30() -> None:
         )
     ]
 
-    hits = recall_industry_chunks(session, [0.1, 0.2, 0.3])
+    hits = recall_industry_chunks(session, [0.1, 0.2, 0.3], catalog_version_id=7)
 
     statement = session.execute.call_args.args[0]
     sql = str(statement.compile(dialect=postgresql.dialect()))
     assert "<=>" in sql
+    assert "catalog_version_id" in sql
     assert statement._limit_clause.value == RECALL_LIMIT
     assert hits[0].industry_code == "0111"
     assert hits[0].major_category_code == "A01"
@@ -207,7 +208,9 @@ def test_complete_finalists_adds_all_catalog_fragments_without_reordering() -> N
         ),
     )
 
-    completed = complete_finalist_catalog_fragments(session, finalists)
+    completed = complete_finalist_catalog_fragments(
+        session, finalists, catalog_version_id=7
+    )
 
     statement = session.execute.call_args.args[0]
     assert set(statement.compile().params["industry_code_1"]) == {"5111", "5221"}

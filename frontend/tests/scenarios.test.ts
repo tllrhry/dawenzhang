@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  AGRICULTURE_RELATED_SCENARIO,
   DIGITAL_FINANCE_SCENARIO,
   GREEN_FINANCE_SCENARIO,
   NATIONAL_ECONOMY_SCENARIO,
@@ -9,7 +10,6 @@ import {
   TECHNOLOGY_FINANCE_SCENARIO,
   INCLUSIVE_FINANCE_SCENARIO,
   caseMatchesScenario,
-  comingSoonScenarios,
   currentCaseStorageKey,
   fiveArticlesScenarioIds,
   isFiveArticlesScenario,
@@ -30,11 +30,11 @@ test('国民经济与五个五篇子场景均有独立可执行入口', () => {
   assert.equal(isFiveArticlesScenario(NATIONAL_ECONOMY_SCENARIO), false)
 })
 
-test('涉农只登记为暂未开放且不产生执行入口', () => {
-  assert.deepEqual(comingSoonScenarios.map(({ id }) => id), [
-    'agriculture_related',
-  ])
-  assert.ok(comingSoonScenarios.every(({ id }) => !(id in scenarioViews)))
+test('涉农场景是正式可用入口且不再属于暂未开放场景', () => {
+  assert.equal(scenarioViews[AGRICULTURE_RELATED_SCENARIO].classifyPath, '/scenarios/agriculture_related/classify')
+  assert.equal(scenarioViews[AGRICULTURE_RELATED_SCENARIO].historyPath, '/scenarios/agriculture_related/history')
+  assert.equal(templateScenarioId(AGRICULTURE_RELATED_SCENARIO), AGRICULTURE_RELATED_SCENARIO)
+  assert.equal(isFiveArticlesScenario(AGRICULTURE_RELATED_SCENARIO), false)
 })
 
 test('API 路径和 session key 完整携带场景，切换和错配均不复用案例', () => {

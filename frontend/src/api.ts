@@ -5,7 +5,7 @@ import {
 } from './scenarios'
 import type { ScenarioId } from './scenarios'
 
-export { DIGITAL_FINANCE_SCENARIO, GREEN_FINANCE_SCENARIO, INCLUSIVE_FINANCE_SCENARIO, NATIONAL_ECONOMY_SCENARIO, PENSION_FINANCE_SCENARIO, TECHNOLOGY_FINANCE_SCENARIO } from './scenarios'
+export { AGRICULTURE_RELATED_SCENARIO, DIGITAL_FINANCE_SCENARIO, GREEN_FINANCE_SCENARIO, INCLUSIVE_FINANCE_SCENARIO, NATIONAL_ECONOMY_SCENARIO, PENSION_FINANCE_SCENARIO, TECHNOLOGY_FINANCE_SCENARIO } from './scenarios'
 export type { ScenarioId } from './scenarios'
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '')
@@ -114,8 +114,39 @@ export interface InclusiveFinanceWorkflowResult {
   stage_b: InclusiveFinanceResult | null
 }
 
-export type ClassificationOutcome = ClassificationResult | TechnologyFinanceWorkflowResult | InclusiveFinanceWorkflowResult
-export type ClassificationHistoryItem = ClassificationResult | FiveArticlesResult | InclusiveFinanceResult
+export type AgricultureRelatedStatus = FiveArticlesStatus
+
+export interface AgricultureRelatedCategory {
+  category: number
+  category_name: string
+  result: 'matched' | 'not_matched' | 'not_applicable' | 'needs_review'
+  basis: string
+  method: string
+  evidence_refs: EvidenceReference[]
+  model_output?: Record<string, unknown> | null
+}
+
+export interface AgricultureRelatedResult {
+  id: string
+  version: number
+  status: AgricultureRelatedStatus
+  stage_a_result_id: string
+  is_agriculture_related: boolean | null
+  matched_categories: AgricultureRelatedCategory[]
+  basis: string | null
+  evidence_refs: EvidenceReference[]
+  model_output: Record<string, unknown> | null
+  error_detail: string | null
+  created_at: string
+}
+
+export interface AgricultureRelatedWorkflowResult {
+  stage_a: ClassificationResult
+  stage_b: AgricultureRelatedResult | null
+}
+
+export type ClassificationOutcome = ClassificationResult | TechnologyFinanceWorkflowResult | InclusiveFinanceWorkflowResult | AgricultureRelatedWorkflowResult
+export type ClassificationHistoryItem = ClassificationResult | FiveArticlesResult | InclusiveFinanceResult | AgricultureRelatedResult
 
 export interface ClassificationCase {
   id: string

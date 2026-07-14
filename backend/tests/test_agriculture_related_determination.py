@@ -2,12 +2,14 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from unittest.mock import MagicMock
 
 from app.core.config import Settings
 from app.services.agriculture_related_determination import (
     AgricultureRelatedAIError,
     determine_category_four,
     determine_category_two,
+    determine_agriculture_related,
     determine_agriculture_industry_loan_category,
     determine_farmer_loan_category,
 )
@@ -258,3 +260,51 @@ def test_category_four_ai_can_match_or_request_review() -> None:
         review = determine_category_four({"loan_purpose": "办公设备采购"}, {"result": "not_matched"}, _ai_settings(), client)
     assert matched["result"] == "matched"
     assert review["result"] == "needs_review"
+
+
+def test_aggregate_evaluates_all_four_categories_after_multiple_matches() -> None:
+    payload = {
+        FARMER_FIELDS[0]: "是",
+        "registered_address": "江苏省某乡某村",
+    }
+    result = determine_agriculture_related(payload, _stage_a(
+        industry_category_name="农、林、牧、渔业",
+        industry_code="0111", industry_major_code="A01", industry_middle_code="A011",
+        industry_middle_name="谷物种植", industry_name="稻谷种植",
+    ), _ai_settings())
+
+    assert result["status"] == "completed"
+    assert result["is_agriculture_related"] is True
+    assert len(result["matched_categories"]) == 4
+    assert [item["category"] for item in result["matched_categories"]] == [1, 3, 2, 4]
+    assert {item["category"] for item in result["matched_categories"] if item["result"] == "matched"} == {1, 2, 3}
+
+
+def test_aggregate_all_non_matches_is_not_applicable() -> None:
+    with _ai_client({"label": "均不属于", "basis": "贷款用途为办公设备采购"}) as client:
+        result = determine_agriculture_related(
+            {"registered_address": "南京市鼓楼区", "loan_purpose": "办公设备采购"},
+            _stage_a(), _ai_settings(), client,
+        )
+    assert result["status"] == "not_applicable"
+    assert result["is_agriculture_related"] is False
+    assert all(item["result"] in {"not_matched", "not_applicable"} for item in result["matched_categories"])
+
+
+def test_aggregate_review_without_match_is_needs_review() -> None:
+    result = determine_agriculture_related({}, _stage_a(), _ai_settings())
+
+    assert result["status"] == "needs_review"
+    assert result["is_agriculture_related"] is None
+    assert any(item["result"] == "needs_review" for item in result["matched_categories"])
+
+
+def test_aggregate_propagates_downstream_ai_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+    determiner = MagicMock(side_effect=AssertionError("sentinel"))
+    monkeypatch.setattr(
+        "app.services.agriculture_related_determination.determine_category_two",
+        determiner,
+    )
+    with pytest.raises(AssertionError, match="sentinel"):
+        determine_agriculture_related({}, _stage_a(), _ai_settings())
+    determiner.assert_called_once()

@@ -14,6 +14,7 @@ from typing import Protocol
 import httpx
 
 from app.core.config import Settings
+from app.core.config import get_settings
 
 from app.services.national_economy_result_presentation import (
     format_industry_display_code,
@@ -44,6 +45,63 @@ class AgricultureRelatedAIError(RuntimeError):
 
 class StageAResult(Protocol):
     """The Stage A attributes used by category three."""
+
+
+def determine_agriculture_related(
+    input_payload: Mapping[str, object],
+    stage_a_result: StageAResult | Mapping[str, object],
+    settings: Settings | None = None,
+    client: httpx.Client | None = None,
+) -> dict[str, object]:
+    """Evaluate all four agriculture categories and aggregate their outcomes.
+
+    Category order is intentional: the two zero-cost checks run first, followed
+    by address and use checks.  A match never short-circuits the remaining checks.
+    """
+    resolved_settings = settings or get_settings()
+    category_results = [
+        determine_farmer_loan_category(input_payload),
+        determine_agriculture_industry_loan_category(stage_a_result),
+    ]
+    category_two = determine_category_two(input_payload, resolved_settings, client)
+    category_results.append(category_two)
+    category_results.append(
+        determine_category_four(input_payload, category_two, resolved_settings, client)
+    )
+
+    matched = [item for item in category_results if item.get("result") == "matched"]
+    needs_review = [item for item in category_results if item.get("result") == "needs_review"]
+    if matched:
+        status = "completed"
+        is_agriculture_related: bool | None = True
+    elif needs_review:
+        status = "needs_review"
+        is_agriculture_related = None
+    else:
+        status = "not_applicable"
+        is_agriculture_related = False
+
+    evidence_refs = [
+        ref
+        for item in category_results
+        for ref in item.get("evidence_refs", [])
+        if isinstance(ref, dict)
+    ]
+    model_output = {
+        str(item["category"]): item["model_output"]
+        for item in category_results
+        if item.get("model_output") is not None
+    } or None
+    return {
+        "status": status,
+        "is_agriculture_related": is_agriculture_related,
+        "matched_categories": category_results,
+        "basis": "；".join(
+            str(item.get("basis", "")) for item in category_results if item.get("basis")
+        ),
+        "evidence_refs": evidence_refs,
+        "model_output": model_output,
+    }
 
 
 def determine_farmer_loan_category(

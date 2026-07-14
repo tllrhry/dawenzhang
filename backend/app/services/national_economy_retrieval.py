@@ -44,6 +44,9 @@ class RecallHit:
     distance: float
     major_category_code: str | None = None
     major_category_name: str | None = None
+    middle_category_code: str | None = None
+    middle_category_name: str | None = None
+    category_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -55,6 +58,9 @@ class IndustryCandidate:
     evidence_traces: tuple["CandidateEvidenceTrace", ...] = ()
     major_category_code: str | None = None
     major_category_name: str | None = None
+    middle_category_code: str | None = None
+    middle_category_name: str | None = None
+    category_name: str | None = None
 
     @property
     def rerank_document(self) -> str:
@@ -83,6 +89,9 @@ class EvidenceSnapshot:
     evidence_traces: tuple["CandidateEvidenceTrace", ...] = ()
     major_category_code: str | None = None
     major_category_name: str | None = None
+    middle_category_code: str | None = None
+    middle_category_name: str | None = None
+    category_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -102,8 +111,11 @@ def recall_industry_chunks(
     distance = NationalEconomyIndustryChunk.embedding.cosine_distance(list(query_embedding))
     statement = (
         select(
+            NationalEconomyIndustryChunk.category_name,
             NationalEconomyIndustryChunk.major_category_code,
             NationalEconomyIndustryChunk.major_category_name,
+            NationalEconomyIndustryChunk.middle_category_code,
+            NationalEconomyIndustryChunk.middle_category_name,
             NationalEconomyIndustryChunk.industry_code,
             NationalEconomyIndustryChunk.industry_name,
             NationalEconomyIndustryChunk.text,
@@ -125,6 +137,9 @@ def recall_industry_chunks(
             distance=float(row.distance),
             major_category_code=getattr(row, "major_category_code", None),
             major_category_name=getattr(row, "major_category_name", None),
+            middle_category_code=getattr(row, "middle_category_code", None),
+            middle_category_name=getattr(row, "middle_category_name", None),
+            category_name=getattr(row, "category_name", None),
         )
         for row in rows
     )
@@ -142,6 +157,9 @@ def aggregate_recall_hits(hits: Sequence[RecallHit]) -> tuple[IndustryCandidate,
             hits=tuple(sorted(industry_hits, key=lambda hit: hit.distance)),
             major_category_code=industry_hits[0].major_category_code,
             major_category_name=industry_hits[0].major_category_name,
+            middle_category_code=industry_hits[0].middle_category_code,
+            middle_category_name=industry_hits[0].middle_category_name,
+            category_name=industry_hits[0].category_name,
         )
         for industry_hits in grouped.values()
     ]
@@ -196,6 +214,9 @@ def aggregate_layer_recall_hits(
                 evidence_traces=traces,
                 major_category_code=first_hit.major_category_code,
                 major_category_name=first_hit.major_category_name,
+                middle_category_code=first_hit.middle_category_code,
+                middle_category_name=first_hit.middle_category_name,
+                category_name=first_hit.category_name,
             )
         )
     return tuple(sorted(candidates, key=lambda candidate: candidate.distance))
@@ -262,6 +283,9 @@ def rerank_candidates(
                     evidence_traces=candidate.evidence_traces,
                     major_category_code=candidate.major_category_code,
                     major_category_name=candidate.major_category_name,
+                    middle_category_code=candidate.middle_category_code,
+                    middle_category_name=candidate.middle_category_name,
+                    category_name=candidate.category_name,
                 )
             )
         return tuple(snapshots[:top_n])
@@ -279,8 +303,11 @@ def complete_finalist_catalog_fragments(
 
     finalist_codes = tuple(dict.fromkeys(snapshot.industry_code for snapshot in snapshots))
     statement = select(
+        NationalEconomyIndustryChunk.category_name,
         NationalEconomyIndustryChunk.major_category_code,
         NationalEconomyIndustryChunk.major_category_name,
+        NationalEconomyIndustryChunk.middle_category_code,
+        NationalEconomyIndustryChunk.middle_category_name,
         NationalEconomyIndustryChunk.industry_code,
         NationalEconomyIndustryChunk.industry_name,
         NationalEconomyIndustryChunk.text,
@@ -309,6 +336,9 @@ def complete_finalist_catalog_fragments(
                 distance=1.0,
                 major_category_code=getattr(row, "major_category_code", None),
                 major_category_name=getattr(row, "major_category_name", None),
+                middle_category_code=getattr(row, "middle_category_code", None),
+                middle_category_name=getattr(row, "middle_category_name", None),
+                category_name=getattr(row, "category_name", None),
             )
         )
 
@@ -336,6 +366,9 @@ def complete_finalist_catalog_fragments(
                 evidence_traces=snapshot.evidence_traces,
                 major_category_code=snapshot.major_category_code,
                 major_category_name=snapshot.major_category_name,
+                middle_category_code=snapshot.middle_category_code,
+                middle_category_name=snapshot.middle_category_name,
+                category_name=snapshot.category_name,
             )
         )
     return tuple(completed)

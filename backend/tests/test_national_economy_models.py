@@ -29,6 +29,9 @@ def test_model_metadata_contains_catalog_and_chunk_fields() -> None:
         "catalog_version_id",
         "major_category_code",
         "major_category_name",
+        "middle_category_code",
+        "middle_category_name",
+        "category_name",
         "industry_code",
         "industry_name",
         "source_row",
@@ -81,6 +84,12 @@ def test_model_metadata_contains_case_and_result_history_fields() -> None:
         "loan_industry_name",
         "loan_matching_basis",
         "loan_matches_enterprise",
+        "industry_middle_code",
+        "industry_middle_name",
+        "industry_category_name",
+        "loan_industry_middle_code",
+        "loan_industry_middle_name",
+        "loan_industry_category_name",
         "confidence",
         "rationale",
         "ai_summary",
@@ -199,6 +208,20 @@ def test_result_major_code_columns_are_nullable_varchar_16() -> None:
 
     for column_name in ("industry_major_code", "loan_industry_major_code"):
         assert column_name in model_columns
+        assert model_columns[column_name].nullable
+        assert str(model_columns[column_name].type) == "VARCHAR(16)"
+        assert database_columns[column_name]["nullable"]
+        assert str(database_columns[column_name]["type"]) == "VARCHAR(16)"
+
+
+def test_result_middle_code_columns_are_nullable_varchar_16() -> None:
+    model_columns = NationalEconomyClassificationResult.__table__.columns
+    inspector = inspect(get_engine())
+    database_columns = {
+        column["name"]: column
+        for column in inspector.get_columns("national_economy_classification_results")
+    }
+    for column_name in ("industry_middle_code", "loan_industry_middle_code"):
         assert model_columns[column_name].nullable
         assert str(model_columns[column_name].type) == "VARCHAR(16)"
         assert database_columns[column_name]["nullable"]

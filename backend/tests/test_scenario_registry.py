@@ -212,24 +212,26 @@ def test_technology_finance_template_path_defaults_to_existing_asset() -> None:
 
 
 @pytest.mark.parametrize(
-    ("registration", "template_name", "mapping_name", "export_sheet_name"),
+    ("registration", "template_name", "export_sheet_name"),
     (
+        (
+            TECHNOLOGY_FINANCE_REGISTRATION,
+            "technology-template.docx",
+            "科技金融判定",
+        ),
         (
             GREEN_FINANCE_REGISTRATION,
             "green-template.docx",
-            "green-mapping.xlsx",
             "绿色金融判定",
         ),
         (
             DIGITAL_FINANCE_REGISTRATION,
             "digital-template.docx",
-            "digital-mapping.xlsx",
             "数字金融判定",
         ),
         (
             PENSION_FINANCE_REGISTRATION,
             "pension-template.docx",
-            "pension-mapping.xlsx",
             "养老金融判定",
         ),
     ),
@@ -239,13 +241,12 @@ def test_new_finance_profiles_resolve_independent_execution_metadata(
     tmp_path: Path,
     registration,
     template_name: str,
-    mapping_name: str,
     export_sheet_name: str,
 ) -> None:
     template_path = tmp_path / template_name
-    mapping_path = tmp_path / mapping_name
+    mapping_path = tmp_path / "five-articles-mapping.xlsx"
     monkeypatch.setenv(registration.template_path_setting.upper(), str(template_path))
-    monkeypatch.setenv(registration.mapping_path_setting.upper(), str(mapping_path))
+    monkeypatch.setenv("FIVE_ARTICLES_MAPPING_SOURCE_PATH", str(mapping_path))
     settings = Settings(_env_file=None)
 
     assert registration.status == "available"
@@ -264,7 +265,7 @@ def test_inclusive_and_unknown_scenarios_are_not_executable_profiles() -> None:
     assert inclusive.status == "coming_soon"
     assert inclusive.workflow is None
     assert inclusive.template_path_setting is None
-    assert inclusive.mapping_path_setting is None
+    assert inclusive.uses_five_articles_mapping is False
     assert inclusive.export_sheet_name is None
     assert inclusive.is_executable_profile is False
     assert SCENARIO_REGISTRY.get("not_registered") is None
@@ -286,7 +287,7 @@ def test_inclusive_finance_profile_is_mapping_free_and_has_real_stage_a_subset()
     assert registration.status == "available"
     assert registration.parent_id == "five_major_articles"
     assert registration.workflow == "inclusive_finance_single_stage"
-    assert registration.mapping_path_setting is None
+    assert registration.uses_five_articles_mapping is False
     assert registration.export_sheet_name == "普惠金融判定"
     assert registration.is_executable_profile is True
     assert registration.stage_a_field_keys == INCLUSIVE_FINANCE_STAGE_A_FIELD_KEYS

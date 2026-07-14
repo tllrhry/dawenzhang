@@ -12,8 +12,11 @@ from app.models import NationalEconomyCatalogVersion
 
 
 EXPECTED_HEADERS = (
+    "门类",
     "大类名称",
     "大类编码",
+    "中类",
+    "中类编码",
     "小类名称",
     "小类编码",
     "小类说明",

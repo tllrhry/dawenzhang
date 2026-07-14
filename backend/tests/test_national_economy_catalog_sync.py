@@ -17,7 +17,7 @@ def write_catalog(path: Path, headers: tuple[str, ...] = EXPECTED_HEADERS) -> No
     workbook = Workbook()
     worksheet = workbook.active
     worksheet.append(headers)
-    worksheet.append(("农、林、牧、渔业", "A01", "稻谷种植", "A0111", None, "包括稻谷种植", None))
+    worksheet.append(("农、林、牧、渔业", "农业", "A01", "谷物种植", "A011", "稻谷种植", "A0111", None, "包括稻谷种植", None))
     workbook.save(path)
     workbook.close()
 

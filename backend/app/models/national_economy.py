@@ -71,6 +71,11 @@ class NationalEconomyIndustryChunk(Base):
         String(16), nullable=True, index=True
     )
     major_category_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    middle_category_code: Mapped[str | None] = mapped_column(
+        String(16), nullable=True, index=True
+    )
+    middle_category_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    category_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     industry_code: Mapped[str] = mapped_column(String(4), nullable=False, index=True)
     industry_name: Mapped[str] = mapped_column(String(255), nullable=False)
     source_row: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -131,10 +136,22 @@ class NationalEconomyClassificationResult(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     industry_code: Mapped[str | None] = mapped_column(String(4), nullable=True)
     industry_major_code: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    industry_category_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    industry_middle_code: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    industry_middle_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     industry_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     loan_industry_code: Mapped[str | None] = mapped_column(String(4), nullable=True)
     loan_industry_major_code: Mapped[str | None] = mapped_column(
         String(16), nullable=True
+    )
+    loan_industry_category_name: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+    loan_industry_middle_code: Mapped[str | None] = mapped_column(
+        String(16), nullable=True
+    )
+    loan_industry_middle_name: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
     )
     loan_industry_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     loan_matching_basis: Mapped[str | None] = mapped_column(Text, nullable=True)

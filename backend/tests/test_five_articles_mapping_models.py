@@ -33,7 +33,7 @@ def _row(
     return FiveArticlesMappingRow(
         mapping_version_id=mapping_version_id,
         scenario_id=scenario_id,
-        neic_code="2710" if code_level == 4 else "27",
+        neic_code={2: "27", 3: "271", 4: "2710"}.get(code_level, "2710"),
         code_level=code_level,
         neic_name="化学药品原料药制造",
         subject="高技术产业（制造业）",
@@ -183,7 +183,7 @@ def test_database_enforces_source_hash_status_code_level_and_foreign_key() -> No
             _row(
                 mapping_version_id=valid_version.id,
                 scenario_id=scenario_id,
-                code_level=3,
+                code_level=5,
             )
         )
         with pytest.raises(IntegrityError):

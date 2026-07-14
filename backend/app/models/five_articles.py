@@ -64,7 +64,7 @@ class FiveArticlesMappingRow(Base):
     __tablename__ = "five_articles_mapping_rows"
     __table_args__ = (
         CheckConstraint(
-            "code_level IN (2, 4)",
+            "code_level IN (2, 3, 4)",
             name="ck_five_articles_mapping_rows_code_level",
         ),
         CheckConstraint(

@@ -17,7 +17,7 @@ from app.services import national_economy_catalog_chunks as chunks_module
 
 def test_build_industry_chunks_preserves_types_and_character_limit() -> None:
     long_definition = "定" * (MAX_CHUNK_CHARACTERS + 1)
-    rows = (("大类", "A01", "稻谷种植", "0111", long_definition, "包括内容", "不包括内容"),)
+    rows = (("农、林、牧、渔业", "大类", "A01", "谷物种植", "A011", "稻谷种植", "A0111", long_definition, "包括内容", "不包括内容"),)
 
     chunks = build_industry_chunks(rows)
 
@@ -31,11 +31,14 @@ def test_build_industry_chunks_preserves_types_and_character_limit() -> None:
     assert chunks[0].source_row == 2
     assert chunks[0].major_category_code == "A01"
     assert chunks[0].major_category_name == "大类"
+    assert chunks[0].category_name == "农、林、牧、渔业"
+    assert chunks[0].middle_category_code == "A011"
+    assert chunks[0].middle_category_name == "谷物种植"
     assert chunks[0].industry_code == "0111"
 
 
 def test_build_industry_chunks_normalizes_catalog_prefixed_code() -> None:
-    rows = (("大类", "A01", "稻谷种植", "A0111", "定义", None, None),)
+    rows = (("农、林、牧、渔业", "大类", "A01", "谷物种植", "A011", "稻谷种植", "A0111", "定义", None, None),)
 
     chunks = build_industry_chunks(rows)
 
@@ -117,8 +120,8 @@ def test_full_resync_batches_embedding_and_builds_idempotent_upsert() -> None:
         embedding_dimension=3,
     )
     rows = (
-        ("大类", "A01", "稻谷种植", "0111", "定义", "包括", "不包括"),
-        ("大类", "A01", "小麦种植", "0112", "定义二", None, None),
+        ("农、林、牧、渔业", "大类", "A01", "谷物种植", "A011", "稻谷种植", "A0111", "定义", "包括", "不包括"),
+        ("农、林、牧、渔业", "大类", "A01", "谷物种植", "A011", "小麦种植", "A0112", "定义二", None, None),
     )
     requested_batches: list[tuple[str, ...]] = []
 
@@ -147,7 +150,7 @@ def test_full_resync_does_not_create_large_index_files(tmp_path: Path) -> None:
         embedding_model="model",
         embedding_dimension=3,
     )
-    rows = (("大类", "A01", "稻谷种植", "0111", "定义", "包括", "不包括"),)
+    rows = (("农、林、牧、渔业", "大类", "A01", "谷物种植", "A011", "稻谷种植", "A0111", "定义", "包括", "不包括"),)
 
     full_resync_catalog(
         Mock(),
@@ -159,3 +162,17 @@ def test_full_resync_does_not_create_large_index_files(tmp_path: Path) -> None:
 
     assert list(tmp_path.rglob("*.md")) == []
     assert list(tmp_path.rglob("*.jsonl")) == []
+
+
+def test_build_industry_chunks_uses_the_most_specific_available_v2_level() -> None:
+    rows = (
+        ("农、林、牧、渔业", "农业", "A01", "谷物种植", "A011", None, None, "中类定义", None, None),
+        ("农、林、牧、渔业", "农业", "A01", None, None, None, None, "大类定义", None, None),
+    )
+
+    chunks = build_industry_chunks(rows)
+
+    assert [(chunk.industry_code, chunk.industry_name) for chunk in chunks] == [
+        ("011", "谷物种植"),
+        ("01", "农业"),
+    ]

@@ -45,8 +45,14 @@ class ConstrainedClassificationResult:
     objection: dict[str, object] | None
     model_output: dict[str, object]
     industry_major_code: str | None = None
+    industry_category_name: str | None = None
+    industry_middle_code: str | None = None
+    industry_middle_name: str | None = None
     loan_industry_code: str | None = None
     loan_industry_major_code: str | None = None
+    loan_industry_category_name: str | None = None
+    loan_industry_middle_code: str | None = None
+    loan_industry_middle_name: str | None = None
     loan_industry_name: str | None = None
     loan_matching_basis: str | None = None
     loan_specificity: LoanSpecificity | None = None
@@ -214,8 +220,11 @@ def _build_request_payload(
 
 def _serialize_candidate(candidate: EvidenceSnapshot) -> dict[str, object]:
     return {
+        "category_name": candidate.category_name,
         "major_category_code": candidate.major_category_code,
         "major_category_name": candidate.major_category_name,
+        "middle_category_code": candidate.middle_category_code,
+        "middle_category_name": candidate.middle_category_name,
         "industry_code": candidate.industry_code,
         "industry_name": candidate.industry_name,
         "complete_catalog_fragments": [
@@ -378,6 +387,26 @@ def _validate_model_response(
     )
     if loan_specificity == "generic":
         loan_major_code = enterprise_major_code
+    enterprise_middle_code = (
+        enterprise_candidate.middle_category_code
+        if enterprise_candidate is not None and len(enterprise_code or "") == 4
+        else None
+    )
+    enterprise_middle_name = (
+        enterprise_candidate.middle_category_name if enterprise_middle_code else None
+    )
+    loan_middle_code = (
+        loan_candidate.middle_category_code
+        if loan_candidate is not None and len(loan_code or "") == 4
+        else None
+    )
+    loan_middle_name = loan_candidate.middle_category_name if loan_middle_code else None
+    enterprise_category_name = enterprise_candidate.category_name if enterprise_candidate else None
+    loan_category_name = loan_candidate.category_name if loan_candidate else None
+    if loan_specificity == "generic":
+        loan_middle_code = enterprise_middle_code
+        loan_middle_name = enterprise_middle_name
+        loan_category_name = enterprise_category_name
 
     loan_matches_enterprise = (
         loan_code == enterprise_code
@@ -397,8 +426,14 @@ def _validate_model_response(
         objection=objection_snapshot,
         model_output=model_output,
         industry_major_code=enterprise_major_code,
+        industry_category_name=enterprise_category_name,
+        industry_middle_code=enterprise_middle_code,
+        industry_middle_name=enterprise_middle_name,
         loan_industry_code=loan_code,
         loan_industry_major_code=loan_major_code,
+        loan_industry_category_name=loan_category_name,
+        loan_industry_middle_code=loan_middle_code,
+        loan_industry_middle_name=loan_middle_name,
         loan_industry_name=loan_name,
         loan_matching_basis=loan_basis,
         loan_specificity=loan_specificity,

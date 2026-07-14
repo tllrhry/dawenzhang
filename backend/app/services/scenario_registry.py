@@ -30,7 +30,7 @@ class ScenarioRegistration:
     parent_id: str | None
     workflow: str | None
     template_path_setting: str | None
-    mapping_path_setting: str | None
+    uses_five_articles_mapping: bool
     export_sheet_name: str | None
     field_schema: tuple[ScenarioField, ...]
     stage_a_field_keys: tuple[str, ...]
@@ -42,9 +42,9 @@ class ScenarioRegistration:
         return getattr(settings or get_settings(), self.template_path_setting)
 
     def mapping_path(self, settings: Settings | None = None) -> Path:
-        if self.mapping_path_setting is None:
+        if not self.uses_five_articles_mapping:
             raise ValueError(f"场景 {self.id} 暂未配置映射")
-        return getattr(settings or get_settings(), self.mapping_path_setting)
+        return (settings or get_settings()).five_articles_mapping_source_path
 
     @property
     def is_executable_profile(self) -> bool:
@@ -122,7 +122,7 @@ TECHNOLOGY_FINANCE_REGISTRATION = ScenarioRegistration(
     parent_id="five_major_articles",
     workflow="technology_finance_two_stage",
     template_path_setting="technology_finance_template_path",
-    mapping_path_setting="technology_finance_mapping_path",
+    uses_five_articles_mapping=True,
     export_sheet_name="科技金融判定",
     field_schema=TECHNOLOGY_FINANCE_FIELD_SCHEMA,
     stage_a_field_keys=tuple(FIELD_LABELS),
@@ -216,7 +216,7 @@ GREEN_FINANCE_REGISTRATION = ScenarioRegistration(
     parent_id="five_major_articles",
     workflow="technology_finance_two_stage",
     template_path_setting="green_finance_template_path",
-    mapping_path_setting="green_finance_mapping_path",
+    uses_five_articles_mapping=True,
     export_sheet_name="绿色金融判定",
     field_schema=GREEN_FINANCE_FIELD_SCHEMA,
     stage_a_field_keys=tuple(FIELD_LABELS),
@@ -240,7 +240,7 @@ DIGITAL_FINANCE_REGISTRATION = ScenarioRegistration(
     parent_id="five_major_articles",
     workflow="technology_finance_two_stage",
     template_path_setting="digital_finance_template_path",
-    mapping_path_setting="digital_finance_mapping_path",
+    uses_five_articles_mapping=True,
     export_sheet_name="数字金融判定",
     field_schema=DIGITAL_FINANCE_FIELD_SCHEMA,
     stage_a_field_keys=tuple(FIELD_LABELS),
@@ -262,7 +262,7 @@ PENSION_FINANCE_REGISTRATION = ScenarioRegistration(
     parent_id="five_major_articles",
     workflow="technology_finance_two_stage",
     template_path_setting="pension_finance_template_path",
-    mapping_path_setting="pension_finance_mapping_path",
+    uses_five_articles_mapping=True,
     export_sheet_name="养老金融判定",
     field_schema=PENSION_FINANCE_FIELD_SCHEMA,
     stage_a_field_keys=tuple(FIELD_LABELS),
@@ -284,7 +284,7 @@ INCLUSIVE_FINANCE_REGISTRATION = ScenarioRegistration(
     parent_id="five_major_articles",
     workflow="inclusive_finance_single_stage",
     template_path_setting="inclusive_finance_template_path",
-    mapping_path_setting=None,
+    uses_five_articles_mapping=False,
     export_sheet_name="普惠金融判定",
     field_schema=INCLUSIVE_FINANCE_FIELD_SCHEMA,
     stage_a_field_keys=INCLUSIVE_FINANCE_STAGE_A_FIELD_KEYS,
@@ -329,7 +329,7 @@ COMING_SOON_REGISTRATIONS = tuple(
         parent_id=parent_id,
         workflow=None,
         template_path_setting=None,
-        mapping_path_setting=None,
+        uses_five_articles_mapping=False,
         export_sheet_name=None,
         field_schema=(),
         stage_a_field_keys=(),

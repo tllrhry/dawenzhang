@@ -2,6 +2,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
+import json
 import math
 from pathlib import Path
 import re
@@ -88,8 +89,10 @@ class NormalizedMappingRow:
 class CatalogFacts:
     version: NationalEconomyCatalogVersion | None
     four_digit_names: Mapping[str, frozenset[str]]
+    three_digit_names: Mapping[str, frozenset[str]]
     two_digit_names: Mapping[str, frozenset[str]]
     four_digit_name_codes: Mapping[str, frozenset[str]]
+    three_digit_name_codes: Mapping[str, frozenset[str]]
     two_digit_name_codes: Mapping[str, frozenset[str]]
     errors: tuple[dict[str, object], ...] = ()
 
@@ -100,11 +103,14 @@ class MappingSyncResult:
     reused: bool
 
 
-def read_mapping_source(path: Path) -> MappingSyncSource:
+def read_mapping_source(
+    path: Path,
+    *,
+    expected_category: str | None = None,
+) -> MappingSyncSource:
     if not path.is_file():
         raise FileNotFoundError(f"five-articles mapping Excel not found: {path}")
 
-    source_hash = sha256(path.read_bytes()).hexdigest()
     workbook = load_workbook(path, read_only=True, data_only=True)
     try:
         worksheet = workbook.active
@@ -125,6 +131,8 @@ def read_mapping_source(path: Path) -> MappingSyncSource:
                 positions[header] = index
 
         missing = [header for header in REQUIRED_HEADERS if header not in positions]
+        if expected_category is not None and OPTIONAL_CATEGORY_HEADER not in positions:
+            missing.append(OPTIONAL_CATEGORY_HEADER)
         relevant_duplicates = sorted(set(duplicates).intersection(ALL_HEADERS))
         if missing or relevant_duplicates:
             details = []
@@ -143,16 +151,39 @@ def read_mapping_source(path: Path) -> MappingSyncSource:
             }
             if not any(not _is_blank(value) for value in row_values.values()):
                 continue
+            category = _normalize_text(row_values.get(OPTIONAL_CATEGORY_HEADER))
+            if expected_category is not None and category != expected_category:
+                continue
             rows.append(RawMappingRow(source_row=source_row, values=row_values))
     finally:
         workbook.close()
 
     return MappingSyncSource(
         path=path,
-        source_hash=source_hash,
+        source_hash=_source_hash(headers, rows),
         headers=headers,
         rows=tuple(rows),
     )
+
+
+def _source_hash(
+    headers: Sequence[str], rows: Sequence[RawMappingRow]
+) -> str:
+    """Hash only the selected scenario partition, not unrelated workbook rows."""
+    payload = {
+        "headers": list(headers),
+        "rows": [
+            [
+                _audit_value(row.values.get(header))
+                for header in ALL_HEADERS
+                if header in headers
+            ]
+            for row in rows
+        ],
+    }
+    return sha256(
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
 
 
 def synchronize_technology_finance_mapping(
@@ -180,7 +211,9 @@ def synchronize_scenario_mapping(
     """Read, validate, and atomically publish one scenario profile's mapping."""
     if not profile.is_executable_profile:
         raise ValueError(f"scenario {profile.id!r} has no executable mapping profile")
-    source = read_mapping_source(profile.mapping_path(settings))
+    source = read_mapping_source(
+        profile.mapping_path(settings), expected_category=profile.name
+    )
     return _synchronize_mapping(
         session,
         source,
@@ -301,8 +334,10 @@ def load_current_catalog_facts(session: Session, settings: Settings) -> CatalogF
         return CatalogFacts(
             version=None,
             four_digit_names={},
+            three_digit_names={},
             two_digit_names={},
             four_digit_name_codes={},
+            three_digit_name_codes={},
             two_digit_name_codes={},
             errors=(
                 {
@@ -319,6 +354,8 @@ def load_current_catalog_facts(session: Session, settings: Settings) -> CatalogF
             NationalEconomyIndustryChunk.industry_name,
             NationalEconomyIndustryChunk.major_category_code,
             NationalEconomyIndustryChunk.major_category_name,
+            NationalEconomyIndustryChunk.middle_category_code,
+            NationalEconomyIndustryChunk.middle_category_name,
         )
         .where(NationalEconomyIndustryChunk.catalog_version_id == version.id)
         .distinct()
@@ -326,8 +363,10 @@ def load_current_catalog_facts(session: Session, settings: Settings) -> CatalogF
     rows = session.execute(statement).all()
 
     four_digit_names: dict[str, set[str]] = {}
+    three_digit_names: dict[str, set[str]] = {}
     two_digit_names: dict[str, set[str]] = {}
     four_digit_name_codes: dict[str, set[str]] = {}
+    three_digit_name_codes: dict[str, set[str]] = {}
     two_digit_name_codes: dict[str, set[str]] = {}
     errors: list[dict[str, object]] = []
     for row in rows:
@@ -342,9 +381,15 @@ def load_current_catalog_facts(session: Session, settings: Settings) -> CatalogF
                     "industry_name": row.industry_name,
                 }
             )
-        else:
+        elif len(industry_code) == 4:
             four_digit_names.setdefault(industry_code, set()).add(industry_name)
             four_digit_name_codes.setdefault(industry_name, set()).add(industry_code)
+
+        middle_code = _middle_category_digits(row.middle_category_code)
+        middle_name = _normalize_name(row.middle_category_name)
+        if middle_code is not None and middle_name:
+            three_digit_names.setdefault(middle_code, set()).add(middle_name)
+            three_digit_name_codes.setdefault(middle_name, set()).add(middle_code)
 
         major_code = _major_category_digits(row.major_category_code)
         major_name = _normalize_name(row.major_category_name)
@@ -362,12 +407,15 @@ def load_current_catalog_facts(session: Session, settings: Settings) -> CatalogF
             two_digit_name_codes.setdefault(major_name, set()).add(major_code)
 
     errors.extend(_catalog_ambiguity_errors("4", four_digit_names))
+    errors.extend(_catalog_ambiguity_errors("3", three_digit_names))
     errors.extend(_catalog_ambiguity_errors("2", two_digit_names))
     return CatalogFacts(
         version=version,
         four_digit_names=_freeze_sets(four_digit_names),
+        three_digit_names=_freeze_sets(three_digit_names),
         two_digit_names=_freeze_sets(two_digit_names),
         four_digit_name_codes=_freeze_sets(four_digit_name_codes),
+        three_digit_name_codes=_freeze_sets(three_digit_name_codes),
         two_digit_name_codes=_freeze_sets(two_digit_name_codes),
         errors=tuple(errors),
     )
@@ -478,6 +526,9 @@ def _validate_against_catalog(
         if row.code_level == 4:
             names = catalog.four_digit_names
             name_codes = catalog.four_digit_name_codes
+        elif row.code_level == 3:
+            names = catalog.three_digit_names
+            name_codes = catalog.three_digit_name_codes
         else:
             names = catalog.two_digit_names
             name_codes = catalog.two_digit_name_codes
@@ -562,18 +613,24 @@ def _normalize_neic_code(value: Any) -> str | None:
         return None
     if len(digits) == 1:
         digits = digits.zfill(2)
-    return digits if len(digits) in (2, 4) else None
+    return digits if len(digits) in (2, 3, 4) else None
 
 
 def _normalize_catalog_industry_code(value: Any) -> str | None:
     text = _normalize_text(value)
-    match = re.fullmatch(r"[A-Za-z]?(\d{4})", text)
+    match = re.fullmatch(r"[A-Za-z]?(\d{2,4})", text)
     return match.group(1) if match is not None else None
 
 
 def _major_category_digits(value: Any) -> str | None:
     text = re.sub(r"\s+", "", _normalize_text(value))
     match = MAJOR_CATEGORY_CODE_PATTERN.fullmatch(text)
+    return match.group(1) if match is not None else None
+
+
+def _middle_category_digits(value: Any) -> str | None:
+    text = re.sub(r"\s+", "", _normalize_text(value))
+    match = re.fullmatch(r"[A-Za-z]?(\d{3})", text)
     return match.group(1) if match is not None else None
 
 

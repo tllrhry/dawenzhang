@@ -1,8 +1,16 @@
 from pathlib import Path
 
 import pytest
+from sqlalchemy.engine import make_url
 
-from app.core.config import Settings
+from app.core.config import Settings, get_settings
+
+
+def test_pytest_uses_isolated_database() -> None:
+    database_name = make_url(get_settings().database_url).database
+
+    assert database_name is not None
+    assert database_name.startswith("dawenzhang_test_")
 
 
 def test_default_settings() -> None:
@@ -37,15 +45,15 @@ def test_rejects_non_positive_embedding_dimension() -> None:
         Settings(_env_file=None, embedding_dimension=0)
 
 
-def test_technology_finance_mapping_path_has_default_and_environment_alias() -> None:
-    assert Settings(_env_file=None).technology_finance_mapping_path == Path(
-        "五篇大文章映射/科技金融.xlsx"
+def test_five_articles_mapping_source_path_has_default_and_environment_alias() -> None:
+    assert Settings(_env_file=None).five_articles_mapping_source_path == Path(
+        "五篇大文章映射/贷款投向-五篇大文章映射表.xlsx"
     )
     assert Settings(
         _env_file=None,
-        TECHNOLOGY_FINANCE_MAPPING_PATH="/mnt/catalogs/technology-finance.xlsx",
-    ).technology_finance_mapping_path == Path(
-        "/mnt/catalogs/technology-finance.xlsx"
+        FIVE_ARTICLES_MAPPING_SOURCE_PATH="/mnt/catalogs/five-articles.xlsx",
+    ).five_articles_mapping_source_path == Path(
+        "/mnt/catalogs/five-articles.xlsx"
     )
 
 
@@ -58,29 +66,14 @@ def test_technology_finance_mapping_path_has_default_and_environment_alias() -> 
             "模板文件/五篇大文章/绿色金融模版.docx",
         ),
         (
-            "green_finance_mapping_path",
-            "GREEN_FINANCE_MAPPING_PATH",
-            "五篇大文章映射/绿色金融.xlsx",
-        ),
-        (
             "digital_finance_template_path",
             "DIGITAL_FINANCE_TEMPLATE_PATH",
             "模板文件/五篇大文章/数字金融模版.docx",
         ),
         (
-            "digital_finance_mapping_path",
-            "DIGITAL_FINANCE_MAPPING_PATH",
-            "五篇大文章映射/数字金融.xlsx",
-        ),
-        (
             "pension_finance_template_path",
             "PENSION_FINANCE_TEMPLATE_PATH",
             "模板文件/五篇大文章/养老金融模版.docx",
-        ),
-        (
-            "pension_finance_mapping_path",
-            "PENSION_FINANCE_MAPPING_PATH",
-            "五篇大文章映射/养老金融.xlsx",
         ),
         (
             "inclusive_finance_template_path",

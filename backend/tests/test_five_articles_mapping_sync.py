@@ -19,12 +19,14 @@ from app.services.scenario_registry import (
     DIGITAL_FINANCE_REGISTRATION,
     GREEN_FINANCE_REGISTRATION,
     PENSION_FINANCE_REGISTRATION,
+    TECHNOLOGY_FINANCE_REGISTRATION,
     ScenarioRegistration,
 )
 from app.services.technology_finance_mapping_sync import synchronize_scenario_mapping
 
 
 SCENARIO_PROFILES = (
+    TECHNOLOGY_FINANCE_REGISTRATION,
     GREEN_FINANCE_REGISTRATION,
     DIGITAL_FINANCE_REGISTRATION,
     PENSION_FINANCE_REGISTRATION,
@@ -70,6 +72,19 @@ def _write_mapping(
     workbook.close()
 
 
+def _write_merged_mapping(
+    path: Path,
+    rows: Sequence[tuple[str, Sequence[object]]],
+) -> None:
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.append(("属于类别", *REQUIRED_HEADERS))
+    for category, row in rows:
+        worksheet.append((category, *row))
+    workbook.save(path)
+    workbook.close()
+
+
 @pytest.fixture()
 def scenario_mapping_context() -> Iterator[tuple[Session, str]]:
     session = get_sessionmaker()()
@@ -88,6 +103,8 @@ def scenario_mapping_context() -> Iterator[tuple[Session, str]]:
                 catalog_version_id=catalog_version.id,
                 major_category_code="C27",
                 major_category_name="医药制造业",
+                middle_category_code="271",
+                middle_category_name="化学药品制造",
                 industry_code="2710",
                 industry_name="化学药品原料药制造",
                 source_row=2,
@@ -99,6 +116,8 @@ def scenario_mapping_context() -> Iterator[tuple[Session, str]]:
                 catalog_version_id=catalog_version.id,
                 major_category_code="C27",
                 major_category_name="医药制造业",
+                middle_category_code="272",
+                middle_category_name="化学药品制剂制造",
                 industry_code="2720",
                 industry_name="化学药品制剂制造",
                 source_row=3,
@@ -121,12 +140,12 @@ def _settings_for(
     path: Path,
     embedding_model: str,
 ) -> Settings:
-    assert profile.mapping_path_setting is not None
+    assert profile.uses_five_articles_mapping is True
     return Settings(
         _env_file=None,
         SILICONFLOW_EMBEDDING_MODEL=embedding_model,
         EMBEDDING_DIMENSION=4096,
-        **{profile.mapping_path_setting.upper(): path},
+        FIVE_ARTICLES_MAPPING_SOURCE_PATH=path,
     )
 
 
@@ -138,14 +157,13 @@ def test_scenario_profile_mapping_publishes_valid_two_and_four_digit_rows(
 ) -> None:
     session, embedding_model = scenario_mapping_context
     path = tmp_path / f"{profile.id}.xlsx"
-    category = profile.name if profile is GREEN_FINANCE_REGISTRATION else None
     _write_mapping(
         path,
         (
             _mapping_row("27\u3000", " 医药制造业 "),
             _mapping_row(2710.0, "化学药品原料药制造", subject="另一主题"),
         ),
-        category=category,
+        category=profile.name,
     )
 
     result = synchronize_scenario_mapping(
@@ -174,7 +192,9 @@ def test_scenario_profile_mapping_reuses_the_same_source_hash(
 ) -> None:
     session, embedding_model = scenario_mapping_context
     path = tmp_path / f"{profile.id}-reuse.xlsx"
-    _write_mapping(path, (_mapping_row("2710", "化学药品原料药制造"),))
+    _write_mapping(
+        path, (_mapping_row("2710", "化学药品原料药制造"),), category=profile.name
+    )
     settings = _settings_for(profile, path, embedding_model)
 
     first = synchronize_scenario_mapping(session, profile, settings)
@@ -199,7 +219,7 @@ def test_scenario_profile_mapping_rejects_a_nonexistent_code(
 ) -> None:
     session, embedding_model = scenario_mapping_context
     path = tmp_path / f"{profile.id}-missing-code.xlsx"
-    _write_mapping(path, (_mapping_row("9999", "不存在行业"),))
+    _write_mapping(path, (_mapping_row("9999", "不存在行业"),), category=profile.name)
 
     result = synchronize_scenario_mapping(
         session, profile, _settings_for(profile, path, embedding_model)
@@ -218,7 +238,9 @@ def test_scenario_profile_mapping_rejects_a_name_code_conflict(
 ) -> None:
     session, embedding_model = scenario_mapping_context
     path = tmp_path / f"{profile.id}-name-conflict.xlsx"
-    _write_mapping(path, (_mapping_row("2710", "化学药品制剂制造"),))
+    _write_mapping(
+        path, (_mapping_row("2710", "化学药品制剂制造"),), category=profile.name
+    )
 
     result = synchronize_scenario_mapping(
         session, profile, _settings_for(profile, path, embedding_model)
@@ -244,6 +266,7 @@ def test_scenario_profile_mapping_rejects_exact_duplicates(
             _mapping_row("2710", "化学药品原料药制造"),
             _mapping_row("2710.0", "化学药品原料药制造"),
         ),
+        category=profile.name,
     )
 
     result = synchronize_scenario_mapping(
@@ -263,7 +286,7 @@ def test_scenario_profile_mapping_rejects_exact_duplicates(
 
 
 @pytest.mark.parametrize("profile", SCENARIO_PROFILES, ids=lambda item: item.id)
-def test_scenario_profile_mapping_rejects_a_mismatched_nonempty_category(
+def test_scenario_profile_mapping_ignores_rows_from_other_categories(
     profile: ScenarioRegistration,
     tmp_path: Path,
     scenario_mapping_context: tuple[Session, str],
@@ -283,15 +306,69 @@ def test_scenario_profile_mapping_rejects_a_mismatched_nonempty_category(
     assert result.version.status == "invalid"
     assert result.version.validation_report["published_row_count"] == 0
     assert result.version.validation_report["errors"] == [
-        {
-            "type": "category_mismatch",
-            "source_row": 2,
-            "expected": profile.name,
-            "actual": "其他金融",
-        }
+        {"type": "empty_mapping", "message": "mapping contains no data rows"}
     ]
     assert session.scalar(
         select(func.count(FiveArticlesMappingRow.id)).where(
             FiveArticlesMappingRow.mapping_version_id == result.version.id
         )
     ) == 0
+
+
+def test_unrelated_category_change_reuses_current_scenario_version(
+    tmp_path: Path,
+    scenario_mapping_context: tuple[Session, str],
+) -> None:
+    session, embedding_model = scenario_mapping_context
+    path = tmp_path / "merged.xlsx"
+    _write_merged_mapping(
+        path,
+        (
+            ("数字金融", _mapping_row("2710", "化学药品原料药制造")),
+            ("绿色金融", _mapping_row("2720", "化学药品制剂制造")),
+        ),
+    )
+    settings = _settings_for(DIGITAL_FINANCE_REGISTRATION, path, embedding_model)
+
+    first = synchronize_scenario_mapping(session, DIGITAL_FINANCE_REGISTRATION, settings)
+    _write_merged_mapping(
+        path,
+        (
+            ("数字金融", _mapping_row("2710", "化学药品原料药制造")),
+            ("绿色金融", _mapping_row("2720", "化学药品制剂制造", subject="已修改")),
+        ),
+    )
+    second = synchronize_scenario_mapping(session, DIGITAL_FINANCE_REGISTRATION, settings)
+
+    assert first.version.status == "published"
+    assert second.reused is True
+    assert second.version.id == first.version.id
+
+
+def test_scenario_profile_mapping_publishes_valid_three_digit_middle_class_row(
+    tmp_path: Path,
+    scenario_mapping_context: tuple[Session, str],
+) -> None:
+    session, embedding_model = scenario_mapping_context
+    path = tmp_path / "middle-class.xlsx"
+    _write_mapping(
+        path,
+        (_mapping_row("271", "化学药品制造"),),
+        category=PENSION_FINANCE_REGISTRATION.name,
+    )
+
+    result = synchronize_scenario_mapping(
+        session,
+        PENSION_FINANCE_REGISTRATION,
+        _settings_for(PENSION_FINANCE_REGISTRATION, path, embedding_model),
+    )
+
+    assert result.version.status == "published"
+    assert result.version.validation_report["published_row_count"] == 1
+    row = session.scalar(
+        select(FiveArticlesMappingRow).where(
+            FiveArticlesMappingRow.mapping_version_id == result.version.id
+        )
+    )
+    assert row is not None
+    assert (row.neic_code, row.code_level, row.neic_name) == ("271", 3, "化学药品制造")

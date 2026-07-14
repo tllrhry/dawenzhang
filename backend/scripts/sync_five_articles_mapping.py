@@ -11,7 +11,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     profiles = {
         scenario_id: profile
         for scenario_id, profile in SCENARIO_REGISTRY.items()
-        if profile.is_executable_profile
+        if profile.is_executable_profile and profile.uses_five_articles_mapping
     }
     parser = argparse.ArgumentParser()
     parser.add_argument("scenario_id", choices=sorted(profiles))

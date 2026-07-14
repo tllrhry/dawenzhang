@@ -13,14 +13,17 @@ from app.models import NationalEconomyCatalogVersion, NationalEconomyIndustryChu
 
 
 MAX_CHUNK_CHARACTERS = 1000
-CHUNK_COLUMNS = (("definition", 4), ("include", 5), ("exclude", 6))
-INDUSTRY_CODE_PATTERN = re.compile(r"(?:[A-Z])?(\d{4})")
+CHUNK_COLUMNS = (("definition", 7), ("include", 8), ("exclude", 9))
+INDUSTRY_CODE_PATTERN = re.compile(r"(?:[A-Z])?(\d{2,4})")
 
 
 @dataclass(frozen=True)
 class IndustryChunk:
+    category_name: str
     major_category_code: str
     major_category_name: str
+    middle_category_code: str | None
+    middle_category_name: str | None
     industry_code: str
     industry_name: str
     source_row: int
@@ -49,24 +52,36 @@ def build_industry_chunks(
 ) -> tuple[IndustryChunk, ...]:
     chunks: list[IndustryChunk] = []
     for source_row, row in enumerate(rows, start=2):
-        major_category_name = _cell_text(row, 0)
-        major_category_code = _cell_text(row, 1)
-        industry_name = _cell_text(row, 2)
-        raw_industry_code = _cell_text(row, 3)
+        category_name = _cell_text(row, 0)
+        major_category_name = _cell_text(row, 1)
+        major_category_code = _cell_text(row, 2)
+        middle_category_name = _cell_text(row, 3) or None
+        middle_category_code = _cell_text(row, 4) or None
+        small_category_name = _cell_text(row, 5)
+        raw_small_category_code = _cell_text(row, 6)
+        raw_industry_code = raw_small_category_code or middle_category_code or major_category_code
+        industry_name = small_category_name or middle_category_name or major_category_name
         if not industry_name or not raw_industry_code:
             continue
-        if not major_category_name or not major_category_code:
+        if not category_name or not major_category_name or not major_category_code:
             raise ValueError(
-                f"missing major category code or name at source row {source_row}"
+                f"missing category or major category code or name at source row {source_row}"
             )
+        if middle_category_name and not middle_category_code:
+            raise ValueError(f"missing middle category code at source row {source_row}")
+        if middle_category_code and not middle_category_name:
+            raise ValueError(f"missing middle category name at source row {source_row}")
         industry_code = _normalize_industry_code(raw_industry_code, source_row)
         for chunk_type, column_index in CHUNK_COLUMNS:
             content = _cell_text(row, column_index)
             for text in split_bounded_text(content, max_characters):
                 chunks.append(
                     IndustryChunk(
+                        category_name=category_name,
                         major_category_code=major_category_code,
                         major_category_name=major_category_name,
+                        middle_category_code=middle_category_code,
+                        middle_category_name=middle_category_name,
                         industry_code=industry_code,
                         industry_name=industry_name,
                         source_row=source_row,
@@ -162,8 +177,11 @@ def full_resync_catalog(
     values = [
         {
             "catalog_version_id": version.id,
+            "category_name": chunk.category_name,
             "major_category_code": chunk.major_category_code,
             "major_category_name": chunk.major_category_name,
+            "middle_category_code": chunk.middle_category_code,
+            "middle_category_name": chunk.middle_category_name,
             "industry_code": chunk.industry_code,
             "industry_name": chunk.industry_name,
             "source_row": chunk.source_row,
@@ -179,6 +197,9 @@ def full_resync_catalog(
         set_={
             "major_category_code": statement.excluded.major_category_code,
             "major_category_name": statement.excluded.major_category_name,
+            "middle_category_code": statement.excluded.middle_category_code,
+            "middle_category_name": statement.excluded.middle_category_name,
+            "category_name": statement.excluded.category_name,
             "industry_name": statement.excluded.industry_name,
             "embedding": statement.excluded.embedding,
         },
@@ -195,7 +216,7 @@ def _cell_text(row: tuple[Any, ...], index: int) -> str:
 def _normalize_industry_code(value: str, source_row: int) -> str:
     match = INDUSTRY_CODE_PATTERN.fullmatch(value)
     if match is None:
-        raise ValueError(f"invalid four-digit industry code at source row {source_row}: {value}")
+        raise ValueError(f"invalid 2/3/4-digit industry code at source row {source_row}: {value}")
     return match.group(1)
 
 

@@ -33,10 +33,12 @@ class ClassificationResultResponse(BaseModel):
     status: str
     industry_code: str | None
     industry_major_code: str | None = Field(default=None, exclude=True)
+    industry_middle_code: str | None = Field(default=None, exclude=True)
     industry_name: str | None
     matching_basis: str | None = Field(validation_alias="rationale")
     loan_industry_code: str | None
     loan_industry_major_code: str | None = Field(default=None, exclude=True)
+    loan_industry_middle_code: str | None = Field(default=None, exclude=True)
     loan_industry_name: str | None
     loan_matching_basis: str | None
     loan_matches_enterprise: bool | None
@@ -51,6 +53,7 @@ class ClassificationResultResponse(BaseModel):
             if self.industry_code is not None:
                 self.loan_industry_code = self.industry_code
                 self.loan_industry_major_code = self.industry_major_code
+                self.loan_industry_middle_code = self.industry_middle_code
                 self.loan_industry_name = self.industry_name
             self.loan_matching_basis = "贷款投向未单独评估，与企业主营一致"
         elif self.loan_industry_code is None:
@@ -66,6 +69,7 @@ class ClassificationResultResponse(BaseModel):
         return format_industry_display_code(
             self.industry_major_code,
             self.industry_code,
+            self.industry_middle_code,
         )
 
     @computed_field(return_type=str | None)
@@ -74,6 +78,7 @@ class ClassificationResultResponse(BaseModel):
         return format_industry_display_code(
             self.loan_industry_major_code,
             self.loan_industry_code,
+            self.loan_industry_middle_code,
         )
 
 

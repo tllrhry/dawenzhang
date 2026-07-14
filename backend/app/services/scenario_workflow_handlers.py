@@ -110,6 +110,7 @@ class ScenarioWorkflowHandler:
         if profile.workflow == "agriculture_related_single_stage":
             return export_case_workbook(
                 case,
+                agriculture_related_results=results,
                 profile=profile,
             )
         return export_case_workbook(

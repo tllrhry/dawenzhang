@@ -6,6 +6,7 @@ from openpyxl import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
 from app.models import (
+    AgricultureRelatedResult,
     FiveArticlesResult,
     InclusiveFinanceResult,
     NationalEconomyClassificationCase,
@@ -30,6 +31,7 @@ CURRENT_RESULT_SHEET = "当前结论"
 RESULT_HISTORY_SHEET = "判定历史"
 TECHNOLOGY_FINANCE_RESULT_SHEET = "科技金融判定"
 INCLUSIVE_FINANCE_RESULT_SHEET = "普惠金融判定"
+AGRICULTURE_RELATED_RESULT_SHEET = "涉农判定"
 TECHNOLOGY_FINANCE_CONSISTENCY_LABEL = (
     "贷款对应的五篇大文章类别与企业类别是否一致"
 )
@@ -71,6 +73,24 @@ _CONSISTENCY_STATUS_LABELS = {
     "not_applicable": "不适用",
 }
 
+_AGRICULTURE_STATUS_LABELS = {
+    "completed": "判定完成",
+    "not_applicable": "不属于涉农",
+    "needs_review": "待人工复核",
+    "classification_failed": "判定失败",
+}
+
+_AGRICULTURE_RESULT_HEADERS = (
+    "版本号",
+    "状态",
+    "状态说明",
+    "命中类别",
+    "是否涉农",
+    "匹配依据",
+    "各类别判定方式",
+    "创建时间",
+)
+
 
 def export_case_workbook(
     case: NationalEconomyClassificationCase,
@@ -78,6 +98,7 @@ def export_case_workbook(
     five_articles_results: Sequence[FiveArticlesResult] = (),
     profile: ScenarioRegistration | None = None,
     inclusive_finance_results: Sequence[InclusiveFinanceResult] = (),
+    agriculture_related_results: Sequence[AgricultureRelatedResult] = (),
 ) -> bytes:
     workbook = Workbook()
     input_sheet = workbook.active
@@ -97,6 +118,8 @@ def export_case_workbook(
         result_sheet = workbook.create_sheet(resolved_profile.export_sheet_name)
         if resolved_profile.id == "inclusive_finance":
             _write_inclusive_finance_result(result_sheet, inclusive_finance_results)
+        elif resolved_profile.id == "agriculture_related":
+            _write_agriculture_related_result(result_sheet, agriculture_related_results)
         elif resolved_profile.id == TECHNOLOGY_FINANCE_SCENARIO:
             _write_technology_finance_result(result_sheet, five_articles_results)
         else:
@@ -109,6 +132,88 @@ def export_case_workbook(
     output = BytesIO()
     workbook.save(output)
     return output.getvalue()
+
+
+def _write_agriculture_related_result(
+    sheet: Worksheet,
+    results: Sequence[AgricultureRelatedResult],
+) -> None:
+    sheet.append(_AGRICULTURE_RESULT_HEADERS)
+    if not results:
+        sheet.append(
+            (
+                "",
+                "尚未判定",
+                "尚无涉农判定结果。",
+                "",
+                "未判定",
+                "尚无涉农判定结果。",
+                "",
+                "",
+            )
+        )
+        return
+
+    for result in sorted(results, key=lambda item: (item.version, item.id or 0)):
+        status = _AGRICULTURE_STATUS_LABELS.get(result.status, result.status)
+        error_detail = result.error_detail or "未提供原因。"
+        if result.status == "needs_review":
+            status_detail = f"涉农判定需人工复核：{error_detail}"
+        elif result.status == "classification_failed":
+            status_detail = f"涉农判定失败：{error_detail}"
+        elif result.status == "not_applicable":
+            status_detail = "四类判定均未命中，不属于涉农。"
+        else:
+            status_detail = "涉农判定完成。"
+
+        categories = [
+            item
+            for item in (result.matched_categories or [])
+            if isinstance(item, dict)
+        ]
+        matched_names = [
+            str(item.get("category_name") or f"类别{item.get('category', '')}")
+            for item in categories
+            if item.get("result") == "matched"
+        ]
+        methods = [
+            f"类别{item.get('category', '')}（{item.get('category_name', '未命名')}）："
+            f"{_agriculture_method_label(item.get('method'))}"
+            for item in categories
+        ]
+        basis = result.basis or (
+            error_detail
+            if result.status in {"needs_review", "classification_failed"}
+            else "无命中类别。"
+        )
+        is_related = (
+            "是"
+            if result.is_agriculture_related is True
+            else "否"
+            if result.is_agriculture_related is False
+            else "未判定"
+        )
+        created_at = result.created_at.isoformat() if result.created_at else ""
+        sheet.append(
+            (
+                result.version,
+                status,
+                status_detail,
+                "、".join(matched_names) or "无",
+                is_related,
+                basis,
+                "；".join(methods) or "尚无类别判定明细。",
+                created_at,
+            )
+        )
+
+
+def _agriculture_method_label(method: object) -> str:
+    return {
+        "rule": "规则",
+        "stage_a": "Stage A",
+        "ai": "AI",
+    }.get(str(method), str(method) if method else "未记录")
 
 def _write_inclusive_finance_result(sheet: Worksheet, results: Sequence[InclusiveFinanceResult]) -> None:
     headers = ("Stage B版本", "普惠状态", "借款主体", "计算划型", "填报划型", "划型一致性", "是否经营性", "授信金额(万元)", "是否属于普惠", "普惠子类别", "判定依据", "业务证据摘要", "异常")

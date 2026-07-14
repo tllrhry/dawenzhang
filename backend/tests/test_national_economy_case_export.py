@@ -1,8 +1,10 @@
+from datetime import datetime
 from io import BytesIO
 
 from openpyxl import load_workbook
 
 from app.models import (
+    AgricultureRelatedResult,
     NationalEconomyClassificationCase,
     NationalEconomyClassificationResult,
 )
@@ -186,3 +188,86 @@ def test_export_case_workbook_uses_readable_placeholder_without_completed_result
     assert current_values[:2] == (None, None)
     assert current_values[2] == "暂无成功结论（案例状态：needs_review）"
     assert current_values[3:] == (None, None, None, None)
+
+
+def test_export_case_workbook_reads_back_agriculture_history_and_readable_statuses() -> None:
+    case = NationalEconomyClassificationCase(
+        id=2,
+        scenario="agriculture_related",
+        original_filename="涉农示例.docx",
+        input_payload={},
+        status="completed",
+    )
+    results = [
+        AgricultureRelatedResult(
+            id=11,
+            case=case,
+            scenario_id="agriculture_related",
+            version=1,
+            status="completed",
+            stage_a_result_id=101,
+            is_agriculture_related=True,
+            matched_categories=[
+                {"category": 1, "category_name": "农户贷款", "result": "matched", "method": "rule"},
+                {"category": 3, "category_name": "农林牧渔业贷款", "result": "matched", "method": "stage_a"},
+                {"category": 2, "category_name": "农村企业及各类组织贷款", "result": "not_matched", "method": "ai"},
+            ],
+            basis="农户身份字段命中；企业行业门类为农、林、牧、渔业。",
+            created_at=datetime(2026, 7, 14, 10, 30),
+        ),
+        AgricultureRelatedResult(
+            id=12,
+            case=case,
+            scenario_id="agriculture_related",
+            version=2,
+            status="not_applicable",
+            stage_a_result_id=102,
+            is_agriculture_related=False,
+            matched_categories=[
+                {"category": 1, "category_name": "农户贷款", "result": "not_matched", "method": "rule"},
+            ],
+            basis="四类均未命中。",
+        ),
+        AgricultureRelatedResult(
+            id=13,
+            case=case,
+            scenario_id="agriculture_related",
+            version=3,
+            status="needs_review",
+            stage_a_result_id=103,
+            is_agriculture_related=None,
+            matched_categories=[],
+            error_detail="注册地址无法判定城乡类别。",
+        ),
+        AgricultureRelatedResult(
+            id=14,
+            case=case,
+            scenario_id="agriculture_related",
+            version=4,
+            status="classification_failed",
+            stage_a_result_id=104,
+            is_agriculture_related=None,
+            matched_categories=[],
+            error_detail="AI 返回格式不符合约定。",
+        ),
+    ]
+
+    workbook = load_workbook(
+        BytesIO(export_case_workbook(case, agriculture_related_results=results))
+    )
+
+    sheet = workbook["涉农判定"]
+    assert tuple(cell.value for cell in sheet[1]) == (
+        "版本号", "状态", "状态说明", "命中类别", "是否涉农", "匹配依据", "各类别判定方式", "创建时间"
+    )
+    rows = list(sheet.iter_rows(min_row=2, values_only=True))
+    assert len(rows) == 4
+    assert rows[0][:7] == (
+        1, "判定完成", "涉农判定完成。", "农户贷款、农林牧渔业贷款", "是",
+        "农户身份字段命中；企业行业门类为农、林、牧、渔业。",
+        "类别1（农户贷款）：规则；类别3（农林牧渔业贷款）：Stage A；类别2（农村企业及各类组织贷款）：AI",
+    )
+    assert rows[1][1:6] == ("不属于涉农", "四类判定均未命中，不属于涉农。", "无", "否", "四类均未命中。")
+    assert rows[2][1:6] == ("待人工复核", "涉农判定需人工复核：注册地址无法判定城乡类别。", "无", "未判定", "注册地址无法判定城乡类别。")
+    assert rows[3][1:3] == ("判定失败", "涉农判定失败：AI 返回格式不符合约定。")
+    assert rows[0][7] == "2026-07-14T10:30:00"

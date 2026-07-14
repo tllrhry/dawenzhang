@@ -5,8 +5,15 @@
 
 from __future__ import annotations
 
+import json
+import re
 from collections.abc import Mapping
+import time
 from typing import Protocol
+
+import httpx
+
+from app.core.config import Settings
 
 from app.services.national_economy_result_presentation import (
     format_industry_display_code,
@@ -20,6 +27,19 @@ FARMER_IDENTITY_FIELD_KEYS = (
     "farmer_nonlocal_resident_over_one_year",
     "farmer_state_farm_employee_or_rural_individual_business",
 )
+AGRICULTURE_CATEGORY_TWO = "农村企业及各类组织贷款"
+AGRICULTURE_CATEGORY_FOUR = "城市企业及各类组织涉农贷款"
+URBAN_AGRICULTURE_SUBCATEGORIES = (
+    "农产品加工",
+    "农村基建",
+    "农村流通",
+    "乡村文旅或种养基地建设或农机制造销售",
+)
+_CHINESE_PATTERN = re.compile(r"[\u3400-\u9fff]")
+
+
+class AgricultureRelatedAIError(RuntimeError):
+    """Raised when a constrained agriculture fallback cannot be trusted."""
 
 
 class StageAResult(Protocol):
@@ -94,16 +114,153 @@ def determine_agriculture_industry_loan_category(
     )
 
 
-def determine_category_one(input_payload: Mapping[str, object]) -> dict[str, object]:
-    """Generic alias reserved for the shared four-category result contract."""
-    return determine_farmer_loan_category(input_payload)
-
-
-def determine_category_three(
-    stage_a_result: StageAResult | Mapping[str, object],
+def determine_rural_enterprise_loan_category(
+    input_payload: Mapping[str, object],
+    settings: Settings,
+    client: httpx.Client | None = None,
 ) -> dict[str, object]:
-    """Generic alias reserved for the shared four-category result contract."""
-    return determine_agriculture_industry_loan_category(stage_a_result)
+    """Classify category two from registration address, with a grounded AI fallback."""
+    address, source = _select_address(input_payload)
+    if not address:
+        return _category_result(
+            category=2, category_name=AGRICULTURE_CATEGORY_TWO,
+            result="needs_review", basis="注册地址与实际经营地址均为空，待人工复核。",
+            method="rule", evidence_refs=[],
+        )
+    rule_result = _classify_address_rule(address)
+    source_note = "注册地址" if source == "registered_address" else "实际经营地址（注册地址为空时降级使用）"
+    if rule_result is not None:
+        urban_rural, excerpt = rule_result
+        result = "matched" if urban_rural == "农村地区" else "not_matched"
+        return _category_result(
+            category=2, category_name=AGRICULTURE_CATEGORY_TWO, result=result,
+            basis=f"{source_note}“{address}”中“{excerpt}”符合地址规则，判定为{urban_rural}。",
+            method="rule", evidence_refs=[_address_ref(source, address, excerpt)],
+        )
+    model = _call_agriculture_ai(
+        settings, client, address, source, "address", ("农村地区", "城区", "无法判定")
+    )
+    urban_rural = model["label"]
+    result = {"农村地区": "matched", "城区": "not_matched", "无法判定": "needs_review"}[urban_rural]
+    return _category_result(
+        category=2, category_name=AGRICULTURE_CATEGORY_TWO, result=result,
+        basis=f"{model['basis']}（依据来源：{source_note}）", method="ai",
+        evidence_refs=[_address_ref(source, address, address)], model_output=model["raw"],
+    )
+
+
+def determine_category_two(input_payload: Mapping[str, object], settings: Settings, client: httpx.Client | None = None) -> dict[str, object]:
+    return determine_rural_enterprise_loan_category(input_payload, settings, client)
+
+
+def determine_urban_agriculture_loan_category(
+    input_payload: Mapping[str, object], category_two: Mapping[str, object],
+    settings: Settings, client: httpx.Client | None = None,
+) -> dict[str, object]:
+    """Classify category four only after category two establishes an urban address."""
+    category_two_result = str(category_two.get("result", ""))
+    if category_two_result == "matched":
+        return _category_result(category=4, category_name=AGRICULTURE_CATEGORY_FOUR,
+                                result="not_applicable", basis="类别二已判定为农村地区，类别四不适用。",
+                                method="rule", evidence_refs=[])
+    if category_two_result == "needs_review":
+        return _category_result(category=4, category_name=AGRICULTURE_CATEGORY_FOUR,
+                                result="needs_review", basis="类别二待人工复核，无法确认城市主体前提。",
+                                method="rule", evidence_refs=[])
+    fields = ("loan_purpose", "project_content", "trade_goods_services")
+    text = "；".join(f"{key}：{_text(input_payload.get(key))}" for key in fields if _text(input_payload.get(key)))
+    for label, patterns in _URBAN_USE_RULES:
+        for pattern in patterns:
+            match = re.search(pattern, text)
+            if match:
+                excerpt = match.group(0)
+                return _category_result(category=4, category_name=AGRICULTURE_CATEGORY_FOUR,
+                                        result="matched", basis=f"原文“{excerpt}”命中{label}关键词。",
+                                        method="rule", evidence_refs=[{"type": "field_text", "excerpt": excerpt}])
+    model = _call_agriculture_ai(settings, client, text, "use_fields", "use",
+                                 (*URBAN_AGRICULTURE_SUBCATEGORIES, "均不属于", "无法判定"))
+    label = model["label"]
+    result = "matched" if label in URBAN_AGRICULTURE_SUBCATEGORIES else ("needs_review" if label == "无法判定" else "not_matched")
+    return _category_result(category=4, category_name=AGRICULTURE_CATEGORY_FOUR, result=result,
+                            basis=model["basis"], method="ai", evidence_refs=[{"type": "field_text", "excerpt": text}],
+                            model_output=model["raw"])
+
+
+def determine_category_four(input_payload: Mapping[str, object], category_two: Mapping[str, object], settings: Settings, client: httpx.Client | None = None) -> dict[str, object]:
+    return determine_urban_agriculture_loan_category(input_payload, category_two, settings, client)
+
+
+_URBAN_USE_RULES = (
+    ("农产品加工", (r"(?:粮食|果蔬|蔬菜|水果|肉类|屠宰|水产)[^；。]{0,12}(?:加工|深加工)", r"农产品加工")),
+    ("农村基建", (r"乡村道路", r"农田水利", r"农村污水", r"垃圾处理", r"村级养老设施")),
+    ("农村流通", (r"农产品批发市场", r"冷链仓储", r"农资经销")),
+    (URBAN_AGRICULTURE_SUBCATEGORIES[3], (r"乡村文旅", r"种养基地", r"农机(?:制造|销售)")),
+)
+
+
+def _select_address(payload: Mapping[str, object]) -> tuple[str, str]:
+    registered = _text(payload.get("registered_address"))
+    if registered:
+        return registered, "registered_address"
+    return _text(payload.get("actual_business_address")), "actual_business_address"
+
+
+def _classify_address_rule(address: str) -> tuple[str, str] | None:
+    rural = re.search(r"村|乡|(?<!城关)镇", address)
+    urban = re.search(r"城关镇|市辖区|市[^县乡镇村]{0,12}区", address)
+    if bool(rural) == bool(urban):
+        return None
+    match = rural or urban
+    return ("农村地区" if rural else "城区", match.group(0))
+
+
+def _call_agriculture_ai(settings: Settings, client: httpx.Client | None, raw_text: str, source: str,
+                         task: str, labels: tuple[str, ...]) -> dict[str, object]:
+    if not settings.deepseek_api_key:
+        raise AgricultureRelatedAIError("DEEPSEEK_API_KEY is required for agriculture fallback")
+    payload = {"model": settings.deepseek_model, "response_format": {"type": "json_object"}, "temperature": 0,
+               "messages": [{"role": "system", "content": f"你只能从 {'、'.join(labels)} 中选择一个，并只输出 JSON：label、basis。basis 必须是非空中文，且引用输入原文。任务：{task}。"},
+                             {"role": "user", "content": json.dumps({"source": source, "text": raw_text, "candidates": labels}, ensure_ascii=False)}]}
+    owns_client = client is None
+    http_client = client or httpx.Client(base_url=settings.deepseek_base_url.rstrip("/"), timeout=httpx.Timeout(settings.deepseek_timeout_seconds, connect=settings.http_connect_timeout_seconds))
+    try:
+        for attempt in range(3):
+            try:
+                response = http_client.post("/chat/completions", headers={"Authorization": f"Bearer {settings.deepseek_api_key}"}, json=payload)
+                break
+            except (httpx.TimeoutException, httpx.NetworkError):
+                if attempt == 2:
+                    raise
+                time.sleep(0.5 * (2 ** attempt))
+        response.raise_for_status()
+        try:
+            content = response.json()["choices"][0]["message"]["content"]
+            output = json.loads(content)
+        except (TypeError, KeyError, IndexError, json.JSONDecodeError) as exc:
+            raise AgricultureRelatedAIError("DeepSeek response is not valid JSON") from exc
+        if not isinstance(output, dict):
+            raise AgricultureRelatedAIError("DeepSeek output must be a JSON object")
+        label_key = next((key for key in ("label", "result", "category", "classification") if key in output), None)
+        basis_key = next((key for key in ("basis", "reason", "evidence") if key in output), None)
+        if label_key is None or basis_key is None or len(output) != 2:
+            raise AgricultureRelatedAIError("DeepSeek output must contain one label and one basis")
+        label, basis = output[label_key], output[basis_key]
+        original_values = [part.split("：", 1)[-1].strip() for part in _text(raw_text).split("；")]
+        grounded = isinstance(basis, str) and any(value and value in basis for value in original_values)
+        if label not in labels or not isinstance(basis, str) or not basis.strip() or _CHINESE_PATTERN.search(basis) is None or not grounded:
+            raise AgricultureRelatedAIError("DeepSeek basis must be Chinese and quote original input")
+        return {"label": label, "basis": basis.strip(), "raw": output}
+    except AgricultureRelatedAIError:
+        raise
+    except httpx.HTTPError as exc:
+        raise AgricultureRelatedAIError(f"DeepSeek agriculture fallback failed: {exc}") from exc
+    finally:
+        if owns_client:
+            http_client.close()
+
+
+def _address_ref(source: str, address: str, excerpt: str) -> dict[str, object]:
+    return {"type": "field", "field_key": source, "raw_value": address, "excerpt": excerpt}
 
 
 def _candidate(stage_a_result: StageAResult | Mapping[str, object], side: str) -> dict[str, str | None]:

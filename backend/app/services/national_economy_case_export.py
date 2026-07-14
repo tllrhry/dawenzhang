@@ -158,7 +158,7 @@ def _write_agriculture_related_result(
         status = _AGRICULTURE_STATUS_LABELS.get(result.status, result.status)
         error_detail = result.error_detail or "未提供原因。"
         if result.status == "needs_review":
-            status_detail = f"涉农判定需人工复核：{error_detail}"
+            status_detail = f"涉农判定需人工复核：{result.basis or '未提供原因。'}"
         elif result.status == "classification_failed":
             status_detail = f"涉农判定失败：{error_detail}"
         elif result.status == "not_applicable":

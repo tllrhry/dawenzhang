@@ -237,7 +237,18 @@ def test_export_case_workbook_reads_back_agriculture_history_and_readable_status
             stage_a_result_id=103,
             is_agriculture_related=None,
             matched_categories=[],
-            error_detail="注册地址无法判定城乡类别。",
+            basis="注册地址与实际经营地址均为空，待人工复核。",
+            error_detail="不应覆盖匹配依据。",
+        ),
+        AgricultureRelatedResult(
+            id=15,
+            case=case,
+            scenario_id="agriculture_related",
+            version=5,
+            status="needs_review",
+            stage_a_result_id=105,
+            is_agriculture_related=None,
+            matched_categories=[],
         ),
         AgricultureRelatedResult(
             id=14,
@@ -261,13 +272,14 @@ def test_export_case_workbook_reads_back_agriculture_history_and_readable_status
         "版本号", "状态", "状态说明", "命中类别", "是否涉农", "匹配依据", "各类别判定方式", "创建时间"
     )
     rows = list(sheet.iter_rows(min_row=2, values_only=True))
-    assert len(rows) == 4
+    assert len(rows) == 5
     assert rows[0][:7] == (
         1, "判定完成", "涉农判定完成。", "农户贷款、农林牧渔业贷款", "是",
         "农户身份字段命中；企业行业门类为农、林、牧、渔业。",
         "类别1（农户贷款）：规则；类别3（农林牧渔业贷款）：Stage A；类别2（农村企业及各类组织贷款）：AI",
     )
     assert rows[1][1:6] == ("不属于涉农", "四类判定均未命中，不属于涉农。", "无", "否", "四类均未命中。")
-    assert rows[2][1:6] == ("待人工复核", "涉农判定需人工复核：注册地址无法判定城乡类别。", "无", "未判定", "注册地址无法判定城乡类别。")
+    assert rows[2][1:6] == ("待人工复核", "涉农判定需人工复核：注册地址与实际经营地址均为空，待人工复核。", "无", "未判定", "注册地址与实际经营地址均为空，待人工复核。")
     assert rows[3][1:3] == ("判定失败", "涉农判定失败：AI 返回格式不符合约定。")
+    assert rows[4][1:3] == ("待人工复核", "涉农判定需人工复核：未提供原因。")
     assert rows[0][7] == "2026-07-14T10:30:00"

@@ -304,7 +304,7 @@ def _call_agriculture_ai(settings: Settings, client: httpx.Client | None, raw_te
             raise AgricultureRelatedAIError("DeepSeek output must contain one label and one basis")
         label, basis = output[label_key], output[basis_key]
         original_values = [part.split("：", 1)[-1].strip() for part in _text(raw_text).split("；")]
-        grounded = isinstance(basis, str) and any(value and value in basis for value in original_values)
+        grounded = isinstance(basis, str) and _has_grounded_basis(original_values, basis)
         if label not in labels or not isinstance(basis, str) or not basis.strip() or _CHINESE_PATTERN.search(basis) is None or not grounded:
             raise AgricultureRelatedAIError("DeepSeek basis must be Chinese and quote original input")
         return {"label": label, "basis": basis.strip(), "raw": output}
@@ -315,6 +315,37 @@ def _call_agriculture_ai(settings: Settings, client: httpx.Client | None, raw_te
     finally:
         if owns_client:
             http_client.close()
+
+
+def _has_grounded_basis(original_values: list[str], basis: str, *, minimum_length: int = 4) -> bool:
+    """Accept a rewritten citation when it preserves a meaningful Chinese phrase.
+
+    Model explanations commonly omit connective words or add punctuation, so an
+    entire field value is too strict.  Short placeholders such as ``无`` are
+    deliberately ignored by requiring a contiguous Chinese overlap of at least
+    four characters.
+    """
+    return any(
+        _longest_common_chinese_substring_length(value, basis) >= minimum_length
+        for value in original_values
+        if value
+    )
+
+
+def _longest_common_chinese_substring_length(left: str, right: str) -> int:
+    """Return the longest contiguous shared run made only of Chinese chars."""
+    previous = [0] * (len(right) + 1)
+    longest = 0
+    for left_char in left:
+        current = [0]
+        for index, right_char in enumerate(right, start=1):
+            if left_char == right_char and _CHINESE_PATTERN.fullmatch(left_char):
+                current.append(previous[index - 1] + 1)
+                longest = max(longest, current[-1])
+            else:
+                current.append(0)
+        previous = current
+    return longest
 
 
 def _address_ref(source: str, address: str, excerpt: str) -> dict[str, object]:

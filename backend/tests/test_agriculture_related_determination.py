@@ -199,8 +199,8 @@ def test_category_two_ai_and_request_contract() -> None:
 
 
 def test_category_two_ai_can_return_needs_review() -> None:
-    with _ai_client({"label": "无法判定", "basis": "地址为未知路"}) as client:
-        result = determine_category_two({"registered_address": "未知路"}, _ai_settings(), client)
+    with _ai_client({"label": "无法判定", "basis": "地址为未知路段"}) as client:
+        result = determine_category_two({"registered_address": "未知路段"}, _ai_settings(), client)
     assert result["result"] == "needs_review"
 
 
@@ -212,10 +212,10 @@ def test_category_two_ai_retries_network_errors_with_backoff(monkeypatch: pytest
         attempts += 1
         if attempts < 3:
             raise httpx.ReadTimeout("temporary")
-        return httpx.Response(200, json={"choices": [{"message": {"content": '{"label":"城区","basis":"地址为未知路"}'}}]})
+        return httpx.Response(200, json={"choices": [{"message": {"content": '{"label":"城区","basis":"地址为未知路段"}'}}]})
     monkeypatch.setattr("app.services.agriculture_related_determination.time.sleep", delays.append)
     with httpx.Client(transport=httpx.MockTransport(handler), base_url=_ai_settings().deepseek_base_url) as client:
-        result = determine_category_two({"registered_address": "未知路"}, _ai_settings(), client)
+        result = determine_category_two({"registered_address": "未知路段"}, _ai_settings(), client)
     assert result["result"] == "not_matched"
     assert attempts == 3 and delays == [0.5, 1.0]
 
@@ -230,6 +230,19 @@ def test_category_two_rejects_ungrounded_ai_without_retry(monkeypatch: pytest.Mo
     with httpx.Client(transport=httpx.MockTransport(handler), base_url=_ai_settings().deepseek_base_url) as client, pytest.raises(AgricultureRelatedAIError):
         determine_category_two({"registered_address": "未知路"}, _ai_settings(), client)
     assert calls == 1
+
+
+def test_category_two_accepts_rewritten_basis_with_meaningful_address_excerpt() -> None:
+    address = "福建省平潭综合实验区台湾创业园区澜岸大道9号"
+    basis = "地址中包含'平潭综合实验区'和'澜岸大道'，表明该地址位于城区"
+    with _ai_client({"label": "城区", "basis": basis}) as client:
+        result = determine_category_two({"registered_address": address}, _ai_settings(), client)
+    assert result["result"] == "not_matched"
+
+
+def test_agriculture_ai_rejects_basis_with_only_short_placeholder() -> None:
+    with _ai_client({"label": "均不属于", "basis": "贷款用途为无"}) as client, pytest.raises(AgricultureRelatedAIError):
+        determine_category_four({"loan_purpose": "无"}, {"result": "not_matched"}, _ai_settings(), client)
 
 
 @pytest.mark.parametrize("text", ["粮食深加工", "乡村道路建设", "冷链仓储", "乡村文旅项目"])
@@ -251,6 +264,14 @@ def test_category_four_ai_exclusion_and_grounded_basis() -> None:
     with _ai_client({"label": "均不属于", "basis": "贷款用途为办公设备采购"}) as client:
         result = determine_category_four({"loan_purpose": "办公设备采购"}, {"result": "not_matched"}, _ai_settings(), client)
     assert result["result"] == "not_matched"
+
+
+def test_category_four_accepts_rewritten_basis_without_connective_words() -> None:
+    purpose = "贷款用于建设本地特色食品生产线"
+    basis = "建设本地特色食品生产线属于农产品加工"
+    with _ai_client({"label": "农产品加工", "basis": basis}) as client:
+        result = determine_category_four({"loan_purpose": purpose}, {"result": "not_matched"}, _ai_settings(), client)
+    assert result["result"] == "matched"
 
 
 def test_category_four_ai_can_match_or_request_review() -> None:

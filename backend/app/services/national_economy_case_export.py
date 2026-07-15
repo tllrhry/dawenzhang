@@ -37,6 +37,9 @@ AGRICULTURE_RELATED_RESULT_SHEET = "涉农判定"
 TECHNOLOGY_FINANCE_CONSISTENCY_LABEL = (
     "贷款对应的五篇大文章类别与企业类别是否一致"
 )
+_IP_INTENSIVE_INDUSTRY_SUBJECTS = frozenset(
+    {"知识产权（专利）密集型产业", "知识产权(专利)密集型产业"}
+)
 
 _TECHNOLOGY_FINANCE_HEADERS = (
     "Stage B版本",
@@ -57,6 +60,7 @@ _TECHNOLOGY_FINANCE_HEADERS = (
     "映射源行",
     "匹配依据",
     "业务证据摘要",
+    "知识产权条件",
     TECHNOLOGY_FINANCE_CONSISTENCY_LABEL,
     "一致性依据",
 )
@@ -259,6 +263,7 @@ def _write_technology_finance_result(
                 "",
                 "",
                 "",
+                "",
                 "不适用",
                 "尚无科技金融判定结果，一致性不适用。",
             )
@@ -295,6 +300,7 @@ def _write_technology_finance_result(
                 "",
                 "",
                 "",
+                "",
                 consistency_label,
                 consistency_basis,
             )
@@ -312,10 +318,23 @@ def _write_technology_finance_result(
                 _cell_value(label.get("source_row")),
                 _cell_value(label.get("matching_basis")),
                 _business_evidence_summary(label.get("evidence_refs")),
+                _ip_intensive_industry_condition(label),
                 consistency_label,
                 consistency_basis,
             )
         )
+
+
+def _ip_intensive_industry_condition(label: Mapping[str, object]) -> str:
+    if label.get("subject") not in _IP_INTENSIVE_INDUSTRY_SUBJECTS:
+        return ""
+    status = label.get("ip_intensive_industry_status")
+    if status == "satisfied":
+        return "满足"
+    if status == "unsatisfied":
+        basis = _cell_value(label.get("ip_intensive_industry_basis"))
+        return f"不满足：{basis}" if basis else "不满足"
+    return ""
 
 
 def _write_five_articles_result(

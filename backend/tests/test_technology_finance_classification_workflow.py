@@ -14,6 +14,8 @@ from app.models import (
     FiveArticlesResult,
     NationalEconomyClassificationCase,
     NationalEconomyClassificationResult,
+    TechnologyFinanceIpRegistryEntry,
+    TechnologyFinanceIpRegistryVersion,
 )
 from app.services import technology_finance_classification_workflow as workflow_module
 from app.services.green_finance_condition_matching import GreenFinanceConditionCandidate
@@ -491,6 +493,85 @@ def test_same_code_narrows_enterprise_side_to_the_same_winner(
     assert stage_b_classifier.call_args.args[2] == candidates
     assert stage_b_classifier.call_args.args[3] == candidates
     assert outcome.stage_b_result is not None
+
+
+@pytest.mark.parametrize(
+    ("enterprise_name", "expected_status"),
+    [
+        ("知识产权名录命中企业", "satisfied"),
+        ("知识产权名录未命中企业", "unsatisfied"),
+        (None, "unsatisfied"),
+    ],
+    ids=["matched", "unmatched", "missing-enterprise-name"],
+)
+def test_technology_finance_ip_intensive_label_is_annotated_after_stage_b(
+    workflow_context: tuple[Session, NationalEconomyClassificationCase, FiveArticlesMappingVersion],
+    enterprise_name: str | None,
+    expected_status: str,
+) -> None:
+    session, case, mapping_version = workflow_context
+    case.input_payload = {**case.input_payload, "enterprise_name": enterprise_name}
+    registry_version = TechnologyFinanceIpRegistryVersion(
+        version=(session.scalar(select(func.max(TechnologyFinanceIpRegistryVersion.version))) or 0) + 1,
+        source_path="test-registry.pdf",
+        source_hash=uuid4().hex * 2,
+        row_count=1,
+        status="published",
+    )
+    registry_version.entries = [
+        TechnologyFinanceIpRegistryEntry(
+            enterprise_name="知识产权名录命中企业", source_row=71
+        )
+    ]
+    session.add(registry_version)
+    session.commit()
+    stage_b_decision = TechnologyFinanceStageBResult(
+        labels=(
+            {
+                "subject": "知识产权(专利)密集型产业",
+                "taxonomy_path": ["知识产权(专利)密集型产业"],
+                "NEIC_Code": "2710",
+                "NEIC_Name": "化学药品原料药制造",
+                "source_row": 12,
+                "matching_basis": "命中确定性映射。",
+                "evidence_refs": [],
+            },
+            {
+                "subject": "高技术产业（制造业）",
+                "taxonomy_path": ["医药制造业"],
+                "NEIC_Code": "2710",
+                "NEIC_Name": "化学药品原料药制造",
+                "source_row": 13,
+                "matching_basis": "命中确定性映射。",
+                "evidence_refs": [],
+            },
+        ),
+        consistency_status="consistent",
+        consistency_basis="贷款用途服务于企业科技活动。",
+        consistency_evidence_refs=(),
+        model_output={"validated": True},
+    )
+
+    outcome = classify_technology_finance_case(
+        session,
+        case,
+        _settings(),
+        stage_a_classifier=lambda session, case, settings: _persist_stage_a(session, case),
+        mapping_lookup=MagicMock(return_value=_mapping_result(mapping_version.id)),
+        stage_b_classifier=MagicMock(return_value=stage_b_decision),
+    )
+
+    assert outcome.stage_b_result is not None
+    assert outcome.stage_b_result.consistency_status == "consistent"
+    ip_label, other_label = outcome.stage_b_result.labels
+    assert ip_label["ip_intensive_industry_status"] == expected_status
+    assert "知识产权（专利）密集型产业条件" in ip_label["ip_intensive_industry_basis"]
+    if expected_status == "satisfied":
+        assert "来源序号 71" in ip_label["ip_intensive_industry_basis"]
+    else:
+        assert "不满足" in ip_label["ip_intensive_industry_basis"]
+    assert "ip_intensive_industry_status" not in other_label
+    assert "ip_intensive_industry_basis" not in other_label
 
 
 @pytest.mark.parametrize(

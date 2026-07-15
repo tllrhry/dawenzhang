@@ -210,6 +210,39 @@ def test_completed_export_reads_back_multi_labels_sources_evidence_and_consisten
     assert all(row["一致性依据"] == stage_b.consistency_basis for row in rows)
 
 
+def test_export_writes_ip_intensive_industry_condition_per_label() -> None:
+    case, stage_a = _case_with_stage_a()
+    stage_b = _completed_stage_b(
+        stage_a_result_id=stage_a.id,
+        consistency_status="consistent",
+    )
+    stage_b.labels[0] = {
+        **stage_b.labels[0],
+        "subject": "知识产权(专利)密集型产业",
+        "ip_intensive_industry_status": "satisfied",
+        "ip_intensive_industry_basis": "企业名称已在名录中匹配到。",
+    }
+    stage_b.labels[1] = {
+        **stage_b.labels[1],
+        "subject": "知识产权(专利)密集型产业",
+        "ip_intensive_industry_status": "unsatisfied",
+        "ip_intensive_industry_basis": "企业名称未在名录中匹配到。",
+    }
+
+    workbook = load_workbook(
+        BytesIO(export_case_workbook(case, five_articles_results=[stage_b]))
+    )
+    sheet = workbook["科技金融判定"]
+    headers = tuple(cell.value for cell in sheet[1])
+    rows = [
+        dict(zip(headers, row, strict=True))
+        for row in sheet.iter_rows(min_row=2, values_only=True)
+    ]
+
+    assert rows[0]["知识产权条件"] == "满足"
+    assert rows[1]["知识产权条件"] == "不满足：企业名称未在名录中匹配到。"
+
+
 @pytest.mark.parametrize(
     (
         "result_status",

@@ -345,15 +345,15 @@ def test_fake_business_field_or_excerpt_is_rejected(mutation: str) -> None:
         _run(output, (enterprise,), (loan,))
 
 
-def test_missing_mapping_evidence_is_rejected() -> None:
+def test_missing_business_evidence_is_rejected() -> None:
     enterprise = _label(code="2710", name="化学药品原料药制造", source_row=11)
     loan = _label(code="6311", name="基础软件开发", source_row=22)
     output = _model_output((enterprise,), (loan,), "consistent")
     output["labels"][0]["evidence_refs"] = [
-        output["labels"][0]["evidence_refs"][1]
+        output["labels"][0]["evidence_refs"][0]
     ]
 
-    with pytest.raises(TechnologyFinanceStageBError, match="mapping and one business"):
+    with pytest.raises(TechnologyFinanceStageBError, match="at least one business"):
         _run(output, (enterprise,), (loan,))
 
 
@@ -576,6 +576,84 @@ def test_output_label_order_is_normalized_to_deterministic_input_order() -> None
     result = _run(output, (enterprise,), (first, second))
 
     assert [label["source_row"] for label in result.labels] == [22, 23]
+
+
+def test_label_output_allows_only_an_exact_echo_of_server_match_method() -> None:
+    enterprise = _label(code="2710", name="化学药品原料药制造", source_row=11)
+    loan = _label(code="6311", name="基础软件开发", source_row=22)
+    output = _model_output((enterprise,), (loan,), "consistent")
+    output["labels"][0]["match_method"] = "neic_code"
+
+    result = _run(output, (enterprise,), (loan,))
+
+    assert result.labels[0]["match_method"] == "neic_code"
+    output["labels"][0]["match_method"] = "condition_fallback"
+    with pytest.raises(TechnologyFinanceStageBError, match="match_method differs"):
+        _run(output, (enterprise,), (loan,))
+
+
+def test_mapping_evidence_allows_and_discards_an_exact_match_method_echo() -> None:
+    enterprise = _label(code="2710", name="化学药品原料药制造", source_row=11)
+    loan = _label(code="6311", name="基础软件开发", source_row=22)
+    output = _model_output((enterprise,), (loan,), "consistent")
+    output["labels"][0]["evidence_refs"][0]["match_method"] = "neic_code"
+
+    result = _run(output, (enterprise,), (loan,))
+
+    assert result.labels[0]["evidence_refs"][0] == _mapping_ref(loan)
+    output["labels"][0]["evidence_refs"][0]["match_method"] = "condition_fallback"
+    with pytest.raises(TechnologyFinanceStageBError, match="match_method differs"):
+        _run(output, (enterprise,), (loan,))
+
+
+def test_label_evidence_uses_server_mapping_when_model_returns_only_business_evidence() -> None:
+    enterprise = _label(code="2710", name="化学药品原料药制造", source_row=11)
+    loan = _label(code="6311", name="基础软件开发", source_row=22)
+    output = _model_output((enterprise,), (loan,), "consistent")
+    output["labels"][0]["evidence_refs"] = [_business_ref()]
+
+    result = _run(output, (enterprise,), (loan,))
+
+    assert result.labels[0]["evidence_refs"] == [_mapping_ref(loan), _business_ref()]
+
+
+def test_same_code_multiple_labels_prompt_requires_labels_not_label_basis() -> None:
+    first = _label(code="2710", name="化学药品原料药制造", source_row=11)
+    second = _label(
+        code="2710",
+        name="化学药品原料药制造",
+        source_row=12,
+        subject="知识产权(专利)密集型产业",
+        taxonomy_path=("信息通信技术制造业",),
+    )
+    captured: dict[str, object] = {}
+    output = {"labels": [_label_output(first), _label_output(second)]}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": json.dumps(output, ensure_ascii=False)}}]},
+        )
+
+    stage_a = _stage_a(
+        enterprise_code="2710",
+        enterprise_name="化学药品原料药制造",
+        loan_code="2710",
+        loan_name="化学药品原料药制造",
+    )
+    settings = _settings()
+    with httpx.Client(
+        transport=httpx.MockTransport(handler), base_url=settings.deepseek_base_url
+    ) as client:
+        result = classify_technology_finance_stage_b(
+            _input_payload(), stage_a, (first, second), (first, second), settings, client=client
+        )
+
+    system_prompt = captured["messages"][0]["content"]  # type: ignore[index]
+    assert "根对象只能返回 labels，不得返回 consistency。" in system_prompt
+    assert "根对象只能返回 label_basis，不得返回 consistency。" not in system_prompt
+    assert [label["source_row"] for label in result.labels] == [11, 12]
 
 
 def test_single_label_basis_is_attached_to_server_owned_label() -> None:

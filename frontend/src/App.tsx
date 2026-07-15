@@ -128,6 +128,7 @@ const flowSteps = [
   ['结果复核', '如有异议发起复核'],
   ['历史导出', '导出历史判定记录'],
 ]
+const ipIntensiveIndustrySubjects = new Set(['知识产权（专利）密集型产业', '知识产权(专利)密集型产业'])
 
 type ClassificationStage = 'upload' | 'processing' | 'result'
 
@@ -493,6 +494,7 @@ function ResultPanel({ scenarioId, caseData, result, stageBResult, errorMessage,
                 {label.taxonomy_path.map((tier, tierIndex) => <Descriptions.Item key={`tier-${tierIndex}`} label={['第一层名称', '第二层名称', '第三层名称', '第四层名称'][tierIndex]}>{tier}</Descriptions.Item>)}
                 <Descriptions.Item label="映射来源">版本 {label.mapping_version_id} · 源行 {label.source_row}</Descriptions.Item>
                 <Descriptions.Item label="匹配依据" span={2}>{label.matching_basis || '--'}</Descriptions.Item>
+                {scenarioId === TECHNOLOGY_FINANCE_SCENARIO && ipIntensiveIndustrySubjects.has(label.subject) && label.ip_intensive_industry_status && <><Descriptions.Item label="知识产权条件"><Tag color={label.ip_intensive_industry_status === 'satisfied' ? 'success' : 'error'}>{label.ip_intensive_industry_status === 'satisfied' ? '满足' : '不满足'}</Tag></Descriptions.Item><Descriptions.Item label="知识产权条件依据" span={2}>{label.ip_intensive_industry_basis || '--'}</Descriptions.Item></>}
               </Descriptions>
               <div className="evidence-summary"><b>映射与业务证据</b>{label.evidence_refs.map((reference, evidenceIndex) => <span key={`${reference.type || 'evidence'}-${evidenceIndex}`}>{evidenceSummary(reference)}</span>)}</div>
             </section>

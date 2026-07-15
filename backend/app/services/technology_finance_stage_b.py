@@ -243,9 +243,15 @@ def _build_stage_b_request_payload(
         "same_four_digit_code": same_code,
         "max_excerpt_length": MAX_EVIDENCE_EXCERPT_LENGTH,
     }
+    is_single_label = len(loan_direction_labels) == 1
     consistency_instruction = (
-        "企业四位码与投向四位码相同，一致性由服务端确定为 consistent；"
-        "根对象只能返回 label_basis，不得返回 consistency。"
+        (
+            "企业四位码与投向四位码相同，一致性由服务端确定为 consistent；"
+            "根对象只能返回 label_basis，不得返回 consistency。"
+            if is_single_label
+            else "企业四位码与投向四位码相同，一致性由服务端确定为 consistent；"
+            "根对象只能返回 labels，不得返回 consistency。"
+        )
         if same_code
         else (
             "两码不同，根对象必须返回 label_basis 和 consistency。consistency 只能包含 "
@@ -257,7 +263,7 @@ def _build_stage_b_request_payload(
             "不同判 inconsistent，也不得仅凭研发、专利或资质判 consistent。"
         )
     )
-    if len(loan_direction_labels) == 1:
+    if is_single_label:
         label_instruction = (
             "loan_direction_labels 已由服务端收窄为唯一最匹配标签。你不得输出 labels "
             "数组，也不得复制标签字段；不得新增、删除、改写或替换标签。"
@@ -281,7 +287,7 @@ def _build_stage_b_request_payload(
             "每个条目的 matching_basis 都是对应候选的中文匹配依据，且 evidence_refs 至少一条；"
         )
         evidence_instruction = (
-            "evidence_refs 必须包含对应候选的 mapping 证据和至少一条 business 证据；"
+            "evidence_refs 必须至少包含一条 business 证据；对应候选的 mapping 证据由服务端组装。"
             "每条 business 证据只能包含 type、field_key、field_label、excerpt，type 必须为 business。"
         )
     return {
@@ -430,7 +436,11 @@ def _validate_label_outputs(
             raise TechnologyFinanceStageBError(
                 f"labels[{index}] must be a JSON object"
             )
-        _require_exact_fields(raw_label, _LABEL_FIELDS, f"labels[{index}]")
+        echoed_match_method = raw_label.get("match_method")
+        fields_without_match_method = {
+            field: value for field, value in raw_label.items() if field != "match_method"
+        }
+        _require_exact_fields(fields_without_match_method, _LABEL_FIELDS, f"labels[{index}]")
         key = _label_key_from_output(raw_label, f"labels[{index}]")
         expected = expected_by_key.get(key)
         if expected is None:
@@ -444,6 +454,10 @@ def _validate_label_outputs(
                 continue
             raise TechnologyFinanceStageBError(
                 f"labels[{index}] duplicated a deterministic label"
+            )
+        if "match_method" in raw_label and echoed_match_method != expected.match_method:
+            raise TechnologyFinanceStageBError(
+                f"labels[{index}].match_method differs from the deterministic label"
             )
         basis = _required_chinese_text(raw_label, "matching_basis", f"labels[{index}]")
         evidence_refs = _validate_label_evidence_refs(
@@ -531,37 +545,40 @@ def _validate_label_evidence_refs(
     branch: str,
 ) -> tuple[dict[str, object], ...]:
     refs = _required_array(raw_refs, f"{branch}.evidence_refs")
-    validated: list[dict[str, object]] = []
-    has_mapping = False
-    has_business = False
+    business_refs: list[dict[str, object]] = []
     for index, raw_ref in enumerate(refs):
         ref_branch = f"{branch}.evidence_refs[{index}]"
         if not isinstance(raw_ref, dict):
             raise TechnologyFinanceStageBError(f"{ref_branch} must be an object")
         ref_type = raw_ref.get("type")
         if ref_type == "mapping":
-            _require_exact_fields(raw_ref, _MAPPING_EVIDENCE_FIELDS, ref_branch)
+            echoed_match_method = raw_ref.get("match_method")
+            fields_without_match_method = {
+                field: value for field, value in raw_ref.items() if field != "match_method"
+            }
+            _require_exact_fields(
+                fields_without_match_method, _MAPPING_EVIDENCE_FIELDS, ref_branch
+            )
             if _mapping_ref_key(raw_ref, ref_branch) != _mapping_key(expected_label):
                 raise TechnologyFinanceStageBError(
                     f"{ref_branch} does not match the label mapping source"
                 )
-            has_mapping = True
-            validated.append(dict(raw_ref))
+            if "match_method" in raw_ref and echoed_match_method != expected_label.match_method:
+                raise TechnologyFinanceStageBError(
+                    f"{ref_branch}.match_method differs from the deterministic label"
+                )
         elif ref_type == "business":
             _require_exact_fields(raw_ref, _BUSINESS_EVIDENCE_FIELDS, ref_branch)
-            validated.append(
-                _validate_business_ref(raw_ref, business_sources, ref_branch)
-            )
-            has_business = True
+            business_refs.append(_validate_business_ref(raw_ref, business_sources, ref_branch))
         else:
             raise TechnologyFinanceStageBError(
                 f"{ref_branch}.type must be mapping or business"
             )
-    if not has_mapping or not has_business:
+    if not business_refs:
         raise TechnologyFinanceStageBError(
-            f"{branch} requires at least one mapping and one business evidence ref"
+            f"{branch} requires at least one business evidence ref"
         )
-    return tuple(validated)
+    return (_mapping_evidence_ref(expected_label), *business_refs)
 
 
 def _validate_consistency_output(

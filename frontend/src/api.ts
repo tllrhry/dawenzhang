@@ -63,6 +63,8 @@ export interface TechnologyFinanceLabel {
   source_row: number
   matching_basis: string
   evidence_refs: EvidenceReference[]
+  ip_intensive_industry_status?: 'satisfied' | 'unsatisfied'
+  ip_intensive_industry_basis?: string
 }
 
 export interface FiveArticlesResult {

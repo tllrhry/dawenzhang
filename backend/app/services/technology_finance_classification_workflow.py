@@ -35,6 +35,9 @@ from app.services.technology_finance_mapping_query import (
     FiveArticlesMappingLookupResult,
     lookup_five_articles_hierarchy_mapping,
 )
+from app.services.technology_finance_ip_registry import (
+    lookup_technology_finance_ip_registry_match,
+)
 from app.services.technology_finance_stage_b import (
     TechnologyFinanceStageBResult,
     classify_five_articles_stage_b,
@@ -64,6 +67,9 @@ ConditionLabelSelectionCallable = Callable[
 
 GREEN_FINANCE_SCENARIO_ID = "green_finance"
 _GREEN_FINANCE_KEYWORDS = ("绿色生产", "绿色经营")
+_IP_INTENSIVE_INDUSTRY_SUBJECTS = frozenset(
+    {"知识产权（专利）密集型产业", "知识产权(专利)密集型产业"}
+)
 
 
 @dataclass(frozen=True)
@@ -330,12 +336,44 @@ def _build_stage_b_result(
     decision = stage_b_classifier(
         profile, case.input_payload, stage_a_result, enterprise_labels, loan_labels, settings
     )
+    labels = list(decision.labels)
+    if profile.id == TECHNOLOGY_FINANCE_REGISTRATION.id:
+        labels = _apply_technology_finance_ip_registry_statuses(
+            session, case.input_payload, labels
+        )
     return _new_result(
         session, case=case, stage_a_result=stage_a_result, status="completed",
-        mapping_version_id=mapping_result.mapping_version_id, labels=list(decision.labels),
+        mapping_version_id=mapping_result.mapping_version_id, labels=labels,
         consistency_status=decision.consistency_status, consistency_basis=decision.consistency_basis,
         consistency_evidence_refs=list(decision.consistency_evidence_refs), model_output=dict(decision.model_output),
     )
+
+
+def _apply_technology_finance_ip_registry_statuses(
+    session: Session, input_payload: dict[str, object], labels: list[dict[str, object]]
+) -> list[dict[str, object]]:
+    enterprise_name = input_payload.get("enterprise_name")
+    display_name = enterprise_name.strip() if isinstance(enterprise_name, str) else ""
+    display_name = display_name or "（未填写）"
+    result_labels: list[dict[str, object]] = []
+    for label in labels:
+        result_label = dict(label)
+        if result_label.get("subject") in _IP_INTENSIVE_INDUSTRY_SUBJECTS:
+            match = lookup_technology_finance_ip_registry_match(session, enterprise_name if isinstance(enterprise_name, str) else None)
+            if match.matched:
+                result_label["ip_intensive_industry_status"] = "satisfied"
+                result_label["ip_intensive_industry_basis"] = (
+                    f"企业名称『{display_name}』能在江苏省高新技术企业备案名单中匹配到"
+                    f"（来源序号 {match.source_row}），知识产权（专利）密集型产业条件满足。"
+                )
+            else:
+                result_label["ip_intensive_industry_status"] = "unsatisfied"
+                result_label["ip_intensive_industry_basis"] = (
+                    f"企业名称『{display_name}』未能在江苏省高新技术企业备案名单中匹配到，"
+                    "知识产权（专利）密集型产业条件不满足。"
+                )
+        result_labels.append(result_label)
+    return result_labels
 
 
 def _resolve_green_finance_condition_fallbacks(

@@ -25,6 +25,7 @@ from app.services.scenario_registry import (
     TECHNOLOGY_FINANCE_REGISTRATION,
     ScenarioRegistration,
 )
+from app.services.national_economy_catalog_chunks import embed_texts
 
 
 TECHNOLOGY_FINANCE_SCENARIO_ID = "technology_finance"
@@ -38,7 +39,8 @@ REQUIRED_HEADERS = (
     "国民经济行业代码",
     "国民经济行业名称",
 )
-ALL_HEADERS = (OPTIONAL_CATEGORY_HEADER, *REQUIRED_HEADERS)
+CONDITION_CRITERIA_HEADER = "条件/标准"
+ALL_HEADERS = (OPTIONAL_CATEGORY_HEADER, *REQUIRED_HEADERS, CONDITION_CRITERIA_HEADER)
 MAJOR_CATEGORY_CODE_PATTERN = re.compile(r"^[A-Za-z]?(\d{2})$")
 
 
@@ -64,7 +66,7 @@ class MappingSyncSource:
 class NormalizedMappingRow:
     source_row: int
     neic_code: str
-    code_level: int
+    code_level: int | None
     neic_name: str
     comparison_name: str
     subject: str
@@ -72,6 +74,7 @@ class NormalizedMappingRow:
     tier2: str | None
     tier3: str | None
     tier4: str | None
+    condition_criteria: str | None
 
     @property
     def duplicate_key(self) -> tuple[object, ...]:
@@ -83,6 +86,7 @@ class NormalizedMappingRow:
             self.tier2,
             self.tier3,
             self.tier4,
+            self.condition_criteria,
         )
 
 
@@ -108,6 +112,7 @@ def read_mapping_source(
     path: Path,
     *,
     expected_category: str | None = None,
+    profile: ScenarioRegistration | None = None,
 ) -> MappingSyncSource:
     if not path.is_file():
         raise FileNotFoundError(f"five-articles mapping Excel not found: {path}")
@@ -131,9 +136,21 @@ def read_mapping_source(
             else:
                 positions[header] = index
 
-        missing = [header for header in REQUIRED_HEADERS if header not in positions]
+        tier_depth = profile.mapping_tier_depth if profile else 4
+        tier_headers = (
+            *REQUIRED_HEADERS[: tier_depth + 1],
+            *REQUIRED_HEADERS[-2:],
+        )
+        missing = [header for header in tier_headers if header not in positions]
         if expected_category is not None and OPTIONAL_CATEGORY_HEADER not in positions:
             missing.append(OPTIONAL_CATEGORY_HEADER)
+        if profile is not None and profile.mapping_has_condition_criteria:
+            if CONDITION_CRITERIA_HEADER not in positions:
+                missing.append(CONDITION_CRITERIA_HEADER)
+        elif CONDITION_CRITERIA_HEADER in positions:
+            raise MappingHeaderError(
+                "invalid mapping headers: unexpected header: '条件/标准'"
+            )
         relevant_duplicates = sorted(set(duplicates).intersection(ALL_HEADERS))
         if missing or relevant_duplicates:
             details = []
@@ -201,6 +218,7 @@ def synchronize_technology_finance_mapping(
         settings,
         scenario_id=scenario_id,
         expected_category=TECHNOLOGY_FINANCE_REGISTRATION.name,
+        profile=TECHNOLOGY_FINANCE_REGISTRATION,
     )
 
 
@@ -213,7 +231,7 @@ def synchronize_scenario_mapping(
     if not profile.is_executable_profile:
         raise ValueError(f"scenario {profile.id!r} has no executable mapping profile")
     source = read_mapping_source(
-        profile.mapping_path(settings), expected_category=profile.name
+        profile.mapping_path(settings), expected_category=profile.name, profile=profile
     )
     return _synchronize_mapping(
         session,
@@ -221,6 +239,7 @@ def synchronize_scenario_mapping(
         settings,
         scenario_id=profile.id,
         expected_category=profile.name,
+        profile=profile,
     )
 
 
@@ -231,6 +250,7 @@ def _synchronize_mapping(
     *,
     scenario_id: str,
     expected_category: str,
+    profile: ScenarioRegistration = TECHNOLOGY_FINANCE_REGISTRATION,
 ) -> MappingSyncResult:
     existing = session.scalar(
         select(FiveArticlesMappingVersion).where(
@@ -244,6 +264,7 @@ def _synchronize_mapping(
     normalized_rows, normalization_errors, normalizations = _normalize_rows(
         source.rows,
         expected_category=expected_category,
+        profile=profile,
     )
     catalog = load_current_catalog_facts(session, settings)
     normalized_rows, catalog_name_normalizations = _canonicalize_catalog_names(
@@ -254,6 +275,18 @@ def _synchronize_mapping(
     if catalog.version is not None:
         validation_errors.extend(_validate_against_catalog(normalized_rows, catalog))
     validation_errors.extend(_find_duplicate_rows(normalized_rows))
+
+    condition_embeddings: tuple[tuple[float, ...], ...] | None = None
+    if (
+        profile.mapping_has_condition_criteria
+        and normalized_rows
+        and not validation_errors
+    ):
+        # Generate every vector before creating a draft/version row.  A cloud
+        # failure therefore cannot leave a partially published mapping behind.
+        condition_embeddings = embed_texts(
+            tuple(row.condition_criteria or "" for row in normalized_rows), settings
+        )
 
     if existing is None:
         version_number = session.scalar(
@@ -317,9 +350,15 @@ def _synchronize_mapping(
                 tier2=row.tier2,
                 tier3=row.tier3,
                 tier4=row.tier4,
+                condition_criteria=row.condition_criteria,
+                condition_embedding=(
+                    condition_embeddings[index]
+                    if condition_embeddings is not None
+                    else None
+                ),
                 source_row=row.source_row,
             )
-            for row in normalized_rows
+            for index, row in enumerate(normalized_rows)
         ]
     )
     session.flush()
@@ -438,6 +477,7 @@ def _normalize_rows(
     rows: Sequence[RawMappingRow],
     *,
     expected_category: str,
+    profile: ScenarioRegistration = TECHNOLOGY_FINANCE_REGISTRATION,
 ) -> tuple[
     tuple[NormalizedMappingRow, ...],
     list[dict[str, object]],
@@ -461,7 +501,11 @@ def _normalize_rows(
 
         raw_code = row.values.get("国民经济行业代码")
         code = _normalize_neic_code(raw_code)
-        if code is None:
+        is_placeholder_code = (
+            profile.mapping_has_condition_criteria
+            and _normalize_text(raw_code) == "-"
+        )
+        if code is None and not is_placeholder_code:
             errors.append(
                 {
                     "type": "invalid_code",
@@ -477,6 +521,27 @@ def _normalize_rows(
         tier2 = _optional_text(row.values.get("第二层名称"))
         tier3 = _optional_text(row.values.get("第三层名称"))
         tier4 = _optional_text(row.values.get("第四层名称"))
+        condition_criteria = _optional_text(row.values.get(CONDITION_CRITERIA_HEADER))
+
+        tiers = (tier1, tier2, tier3, tier4)
+        for level, value in enumerate(tiers, start=1):
+            if level > profile.mapping_tier_depth and value is not None:
+                errors.append(
+                    {
+                        "type": "tier_exceeds_declared_depth",
+                        "source_row": row.source_row,
+                        "tier": level,
+                        "value": value,
+                    }
+                )
+        if profile.mapping_has_condition_criteria and not condition_criteria:
+            errors.append(
+                {
+                    "type": "missing_required_value",
+                    "source_row": row.source_row,
+                    "field": CONDITION_CRITERIA_HEADER,
+                }
+            )
 
         for field, value in (
             ("NEIC_Name", name),
@@ -512,13 +577,19 @@ def _normalize_rows(
                 }
             )
 
-        if code is None or not name or not subject or not tier1:
+        if (
+            (code is None and not is_placeholder_code)
+            or not name
+            or not subject
+            or not tier1
+            or (profile.mapping_has_condition_criteria and not condition_criteria)
+        ):
             continue
         normalized.append(
             NormalizedMappingRow(
                 source_row=row.source_row,
-                neic_code=code,
-                code_level=len(code),
+                neic_code="-" if is_placeholder_code else code,
+                code_level=None if is_placeholder_code else len(code),
                 neic_name=name,
                 comparison_name=name,
                 subject=subject,
@@ -526,6 +597,7 @@ def _normalize_rows(
                 tier2=tier2,
                 tier3=tier3,
                 tier4=tier4,
+                condition_criteria=condition_criteria,
             )
         )
     return tuple(normalized), errors, normalizations
@@ -536,6 +608,8 @@ def _validate_against_catalog(
 ) -> list[dict[str, object]]:
     errors: list[dict[str, object]] = []
     for row in rows:
+        if row.code_level is None:
+            continue
         if row.code_level == 4:
             names = catalog.four_digit_names
             name_codes = catalog.four_digit_name_codes
@@ -589,6 +663,9 @@ def _canonicalize_catalog_names(
     canonical_rows: list[NormalizedMappingRow] = []
     normalizations: list[dict[str, object]] = []
     for row in rows:
+        if row.code_level is None:
+            canonical_rows.append(row)
+            continue
         if row.code_level == 4:
             names = catalog.four_digit_names
             name_codes = catalog.four_digit_name_codes

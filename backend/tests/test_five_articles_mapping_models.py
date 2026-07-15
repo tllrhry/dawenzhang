@@ -7,7 +7,9 @@ import pytest
 from sqlalchemy import inspect
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
+from pgvector.sqlalchemy import Vector
 
+from app.core.config import get_settings
 from app.db.session import get_engine, get_sessionmaker
 from app.models import FiveArticlesMappingRow, FiveArticlesMappingVersion
 
@@ -71,12 +73,18 @@ def test_mapping_model_metadata_contains_design_fields_and_constraints() -> None
         "tier2",
         "tier3",
         "tier4",
+        "condition_criteria",
+        "condition_embedding",
         "source_row",
         "created_at",
     } == set(row_columns.keys())
     assert row_columns["tier1"].nullable is False
     for tier in ("tier2", "tier3", "tier4"):
         assert row_columns[tier].nullable is True
+    assert row_columns["condition_criteria"].nullable is True
+    assert row_columns["condition_embedding"].nullable is True
+    assert isinstance(row_columns["condition_embedding"].type, Vector)
+    assert row_columns["condition_embedding"].type.dim == get_settings().embedding_dimension
 
     foreign_key = next(iter(row_columns["mapping_version_id"].foreign_keys))
     assert foreign_key.target_fullname == "five_articles_mapping_versions.id"
@@ -169,6 +177,53 @@ def test_database_enforces_source_hash_status_code_level_and_foreign_key() -> No
         session.rollback()
 
         session.add(
+            FiveArticlesMappingRow(
+                mapping_version_id=valid_version.id,
+                scenario_id="green_finance",
+                neic_code="-",
+                code_level=None,
+                neic_name="不适用",
+                subject="绿色金融",
+                tier1="节能环保",
+                tier2="绿色产业",
+                tier3=None,
+                tier4=None,
+                source_row=3,
+            )
+        )
+        session.commit()
+
+        session.add(
+            FiveArticlesMappingRow(
+                mapping_version_id=valid_version.id,
+                scenario_id="green_finance",
+                neic_code="-",
+                code_level=2,
+                neic_name="不适用",
+                subject="绿色金融",
+                tier1="节能环保",
+                tier2="绿色产业",
+                tier3=None,
+                tier4=None,
+                source_row=4,
+            )
+        )
+        with pytest.raises(IntegrityError):
+            session.commit()
+        session.rollback()
+
+        invalid_length_row = _row(
+            mapping_version_id=valid_version.id,
+            scenario_id=scenario_id,
+            code_level=2,
+        )
+        invalid_length_row.neic_code = "271"
+        session.add(invalid_length_row)
+        with pytest.raises(IntegrityError):
+            session.commit()
+        session.rollback()
+
+        session.add(
             _version(
                 scenario_id=scenario_id,
                 source_hash=uuid4().hex * 2,
@@ -209,6 +264,33 @@ def test_database_enforces_source_hash_status_code_level_and_foreign_key() -> No
     finally:
         session.rollback()
         persisted_version = session.get(FiveArticlesMappingVersion, valid_version.id)
+        if persisted_version is not None:
+            session.delete(persisted_version)
+            session.commit()
+        session.close()
+
+
+def test_existing_non_green_finance_rows_leave_condition_fields_null() -> None:
+    session = get_sessionmaker()()
+    version = _version(
+        scenario_id=f"technology_finance_{uuid4().hex}", source_hash=uuid4().hex * 2
+    )
+    try:
+        session.add(version)
+        session.commit()
+        rows = [
+            _row(mapping_version_id=version.id, scenario_id=scenario_id)
+            for scenario_id in ("technology_finance", "digital_finance", "pension_finance")
+        ]
+        session.add_all(rows)
+        session.commit()
+        assert all(
+            row.condition_criteria is None and row.condition_embedding is None
+            for row in rows
+        )
+    finally:
+        session.rollback()
+        persisted_version = session.get(FiveArticlesMappingVersion, version.id)
         if persisted_version is not None:
             session.delete(persisted_version)
             session.commit()

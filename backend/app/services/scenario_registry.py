@@ -36,6 +36,9 @@ class ScenarioRegistration:
     field_schema: tuple[ScenarioField, ...]
     stage_a_field_keys: tuple[str, ...]
     stage_b_evidence_field_keys: tuple[str, ...]
+    mapping_tier_depth: int = 4
+    mapping_path_setting: str | None = None
+    mapping_has_condition_criteria: bool = False
 
     def template_path(self, settings: Settings | None = None) -> Path:
         if self.template_path_setting is None:
@@ -45,7 +48,10 @@ class ScenarioRegistration:
     def mapping_path(self, settings: Settings | None = None) -> Path:
         if not self.uses_five_articles_mapping:
             raise ValueError(f"场景 {self.id} 暂未配置映射")
-        return (settings or get_settings()).five_articles_mapping_source_path
+        resolved_settings = settings or get_settings()
+        if self.mapping_path_setting is not None:
+            return getattr(resolved_settings, self.mapping_path_setting)
+        return resolved_settings.five_articles_mapping_source_path
 
     @property
     def is_executable_profile(self) -> bool:
@@ -130,6 +136,7 @@ TECHNOLOGY_FINANCE_REGISTRATION = ScenarioRegistration(
     stage_b_evidence_field_keys=tuple(
         field.key for field in TECHNOLOGY_FINANCE_FIELD_SCHEMA
     ),
+    mapping_tier_depth=4,
 )
 
 GREEN_FINANCE_ADDITIONAL_FIELDS = (
@@ -339,6 +346,9 @@ GREEN_FINANCE_REGISTRATION = ScenarioRegistration(
         "green_certifications",
         "trade_goods_services",
     ),
+    mapping_tier_depth=2,
+    mapping_path_setting="green_finance_mapping_source_path",
+    mapping_has_condition_criteria=True,
 )
 
 DIGITAL_FINANCE_REGISTRATION = ScenarioRegistration(
@@ -361,6 +371,7 @@ DIGITAL_FINANCE_REGISTRATION = ScenarioRegistration(
         "rd_ip_info",
         "trade_goods_services",
     ),
+    mapping_tier_depth=3,
 )
 
 PENSION_FINANCE_REGISTRATION = ScenarioRegistration(
@@ -383,6 +394,7 @@ PENSION_FINANCE_REGISTRATION = ScenarioRegistration(
         "certifications",
         "trade_goods_services",
     ),
+    mapping_tier_depth=3,
 )
 
 INCLUSIVE_FINANCE_REGISTRATION = ScenarioRegistration(

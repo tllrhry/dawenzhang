@@ -15,8 +15,13 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from pgvector.sqlalchemy import Vector
 
+from app.core.config import get_settings
 from app.models.base import Base
+
+
+settings = get_settings()
 
 
 class FiveArticlesMappingVersion(Base):
@@ -64,11 +69,15 @@ class FiveArticlesMappingRow(Base):
     __tablename__ = "five_articles_mapping_rows"
     __table_args__ = (
         CheckConstraint(
-            "code_level IN (2, 3, 4)",
+            "(neic_code = '-' AND code_level IS NULL) OR "
+            "(neic_code <> '-' AND code_level IS NOT NULL "
+            "AND code_level IN (2, 3, 4))",
             name="ck_five_articles_mapping_rows_code_level",
         ),
         CheckConstraint(
-            "char_length(neic_code) = code_level",
+            "(neic_code = '-' AND code_level IS NULL) OR "
+            "(neic_code <> '-' AND code_level IS NOT NULL "
+            "AND char_length(neic_code) = code_level)",
             name="ck_five_articles_mapping_rows_code_length",
         ),
         Index(
@@ -88,13 +97,17 @@ class FiveArticlesMappingRow(Base):
     )
     scenario_id: Mapped[str] = mapped_column(String(64), nullable=False)
     neic_code: Mapped[str] = mapped_column(String(4), nullable=False)
-    code_level: Mapped[int] = mapped_column(Integer, nullable=False)
+    code_level: Mapped[int | None] = mapped_column(Integer, nullable=True)
     neic_name: Mapped[str] = mapped_column(String(255), nullable=False)
     subject: Mapped[str] = mapped_column(String(255), nullable=False)
     tier1: Mapped[str] = mapped_column(String(255), nullable=False)
     tier2: Mapped[str | None] = mapped_column(String(255), nullable=True)
     tier3: Mapped[str | None] = mapped_column(String(255), nullable=True)
     tier4: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    condition_criteria: Mapped[str | None] = mapped_column(Text, nullable=True)
+    condition_embedding: Mapped[list[float] | None] = mapped_column(
+        Vector(settings.embedding_dimension), nullable=True
+    )
     source_row: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

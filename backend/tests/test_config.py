@@ -71,6 +71,16 @@ def test_five_articles_mapping_source_path_has_default_and_environment_alias() -
     )
 
 
+def test_green_finance_mapping_source_path_has_default_and_environment_alias() -> None:
+    assert Settings(_env_file=None).green_finance_mapping_source_path == Path(
+        "五篇大文章映射/绿色金融贷款投向.xlsx"
+    )
+    assert Settings(
+        _env_file=None,
+        GREEN_FINANCE_MAPPING_SOURCE_PATH="/mnt/catalogs/green-finance.xlsx",
+    ).green_finance_mapping_source_path == Path("/mnt/catalogs/green-finance.xlsx")
+
+
 @pytest.mark.parametrize(
     ("field_name", "environment_name", "default_path"),
     (

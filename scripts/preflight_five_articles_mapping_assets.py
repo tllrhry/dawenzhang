@@ -18,6 +18,7 @@ from openpyxl.utils.exceptions import InvalidFileException
 ROOT = Path(__file__).resolve().parents[1]
 ASSET_DIR = ROOT / "五篇大文章映射"
 MAPPING_SOURCE_FILENAME = "贷款投向-五篇大文章映射表.xlsx"
+GREEN_FINANCE_MAPPING_SOURCE_FILENAME = "绿色金融贷款投向.xlsx"
 
 REQUIRED_HEADERS = (
     "主题",
@@ -29,7 +30,8 @@ REQUIRED_HEADERS = (
     "NEIC_Name",
 )
 OPTIONAL_CATEGORY_HEADER = "属于类别"
-ALL_HEADERS = (*REQUIRED_HEADERS, OPTIONAL_CATEGORY_HEADER)
+CONDITION_CRITERIA_HEADER = "条件/标准"
+ALL_HEADERS = (*REQUIRED_HEADERS, OPTIONAL_CATEGORY_HEADER, CONDITION_CRITERIA_HEADER)
 
 HEADER_ALIASES = {
     "主题": ("主题", "主题 Subject", "Subject"),
@@ -40,6 +42,7 @@ HEADER_ALIASES = {
     "NEIC_Code": ("NEIC_Code", "国民经济行业代码", "国民经济行业代码 NEIC_Code"),
     "NEIC_Name": ("NEIC_Name", "国民经济行业名称", "国民经济行业名称 NEIC_Name"),
     OPTIONAL_CATEGORY_HEADER: (OPTIONAL_CATEGORY_HEADER,),
+    CONDITION_CRITERIA_HEADER: (CONDITION_CRITERIA_HEADER,),
 }
 
 
@@ -47,6 +50,8 @@ HEADER_ALIASES = {
 class MappingAssetSpec:
     scenario_id: str
     category_name: str
+    source_filename: str = MAPPING_SOURCE_FILENAME
+    required_headers: tuple[str, ...] = REQUIRED_HEADERS
 
 
 @dataclass(frozen=True)
@@ -60,7 +65,19 @@ class MappingAssetReport:
 
 ASSET_SPECS = (
     MappingAssetSpec("technology_finance", "科技金融"),
-    MappingAssetSpec("green_finance", "绿色金融"),
+    MappingAssetSpec(
+        "green_finance",
+        "绿色金融",
+        source_filename=GREEN_FINANCE_MAPPING_SOURCE_FILENAME,
+        required_headers=(
+            "主题",
+            "第一层",
+            "第二层",
+            "NEIC_Code",
+            "NEIC_Name",
+            CONDITION_CRITERIA_HEADER,
+        ),
+    ),
     MappingAssetSpec("digital_finance", "数字金融"),
     MappingAssetSpec("pension_finance", "养老金融"),
 )
@@ -102,10 +119,13 @@ def discover_mapping_assets(asset_dir: Path = ASSET_DIR) -> dict[str, Path]:
     """Resolve every executable scenario to the one formal mapping workbook."""
     if not asset_dir.is_dir():
         raise MappingAssetValidationError(f"映射资产目录不存在: {asset_dir}")
-    source = asset_dir / MAPPING_SOURCE_FILENAME
-    if not source.is_file():
-        raise MappingAssetValidationError(f"映射资产缺失: {MAPPING_SOURCE_FILENAME}")
-    return {spec.scenario_id: source for spec in ASSET_SPECS}
+    paths: dict[str, Path] = {}
+    for spec in ASSET_SPECS:
+        source = asset_dir / spec.source_filename
+        if not source.is_file():
+            raise MappingAssetValidationError(f"映射资产缺失: {spec.source_filename}")
+        paths[spec.scenario_id] = source
+    return paths
 
 
 def validate_mapping_asset(path: Path, spec: MappingAssetSpec) -> MappingAssetReport:
@@ -138,7 +158,7 @@ def validate_mapping_asset(path: Path, spec: MappingAssetSpec) -> MappingAssetRe
             else:
                 positions[header] = index
 
-        missing = [header for header in REQUIRED_HEADERS if header not in positions]
+        missing = [header for header in spec.required_headers if header not in positions]
         if missing or duplicates:
             details = []
             if missing:
@@ -160,7 +180,7 @@ def validate_mapping_asset(path: Path, spec: MappingAssetSpec) -> MappingAssetRe
             if not any(
                 index < len(row) and _clean_value(row[index])
                 for header, index in positions.items()
-                if header in REQUIRED_HEADERS
+                if header in spec.required_headers
             ):
                 continue
             if category_position >= len(row):

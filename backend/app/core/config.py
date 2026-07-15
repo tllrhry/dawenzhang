@@ -63,6 +63,10 @@ class Settings(BaseSettings):
         default=Path("五篇大文章映射/贷款投向-五篇大文章映射表.xlsx"),
         validation_alias=AliasChoices("FIVE_ARTICLES_MAPPING_SOURCE_PATH"),
     )
+    green_finance_mapping_source_path: Path = Field(
+        default=Path("五篇大文章映射/绿色金融贷款投向.xlsx"),
+        validation_alias=AliasChoices("GREEN_FINANCE_MAPPING_SOURCE_PATH"),
+    )
     green_finance_template_path: Path = Field(
         default=Path("模板文件/五篇大文章/绿色金融模版.docx"),
         validation_alias=AliasChoices("GREEN_FINANCE_TEMPLATE_PATH"),

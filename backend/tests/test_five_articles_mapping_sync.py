@@ -30,7 +30,6 @@ from app.services.technology_finance_mapping_sync import (
 
 SCENARIO_PROFILES = (
     TECHNOLOGY_FINANCE_REGISTRATION,
-    GREEN_FINANCE_REGISTRATION,
     DIGITAL_FINANCE_REGISTRATION,
     PENSION_FINANCE_REGISTRATION,
 )
@@ -144,12 +143,142 @@ def _settings_for(
     embedding_model: str,
 ) -> Settings:
     assert profile.uses_five_articles_mapping is True
-    return Settings(
+    values = dict(
         _env_file=None,
         SILICONFLOW_EMBEDDING_MODEL=embedding_model,
         EMBEDDING_DIMENSION=4096,
         FIVE_ARTICLES_MAPPING_SOURCE_PATH=path,
     )
+    if profile is GREEN_FINANCE_REGISTRATION:
+        values["GREEN_FINANCE_MAPPING_SOURCE_PATH"] = path
+        values["SILICONFLOW_API_KEY"] = "test-key"
+    return Settings(**values)
+
+
+GREEN_HEADERS = (
+    "属于类别",
+    "主题\nSubject",
+    "第一层名称\nTier1_Name",
+    "第二层名称\nTier2_Name",
+    "条件/标准",
+    "国民经济行业代码\nNEIC_Code",
+    "国民经济行业名称\nNEIC_Name",
+)
+
+
+def _write_green_mapping(path: Path, rows: Sequence[Sequence[object]]) -> None:
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.append(GREEN_HEADERS)
+    for row in rows:
+        worksheet.append(tuple(row))
+    workbook.save(path)
+    workbook.close()
+
+
+def test_green_mapping_publishes_condition_embeddings_and_placeholder_rows(
+    tmp_path: Path,
+    scenario_mapping_context: tuple[Session, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session, embedding_model = scenario_mapping_context
+    path = tmp_path / "green.xlsx"
+    _write_green_mapping(
+        path,
+        (
+            ("绿色金融", "绿色主题", "绿色一级", "绿色二级", "节能锅炉", "2710", "化学药品原料药制造"),
+            ("绿色金融", "绿色主题", "绿色一级", "绿色二级", "绿色项目", "-", "无行业代码"),
+        ),
+    )
+    monkeypatch.setattr(
+        "app.services.technology_finance_mapping_sync.embed_texts",
+        lambda texts, settings: tuple((0.1,) * settings.embedding_dimension for _ in texts),
+    )
+
+    result = synchronize_scenario_mapping(
+        session,
+        GREEN_FINANCE_REGISTRATION,
+        _settings_for(GREEN_FINANCE_REGISTRATION, path, embedding_model),
+    )
+
+    assert result.version.status == "published"
+    rows = session.scalars(
+        select(FiveArticlesMappingRow)
+        .where(FiveArticlesMappingRow.mapping_version_id == result.version.id)
+        .order_by(FiveArticlesMappingRow.source_row)
+    ).all()
+    assert [(row.neic_code, row.code_level) for row in rows] == [("2710", 4), ("-", None)]
+    assert all(row.condition_criteria for row in rows)
+    assert all(
+        row.condition_embedding is not None and len(row.condition_embedding) == 4096
+        for row in rows
+    )
+
+
+def test_green_mapping_embedding_failure_does_not_publish_a_partial_version(
+    tmp_path: Path,
+    scenario_mapping_context: tuple[Session, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session, embedding_model = scenario_mapping_context
+    path = tmp_path / "green-failure.xlsx"
+    _write_green_mapping(
+        path,
+        (("绿色金融", "绿色主题", "绿色一级", "绿色二级", "节能锅炉", "2710", "化学药品原料药制造"),),
+    )
+    monkeypatch.setattr(
+        "app.services.technology_finance_mapping_sync.embed_texts",
+        lambda *_: (_ for _ in ()).throw(RuntimeError("embedding unavailable")),
+    )
+
+    with pytest.raises(RuntimeError, match="embedding unavailable"):
+        synchronize_scenario_mapping(
+            session,
+            GREEN_FINANCE_REGISTRATION,
+            _settings_for(GREEN_FINANCE_REGISTRATION, path, embedding_model),
+        )
+    assert session.scalar(
+        select(func.count(FiveArticlesMappingVersion.id)).where(
+            FiveArticlesMappingVersion.scenario_id == GREEN_FINANCE_REGISTRATION.id
+        )
+    ) == 0
+
+
+def test_non_green_mapping_rejects_condition_header_and_tiers_above_depth(
+    tmp_path: Path,
+    scenario_mapping_context: tuple[Session, str],
+) -> None:
+    session, embedding_model = scenario_mapping_context
+    path = tmp_path / "digital-condition.xlsx"
+    _write_mapping(path, (_mapping_row("2710", "化学药品原料药制造"),), category="数字金融")
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.append(("属于类别", *REQUIRED_HEADERS, "条件/标准"))
+    worksheet.append(("数字金融", *_mapping_row("2710", "化学药品原料药制造"), "条件"))
+    workbook.save(path)
+    workbook.close()
+    with pytest.raises(ValueError, match="条件/标准"):
+        synchronize_scenario_mapping(session, DIGITAL_FINANCE_REGISTRATION, _settings_for(DIGITAL_FINANCE_REGISTRATION, path, embedding_model))
+
+    path = tmp_path / "pension-tier4.xlsx"
+    _write_mapping(
+        path,
+        (
+            (
+                "场景主题",
+                "场景一级标签",
+                None,
+                None,
+                "不允许的第四层",
+                "2710",
+                "化学药品原料药制造",
+            ),
+        ),
+        category="养老金融",
+    )
+    result = synchronize_scenario_mapping(session, PENSION_FINANCE_REGISTRATION, _settings_for(PENSION_FINANCE_REGISTRATION, path, embedding_model))
+    assert result.version.status == "invalid"
+    assert result.version.validation_report["errors"][0]["type"] == "tier_exceeds_declared_depth"
 
 
 @pytest.mark.parametrize("profile", SCENARIO_PROFILES, ids=lambda item: item.id)
@@ -450,10 +579,10 @@ def test_invalid_same_source_hash_is_revalidated_after_catalog_repair(
     _write_mapping(
         path,
         (_mapping_row("9999", "新增目录行业"),),
-        category=GREEN_FINANCE_REGISTRATION.name,
+        category=TECHNOLOGY_FINANCE_REGISTRATION.name,
     )
-    settings = _settings_for(GREEN_FINANCE_REGISTRATION, path, embedding_model)
-    first = synchronize_scenario_mapping(session, GREEN_FINANCE_REGISTRATION, settings)
+    settings = _settings_for(TECHNOLOGY_FINANCE_REGISTRATION, path, embedding_model)
+    first = synchronize_scenario_mapping(session, TECHNOLOGY_FINANCE_REGISTRATION, settings)
     assert first.version.status == "invalid"
 
     catalog = session.scalar(select(NationalEconomyCatalogVersion))
@@ -475,7 +604,7 @@ def test_invalid_same_source_hash_is_revalidated_after_catalog_repair(
     )
     session.flush()
 
-    second = synchronize_scenario_mapping(session, GREEN_FINANCE_REGISTRATION, settings)
+    second = synchronize_scenario_mapping(session, TECHNOLOGY_FINANCE_REGISTRATION, settings)
 
     assert second.reused is False
     assert second.version.id == first.version.id

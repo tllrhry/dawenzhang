@@ -49,10 +49,10 @@ def _write_workbook(
 
 @pytest.mark.parametrize("spec", ASSET_SPECS, ids=lambda spec: spec.scenario_id)
 def test_formal_mapping_asset_has_unified_headers_and_metadata(spec) -> None:
-    path = Path("五篇大文章映射") / MAPPING_SOURCE_FILENAME
+    path = Path("五篇大文章映射") / spec.source_filename
     report = validate_mapping_asset(path, spec)
 
-    assert set(REQUIRED_HEADERS).issubset(report.headers)
+    assert set(spec.required_headers).issubset(report.headers)
     assert report.source_hash == sha256(report.path.read_bytes()).hexdigest()
     assert len(report.source_hash) == 64
     assert report.data_row_count > 0
@@ -80,7 +80,11 @@ def test_mapping_asset_preflight_rejects_missing_category_data(
     tmp_path: Path,
 ) -> None:
     path = tmp_path / "绿色金融.xlsx"
-    _write_workbook(path, category="数字金融")
+    _write_workbook(
+        path,
+        headers=(*REQUIRED_HEADERS, "条件/标准"),
+        category="数字金融",
+    )
 
     with pytest.raises(MappingAssetValidationError, match="未找到属于类别“绿色金融”的数据"):
         validate_mapping_asset(path, _spec("green_finance"))
@@ -89,8 +93,9 @@ def test_mapping_asset_preflight_rejects_missing_category_data(
 def test_mapping_asset_discovery_ignores_lock_file_and_ds_store(
     tmp_path: Path,
 ) -> None:
-    source = Path("五篇大文章映射") / MAPPING_SOURCE_FILENAME
-    (tmp_path / MAPPING_SOURCE_FILENAME).write_bytes(source.read_bytes())
+    asset_dir = Path("五篇大文章映射")
+    for filename in {spec.source_filename for spec in ASSET_SPECS}:
+        (tmp_path / filename).write_bytes((asset_dir / filename).read_bytes())
     (tmp_path / "~$绿色金融.xlsx").write_bytes(b"not an xlsx")
     (tmp_path / ".DS_Store").write_bytes(b"filesystem metadata")
 
@@ -98,4 +103,7 @@ def test_mapping_asset_discovery_ignores_lock_file_and_ds_store(
 
     assert set(discovered) == {spec.scenario_id for spec in ASSET_SPECS}
     assert all(not path.name.startswith("~$") for path in discovered.values())
-    assert set(discovered.values()) == {tmp_path / MAPPING_SOURCE_FILENAME}
+    assert set(discovered.values()) == {
+        tmp_path / MAPPING_SOURCE_FILENAME,
+        tmp_path / "绿色金融贷款投向.xlsx",
+    }

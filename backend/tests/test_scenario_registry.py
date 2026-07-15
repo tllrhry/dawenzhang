@@ -250,19 +250,43 @@ def test_new_finance_profiles_resolve_independent_execution_metadata(
     export_sheet_name: str,
 ) -> None:
     template_path = tmp_path / template_name
-    mapping_path = tmp_path / "five-articles-mapping.xlsx"
+    shared_mapping_path = tmp_path / "five-articles-mapping.xlsx"
+    green_mapping_path = tmp_path / "green-finance-mapping.xlsx"
     monkeypatch.setenv(registration.template_path_setting.upper(), str(template_path))
-    monkeypatch.setenv("FIVE_ARTICLES_MAPPING_SOURCE_PATH", str(mapping_path))
+    monkeypatch.setenv("FIVE_ARTICLES_MAPPING_SOURCE_PATH", str(shared_mapping_path))
+    monkeypatch.setenv("GREEN_FINANCE_MAPPING_SOURCE_PATH", str(green_mapping_path))
     settings = Settings(_env_file=None)
 
     assert registration.status == "available"
     assert registration.workflow == "technology_finance_two_stage"
     assert registration.is_executable_profile is True
     assert registration.template_path(settings) == template_path
-    assert registration.mapping_path(settings) == mapping_path
+    expected_mapping_path = (
+        green_mapping_path
+        if registration is GREEN_FINANCE_REGISTRATION
+        else shared_mapping_path
+    )
+    assert registration.mapping_path(settings) == expected_mapping_path
     assert registration.export_sheet_name == export_sheet_name
     assert registration.field_schema
     assert registration.name in export_sheet_name
+
+
+def test_five_articles_mapping_profiles_declare_source_and_column_shape() -> None:
+    assert GREEN_FINANCE_REGISTRATION.mapping_path_setting == (
+        "green_finance_mapping_source_path"
+    )
+    assert GREEN_FINANCE_REGISTRATION.mapping_tier_depth == 2
+    assert GREEN_FINANCE_REGISTRATION.mapping_has_condition_criteria is True
+
+    for registration, expected_tier_depth in (
+        (TECHNOLOGY_FINANCE_REGISTRATION, 4),
+        (DIGITAL_FINANCE_REGISTRATION, 3),
+        (PENSION_FINANCE_REGISTRATION, 3),
+    ):
+        assert registration.mapping_path_setting is None
+        assert registration.mapping_tier_depth == expected_tier_depth
+        assert registration.mapping_has_condition_criteria is False
 
 
 def test_agriculture_and_unknown_scenarios_resolve_correctly() -> None:

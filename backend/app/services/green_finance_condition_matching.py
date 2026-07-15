@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
@@ -35,6 +35,10 @@ EmbeddingRequest = Callable[[Sequence[str], Settings], Sequence[Sequence[float]]
 
 class GreenFinanceConditionSelectionError(RuntimeError):
     """Raised when condition-candidate selection is not grounded in evidence."""
+
+
+class GreenFinanceConditionIndexError(RuntimeError):
+    """Raised when the latest green mapping has an incomplete condition index."""
 
 
 @dataclass(frozen=True)
@@ -67,6 +71,8 @@ def retrieve_green_finance_condition_candidates(
     if not MIN_RERANK_RESULTS <= top_n <= MAX_RERANK_RESULTS:
         raise ValueError("top_n must be between 5 and 8")
     query = build_green_finance_condition_evidence(input_payload, side)
+    mapping_version = _latest_published_green_mapping(session)
+    _validate_condition_index(session, mapping_version)
     embeddings = tuple(embedding_request((query,), settings))
     if len(embeddings) != 1:
         raise ValueError("condition embedding response count does not match request")
@@ -81,9 +87,8 @@ def retrieve_green_finance_condition_candidates(
             FiveArticlesMappingRow.mapping_version_id == FiveArticlesMappingVersion.id,
         )
         .where(
+            FiveArticlesMappingRow.mapping_version_id == mapping_version.id,
             FiveArticlesMappingRow.scenario_id == GREEN_FINANCE_SCENARIO,
-            FiveArticlesMappingVersion.scenario_id == GREEN_FINANCE_SCENARIO,
-            FiveArticlesMappingVersion.status == "published",
             FiveArticlesMappingRow.condition_embedding.is_not(None),
             FiveArticlesMappingRow.condition_criteria.is_not(None),
         )
@@ -112,11 +117,19 @@ def build_green_finance_condition_evidence(
         fields = (
             ("核心产品 / 服务名称", "core_products_services"),
             ("主营业务", "main_business"),
+            ("主营业务及营收占比", "main_business_revenue_share"),
+            ("营业执照经营范围", "business_scope"),
         )
     elif side == "loan_direction":
         fields = (
             ("贷款用途详细描述", "loan_purpose"),
+            ("对应绿色项目名称", "green_project_name"),
+            ("项目建设 / 运营内容", "project_content"),
+            ("节能减排 / 污染治理内容", "energy_saving_pollution_control"),
+            ("环保与绿色资质认证", "green_certifications"),
+            ("碳排放与环境效益", "carbon_environmental_benefits"),
             ("贸易合同核心交易品类 / 服务内容", "trade_goods_services"),
+            ("授信审批意见", "credit_approval_opinion"),
         )
     else:
         raise ValueError("side must be enterprise or loan_direction")
@@ -128,6 +141,68 @@ def build_green_finance_condition_evidence(
     if not evidence:
         raise ValueError(f"{side} condition fallback requires usable evidence")
     return "\n".join(evidence)
+
+
+def condition_candidates_from_labels(
+    labels: Sequence[FiveArticlesMappingLabel],
+) -> tuple[GreenFinanceConditionCandidate, ...]:
+    """Convert NEIC hits into condition-gated candidates.
+
+    Rows without condition text are deliberately excluded: a green mapping code
+    is only a search hint and cannot establish eligibility by itself.
+    """
+    return tuple(
+        GreenFinanceConditionCandidate(
+            label=label,
+            condition_criteria=criteria,
+            vector_score=1.0,
+            rerank_score=1.0,
+        )
+        for label in labels
+        if (criteria := _text(label.condition_criteria))
+    )
+
+
+def _latest_published_green_mapping(session: Session) -> FiveArticlesMappingVersion:
+    version = session.scalar(
+        select(FiveArticlesMappingVersion)
+        .where(
+            FiveArticlesMappingVersion.scenario_id == GREEN_FINANCE_SCENARIO,
+            FiveArticlesMappingVersion.status == "published",
+        )
+        .order_by(
+            FiveArticlesMappingVersion.version.desc(),
+            FiveArticlesMappingVersion.created_at.desc(),
+            FiveArticlesMappingVersion.id.desc(),
+        )
+        .limit(1)
+    )
+    if version is None:
+        raise GreenFinanceConditionIndexError(
+            "published green-finance mapping version not found"
+        )
+    return version
+
+
+def _validate_condition_index(
+    session: Session, version: FiveArticlesMappingVersion
+) -> None:
+    total_rows, criteria_rows, embedding_rows = session.execute(
+        select(
+            func.count(FiveArticlesMappingRow.id),
+            func.count(FiveArticlesMappingRow.condition_criteria),
+            func.count(FiveArticlesMappingRow.condition_embedding),
+        ).where(
+            FiveArticlesMappingRow.mapping_version_id == version.id,
+            FiveArticlesMappingRow.scenario_id == GREEN_FINANCE_SCENARIO,
+        )
+    ).one()
+    if total_rows <= 0 or criteria_rows != total_rows or embedding_rows != total_rows:
+        raise GreenFinanceConditionIndexError(
+            "green-finance condition index incomplete: "
+            f"version_id={version.id} total={total_rows} "
+            f"criteria={criteria_rows} embeddings={embedding_rows}"
+        )
 
 
 def select_green_finance_condition_label(
@@ -308,8 +383,9 @@ def _build_selection_request(
                     "只包含 selected_source_row 和 selection_basis 两个字段。"
                     "selected_source_row 必须原样等于 candidates 中某项的 source_row，"
                     f"或原样等于 {NO_MATCH_SOURCE_ROW}。只有在任一候选的条件/标准"
-                    "与证据文本均不匹配时才可选择该值。selection_basis 必须是非空中文，"
-                    "并逐字引用候选条件/标准原文或证据文本中的一个连续片段；不得臆造。"
+                    "与证据文本均不匹配时才可选择该值。selection_basis 必须是非空中文；"
+                    "选择具体候选时必须逐字引用该候选条件/标准原文或证据文本中的一个"
+                    "连续片段，选择不匹配时应说明主要差异；不得臆造。"
                 ),
             },
             {"role": "user", "content": json.dumps(prompt_input, ensure_ascii=False)},
@@ -348,11 +424,6 @@ def _validate_selection_response(
         raise GreenFinanceConditionSelectionError(
             "selection_basis must be non-empty Chinese text"
         )
-    grounded_sources = tuple(candidate.condition_criteria for candidate in by_source_row.values())
-    if not _basis_is_grounded(basis.strip(), grounded_sources, evidence_text):
-        raise GreenFinanceConditionSelectionError(
-            "selection_basis must quote candidate condition criteria or side evidence"
-        )
     if selected_source_row == NO_MATCH_SOURCE_ROW:
         return None
     if not isinstance(selected_source_row, int) or isinstance(selected_source_row, bool):
@@ -363,6 +434,12 @@ def _validate_selection_response(
     if candidate is None:
         raise GreenFinanceConditionSelectionError(
             "selected_source_row must reference a given condition candidate or no-match"
+        )
+    if not _basis_is_grounded(
+        basis.strip(), (candidate.condition_criteria,), evidence_text
+    ):
+        raise GreenFinanceConditionSelectionError(
+            "selection_basis must quote the selected condition criteria or side evidence"
         )
     return candidate.label
 

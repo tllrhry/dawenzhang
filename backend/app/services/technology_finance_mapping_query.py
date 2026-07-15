@@ -32,6 +32,7 @@ class FiveArticlesMappingLabel:
     tier3: str | None
     tier4: str | None
     source_row: int
+    condition_criteria: str | None = None
     match_method: MappingMatchMethod = "neic_code"
 
     @property
@@ -412,6 +413,7 @@ def _row_to_label(row: FiveArticlesMappingRow) -> FiveArticlesMappingLabel:
         tier3=row.tier3,
         tier4=row.tier4,
         source_row=row.source_row,
+        condition_criteria=row.condition_criteria,
     )
 
 

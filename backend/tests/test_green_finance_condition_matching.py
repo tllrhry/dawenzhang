@@ -8,6 +8,7 @@ from sqlalchemy.dialects import postgresql
 
 from app.core.config import Settings
 from app.services.green_finance_condition_matching import (
+    GreenFinanceConditionIndexError,
     MAX_RERANK_RESULTS,
     NO_MATCH_SOURCE_ROW,
     RECALL_LIMIT,
@@ -86,13 +87,22 @@ def _selection_client(model_output: object, *, attempts: list[int] | None = None
     return httpx.Client(transport=httpx.MockTransport(handler), base_url=_settings().deepseek_base_url)
 
 
+def _mock_complete_index(session: Mock, recalled: object) -> None:
+    session.scalar.return_value = SimpleNamespace(id=9, version=3)
+    index_result = Mock()
+    index_result.one.return_value = (1506, 1506, 1506)
+    recall_result = Mock()
+    recall_result.all.return_value = recalled
+    session.execute.side_effect = (index_result, recall_result)
+
+
 def test_retrieval_uses_green_published_rows_cosine_top_30_and_rerank_limit() -> None:
     session = Mock()
     # The database has already applied the SQL ORDER BY distance contract.
-    session.execute.return_value.all.return_value = [
+    _mock_complete_index(session, [
         (_row(20, "太阳能发电项目"), 0.08),
         (_row(10, "节能改造项目"), 0.21),
-    ]
+    ])
     captured: dict[str, object] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -112,12 +122,12 @@ def test_retrieval_uses_green_published_rows_cosine_top_30_and_rerank_limit() ->
             rerank_client=client,
         )
 
-    statement = session.execute.call_args.args[0]
+    statement = session.execute.call_args_list[1].args[0]
     compiled = statement.compile(dialect=postgresql.dialect())
     sql = str(compiled)
     assert "<=>" in sql
     assert GREEN_FINANCE_SCENARIO in compiled.params.values()
-    assert "published" in compiled.params.values()
+    assert 9 in compiled.params.values()
     assert statement._limit_clause.value == RECALL_LIMIT
     assert captured["documents"] == ["太阳能发电项目", "节能改造项目"]
     assert captured["top_n"] == 2
@@ -128,6 +138,8 @@ def test_retrieval_uses_green_published_rows_cosine_top_30_and_rerank_limit() ->
 
 def test_retrieval_uses_side_specific_evidence_and_propagates_embedding_failure() -> None:
     session = Mock()
+    session.scalar.return_value = SimpleNamespace(id=9, version=3)
+    session.execute.return_value.one.return_value = (1506, 1506, 1506)
     requested: list[tuple[str, ...]] = []
 
     with pytest.raises(RuntimeError, match="embedding unavailable"):
@@ -141,12 +153,12 @@ def test_retrieval_uses_side_specific_evidence_and_propagates_embedding_failure(
         )
 
     assert requested == [("核心产品 / 服务名称：污水处理设备\n主营业务：环保工程",)]
-    session.execute.assert_not_called()
+    assert session.execute.call_count == 1
 
 
 def test_retrieval_propagates_rerank_service_failure() -> None:
     session = Mock()
-    session.execute.return_value.all.return_value = [(_row(10, "节能改造项目"), 0.1)]
+    _mock_complete_index(session, [(_row(10, "节能改造项目"), 0.1)])
 
     with httpx.Client(
         transport=httpx.MockTransport(lambda _request: httpx.Response(503)),
@@ -164,9 +176,9 @@ def test_retrieval_propagates_rerank_service_failure() -> None:
 
 def test_retrieval_caps_rerank_response_at_eight_candidates() -> None:
     session = Mock()
-    session.execute.return_value.all.return_value = [
+    _mock_complete_index(session, [
         (_row(index, f"条件{index}"), index / 100) for index in range(1, 10)
-    ]
+    ])
 
     with httpx.Client(
         transport=httpx.MockTransport(
@@ -194,12 +206,60 @@ def test_retrieval_caps_rerank_response_at_eight_candidates() -> None:
     assert len(candidates) == MAX_RERANK_RESULTS
 
 
+def test_retrieval_rejects_incomplete_latest_condition_index_before_cloud_call() -> None:
+    session = Mock()
+    session.scalar.return_value = SimpleNamespace(id=9, version=3)
+    session.execute.return_value.one.return_value = (1506, 1506, 1499)
+    embedding_request = Mock()
+
+    with pytest.raises(GreenFinanceConditionIndexError, match="index incomplete"):
+        retrieve_green_finance_condition_candidates(
+            session,
+            {"loan_purpose": "节能改造"},
+            "loan_direction",
+            _settings(),
+            embedding_request=embedding_request,
+        )
+
+    embedding_request.assert_not_called()
+
+
+def test_loan_condition_evidence_uses_all_structured_green_fields() -> None:
+    from app.services.green_finance_condition_matching import (
+        build_green_finance_condition_evidence,
+    )
+
+    evidence = build_green_finance_condition_evidence(
+        {
+            "loan_purpose": "生产线技改",
+            "green_project_name": "绿色工厂项目",
+            "project_content": "建设余热回收系统",
+            "energy_saving_pollution_control": "单位能耗下降30%",
+            "green_certifications": "ISO14001",
+            "carbon_environmental_benefits": "年减碳100吨",
+            "trade_goods_services": "高效节能设备",
+        },
+        "loan_direction",
+    )
+
+    assert "生产线技改" in evidence
+    assert "余热回收系统" in evidence
+    assert "单位能耗下降30%" in evidence
+    assert "ISO14001" in evidence
+    assert "年减碳100吨" in evidence
+
+
 def test_selection_accepts_candidate_and_explicit_no_match() -> None:
     candidate = _candidate()
     evidence = "贷款用于节能改造生产线"
     with _selection_client({"selected_source_row": 12, "selection_basis": "节能改造项目"}) as client:
         assert select_green_finance_condition_label((candidate,), evidence, _settings(), client=client) is candidate.label
-    with _selection_client({"selected_source_row": NO_MATCH_SOURCE_ROW, "selection_basis": "贷款用于"}) as client:
+    with _selection_client(
+        {
+            "selected_source_row": NO_MATCH_SOURCE_ROW,
+            "selection_basis": "候选条件与当前业务证据不一致。",
+        }
+    ) as client:
         assert select_green_finance_condition_label((candidate,), evidence, _settings(), client=client) is None
 
 

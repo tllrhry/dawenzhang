@@ -19,6 +19,7 @@ from app.services.green_finance_condition_matching import (
     ConditionSide,
     GreenFinanceConditionCandidate,
     build_green_finance_condition_evidence,
+    condition_candidates_from_labels,
     retrieve_green_finance_condition_candidates,
     select_green_finance_condition_label,
 )
@@ -66,7 +67,8 @@ ConditionLabelSelectionCallable = Callable[
 ]
 
 GREEN_FINANCE_SCENARIO_ID = "green_finance"
-_GREEN_FINANCE_KEYWORDS = ("绿色生产", "绿色经营")
+GREEN_FINANCE_DECISION_POLICY_VERSION = "green-condition-v2"
+LEGACY_DECISION_POLICY_VERSION = "legacy-v1"
 _IP_INTENSIVE_INDUSTRY_SUBJECTS = frozenset(
     {"知识产权（专利）密集型产业", "知识产权(专利)密集型产业"}
 )
@@ -215,21 +217,8 @@ def run_five_articles_stage_b(
     if stage_a_result.status != "completed":
         return TechnologyFinanceWorkflowResult(stage_a_result, None)
 
-    existing_completed = session.scalar(
-        select(FiveArticlesResult)
-        .where(
-            FiveArticlesResult.case_id == case.id,
-            FiveArticlesResult.scenario_id == profile.id,
-            FiveArticlesResult.stage_a_result_id == stage_a_result.id,
-            FiveArticlesResult.status == "completed",
-        )
-        .order_by(FiveArticlesResult.version.desc())
-        .limit(1)
-    )
-    if existing_completed is not None:
-        return TechnologyFinanceWorkflowResult(stage_a_result, existing_completed)
-
     mapping_result: FiveArticlesMappingLookupResult | None = None
+    decision_policy_version = _decision_policy_version(profile)
     try:
         mapping_result = mapping_lookup(
             session,
@@ -242,6 +231,21 @@ def run_five_articles_stage_b(
             scenario_id=profile.id,
         )
         _validate_mapping_context(session, mapping_result, profile)
+        existing_completed = session.scalar(
+            select(FiveArticlesResult)
+            .where(
+                FiveArticlesResult.case_id == case.id,
+                FiveArticlesResult.scenario_id == profile.id,
+                FiveArticlesResult.stage_a_result_id == stage_a_result.id,
+                FiveArticlesResult.mapping_version_id == mapping_result.mapping_version_id,
+                FiveArticlesResult.decision_policy_version == decision_policy_version,
+                FiveArticlesResult.status == "completed",
+            )
+            .order_by(FiveArticlesResult.version.desc())
+            .limit(1)
+        )
+        if existing_completed is not None:
+            return TechnologyFinanceWorkflowResult(stage_a_result, existing_completed)
         result = _build_stage_b_result(
             session, case, stage_a_result, mapping_result, settings, profile,
             label_selector, stage_b_classifier, condition_candidate_retriever,
@@ -254,6 +258,7 @@ def run_five_articles_stage_b(
             session, case=case, stage_a_result=stage_a_result,
             status="classification_failed",
             mapping_version_id=_failure_mapping_version_id(session, mapping_result, profile),
+            decision_policy_version=decision_policy_version,
             error_detail=str(exc) or exc.__class__.__name__,
         )
         return TechnologyFinanceWorkflowResult(stage_a_result, _commit_stage_b_result(session, failed_result))
@@ -280,49 +285,55 @@ def _build_stage_b_result(
     condition_candidate_retriever: ConditionCandidateRetrievalCallable,
     condition_label_selector: ConditionLabelSelectionCallable,
 ) -> FiveArticlesResult:
-    if mapping_result.status == "not_applicable":
-        if profile.id == GREEN_FINANCE_SCENARIO_ID:
-            enterprise_labels, loan_labels = _resolve_green_finance_condition_fallbacks(
-                session,
-                case.input_payload,
-                mapping_result.enterprise_labels,
-                settings,
-                condition_candidate_retriever,
-                condition_label_selector,
-            )
-            if loan_labels:
-                mapping_result = replace(
-                    mapping_result,
-                    status="mapping_hit",
-                    enterprise_labels=enterprise_labels,
-                    loan_direction_labels=loan_labels,
-                    detail="green_finance_condition_fallback_mapping_hit",
-                )
-            elif _has_green_finance_keyword(case.input_payload):
-                return _new_result(
-                    session, case=case, stage_a_result=stage_a_result,
-                    status="needs_review", mapping_version_id=mapping_result.mapping_version_id,
-                    consistency_status="needs_review",
-                    consistency_basis=(
-                        "贷款用途提及绿色生产/绿色经营，已确认属于绿色金融业务范畴，"
-                        "但编码与条件/标准均未能定位具体分类标签，需人工复核确定。"
-                    ),
-                    error_detail="green_finance_label_pending_review_after_condition_fallback",
-                )
-        if mapping_result.status == "not_applicable":
-            return _new_result(
-                session, case=case, stage_a_result=stage_a_result, status="not_applicable",
-                mapping_version_id=mapping_result.mapping_version_id,
-                consistency_status="not_applicable",
-                consistency_basis=f"贷款投向未命中已发布{profile.name}映射，{profile.name}一致性判定不适用。",
-                error_detail=mapping_result.detail,
-            )
     if mapping_result.status == "needs_review":
         return _new_result(
             session, case=case, stage_a_result=stage_a_result, status="needs_review",
             mapping_version_id=mapping_result.mapping_version_id,
+            decision_policy_version=_decision_policy_version(profile),
             consistency_status="needs_review",
             consistency_basis=f"{profile.name}映射数据异常，需人工复核。",
+            error_detail=mapping_result.detail,
+        )
+
+    if profile.id == GREEN_FINANCE_SCENARIO_ID:
+        enterprise_labels, loan_labels = _resolve_green_finance_condition_matches(
+            session,
+            case.input_payload,
+            mapping_result.enterprise_labels,
+            mapping_result.loan_direction_labels,
+            settings,
+            condition_candidate_retriever,
+            condition_label_selector,
+        )
+        if not loan_labels:
+            return _new_result(
+                session,
+                case=case,
+                stage_a_result=stage_a_result,
+                status="not_applicable",
+                mapping_version_id=mapping_result.mapping_version_id,
+                decision_policy_version=_decision_policy_version(profile),
+                consistency_status="not_applicable",
+                consistency_basis=(
+                    "贷款投向的行业编码候选及全库条件/标准均未与案例业务证据形成可靠匹配，"
+                    "绿色金融判定不适用。"
+                ),
+                error_detail="green_finance_condition_no_match",
+            )
+        mapping_result = replace(
+            mapping_result,
+            status="mapping_hit",
+            enterprise_labels=enterprise_labels,
+            loan_direction_labels=loan_labels,
+            detail="green_finance_condition_validated_mapping_hit",
+        )
+    elif mapping_result.status == "not_applicable":
+        return _new_result(
+            session, case=case, stage_a_result=stage_a_result, status="not_applicable",
+            mapping_version_id=mapping_result.mapping_version_id,
+            decision_policy_version=_decision_policy_version(profile),
+            consistency_status="not_applicable",
+            consistency_basis=f"贷款投向未命中已发布{profile.name}映射，{profile.name}一致性判定不适用。",
             error_detail=mapping_result.detail,
         )
 
@@ -343,7 +354,8 @@ def _build_stage_b_result(
         )
     return _new_result(
         session, case=case, stage_a_result=stage_a_result, status="completed",
-        mapping_version_id=mapping_result.mapping_version_id, labels=labels,
+        mapping_version_id=mapping_result.mapping_version_id,
+        decision_policy_version=_decision_policy_version(profile), labels=labels,
         consistency_status=decision.consistency_status, consistency_basis=decision.consistency_basis,
         consistency_evidence_refs=list(decision.consistency_evidence_refs), model_output=dict(decision.model_output),
     )
@@ -376,45 +388,56 @@ def _apply_technology_finance_ip_registry_statuses(
     return result_labels
 
 
-def _resolve_green_finance_condition_fallbacks(
+def _resolve_green_finance_condition_matches(
     session: Session,
     input_payload: dict[str, object],
     enterprise_labels: tuple[FiveArticlesMappingLabel, ...],
+    loan_labels: tuple[FiveArticlesMappingLabel, ...],
     settings: Settings,
     candidate_retriever: ConditionCandidateRetrievalCallable,
     label_selector: ConditionLabelSelectionCallable,
 ) -> tuple[tuple[FiveArticlesMappingLabel, ...], tuple[FiveArticlesMappingLabel, ...]]:
-    resolved_enterprise = enterprise_labels or _select_green_finance_condition_label(
-        session, input_payload, "enterprise", settings, candidate_retriever, label_selector
+    resolved_enterprise = _resolve_green_finance_side(
+        session, input_payload, "enterprise", enterprise_labels, settings,
+        candidate_retriever, label_selector,
     )
-    resolved_loan = _select_green_finance_condition_label(
-        session, input_payload, "loan_direction", settings, candidate_retriever, label_selector
+    resolved_loan = _resolve_green_finance_side(
+        session, input_payload, "loan_direction", loan_labels, settings,
+        candidate_retriever, label_selector,
     )
     return resolved_enterprise, resolved_loan
 
 
-def _select_green_finance_condition_label(
+def _resolve_green_finance_side(
     session: Session,
     input_payload: dict[str, object],
     side: ConditionSide,
+    explicit_labels: tuple[FiveArticlesMappingLabel, ...],
     settings: Settings,
     candidate_retriever: ConditionCandidateRetrievalCallable,
     label_selector: ConditionLabelSelectionCallable,
 ) -> tuple[FiveArticlesMappingLabel, ...]:
+    evidence_text = build_green_finance_condition_evidence(input_payload, side)
+    explicit_candidates = condition_candidates_from_labels(explicit_labels)
+    if explicit_candidates:
+        selected = label_selector(explicit_candidates, evidence_text, settings)
+        if selected is not None:
+            return (replace(selected, match_method="neic_code"),)
+
     candidates = candidate_retriever(session, input_payload, side, settings)
     if not candidates:
         return ()
-    evidence_text = build_green_finance_condition_evidence(input_payload, side)
     selected = label_selector(candidates, evidence_text, settings)
     if selected is None:
         return ()
     return (replace(selected, match_method="condition_fallback"),)
 
 
-def _has_green_finance_keyword(input_payload: dict[str, object]) -> bool:
-    loan_purpose = input_payload.get("loan_purpose")
-    return isinstance(loan_purpose, str) and any(
-        keyword in loan_purpose for keyword in _GREEN_FINANCE_KEYWORDS
+def _decision_policy_version(profile: ScenarioRegistration) -> str:
+    return (
+        GREEN_FINANCE_DECISION_POLICY_VERSION
+        if profile.id == GREEN_FINANCE_SCENARIO_ID
+        else LEGACY_DECISION_POLICY_VERSION
     )
 
 
@@ -451,6 +474,7 @@ def _new_result(
     stage_a_result: NationalEconomyClassificationResult,
     status: str,
     mapping_version_id: int | None,
+    decision_policy_version: str = LEGACY_DECISION_POLICY_VERSION,
     labels: list[dict[str, object]] | None = None,
     consistency_status: str | None = None,
     consistency_basis: str | None = None,
@@ -462,6 +486,7 @@ def _new_result(
     return FiveArticlesResult(
         case_id=case.id, scenario_id=case.scenario, version=(current_version or 0) + 1,
         status=status, stage_a_result_id=stage_a_result.id, mapping_version_id=mapping_version_id,
+        decision_policy_version=decision_policy_version,
         labels=labels or [], loan_neic_code=stage_a_result.loan_industry_code,
         loan_neic_name=stage_a_result.loan_industry_name, enterprise_neic_code=stage_a_result.industry_code,
         enterprise_neic_name=stage_a_result.industry_name, consistency_status=consistency_status,

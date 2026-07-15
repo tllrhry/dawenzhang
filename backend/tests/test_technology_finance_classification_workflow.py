@@ -263,7 +263,8 @@ def test_stage_b_failure_preserves_stage_a_and_retry_reuses_it_idempotently(
 
     assert duplicate.stage_b_result is not None
     assert duplicate.stage_b_result.id == retry.stage_b_result.id
-    assert mapping_lookup.call_count == mapping_calls_before
+    # Mapping freshness is checked before completed-result reuse.
+    assert mapping_lookup.call_count == mapping_calls_before + 1
     assert successful_stage_b.call_count == stage_b_calls_before
     assert session.scalar(
         select(func.count(FiveArticlesResult.id)).where(
@@ -700,7 +701,7 @@ def test_green_condition_fallback_completes_and_serializes_match_method(
 
 
 @pytest.mark.parametrize("multiple", [False, True], ids=["single", "multiple"])
-def test_green_neic_code_matches_keep_existing_selection_path(
+def test_green_neic_code_matches_require_condition_validation(
     green_workflow_context: tuple[Session, NationalEconomyClassificationCase, FiveArticlesMappingVersion],
     multiple: bool,
 ) -> None:
@@ -710,6 +711,7 @@ def test_green_neic_code_matches_keep_existing_selection_path(
         neic_code="2710", code_level=4, neic_name="化学药品原料药制造",
         subject="绿色产业", tier1="节能环保", tier2="节能改造",
         tier3=None, tier4=None, source_row=31,
+        condition_criteria="用于生产线节能改造项目",
     )
     candidates = (first,) if not multiple else (
         first,
@@ -717,11 +719,12 @@ def test_green_neic_code_matches_keep_existing_selection_path(
     )
     mapping_result = FiveArticlesMappingLookupResult(
         status="mapping_hit", mapping_version_id=mapping_version.id, mapping_version=1,
-        enterprise_labels=(), loan_direction_labels=candidates,
+        enterprise_labels=candidates, loan_direction_labels=candidates,
         detail="loan_direction_mapping_hit",
     )
     fallback_retriever = MagicMock()
-    label_selector = MagicMock(return_value=candidates[-1])
+    condition_selector = MagicMock(return_value=candidates[-1])
+    label_selector = MagicMock()
     stage_b_classifier = MagicMock(return_value=_stage_b_decision())
 
     outcome = classify_five_articles_case(
@@ -730,24 +733,77 @@ def test_green_neic_code_matches_keep_existing_selection_path(
         mapping_lookup=MagicMock(return_value=mapping_result),
         label_selector=label_selector, stage_b_classifier=stage_b_classifier,
         condition_candidate_retriever=fallback_retriever,
+        condition_label_selector=condition_selector,
     )
 
     assert outcome.stage_b_result is not None
     assert outcome.stage_b_result.status == "completed"
     fallback_retriever.assert_not_called()
-    if multiple:
-        label_selector.assert_called_once()
-        assert stage_b_classifier.call_args.args[4] == (candidates[-1],)
-    else:
-        label_selector.assert_not_called()
-        assert stage_b_classifier.call_args.args[4] == candidates
+    label_selector.assert_not_called()
+    assert condition_selector.call_count == 2
+    assert stage_b_classifier.call_args.args[4] == (candidates[-1],)
+
+
+def test_green_neic_condition_miss_falls_back_to_full_condition_index(
+    green_workflow_context: tuple[
+        Session, NationalEconomyClassificationCase, FiveArticlesMappingVersion
+    ],
+) -> None:
+    session, case, mapping_version = green_workflow_context
+    explicit = FiveArticlesMappingLabel(
+        mapping_version_id=mapping_version.id,
+        scenario_id="green_finance",
+        neic_code="2822",
+        code_level=4,
+        neic_name="涤纶纤维制造",
+        subject="环境保护产业",
+        tier1="先进环保装备和原料材料制造",
+        tier2="环境污染处理药剂材料制造",
+        tier3=None,
+        tier4=None,
+        source_row=153,
+        condition_criteria="用于高性能袋式除尘器滤料的纤维材料制造",
+    )
+    fallback = _green_condition_candidate(mapping_version.id)
+    mapping_result = FiveArticlesMappingLookupResult(
+        status="mapping_hit",
+        mapping_version_id=mapping_version.id,
+        mapping_version=1,
+        enterprise_labels=(),
+        loan_direction_labels=(explicit,),
+        detail="loan_direction_mapping_hit",
+    )
+    retriever = MagicMock(side_effect=[(), (fallback,)])
+    selector = MagicMock(side_effect=[None, fallback.label])
+    stage_b_classifier = MagicMock(return_value=_stage_b_decision())
+
+    outcome = classify_five_articles_case(
+        session,
+        case,
+        GREEN_FINANCE_REGISTRATION,
+        _settings(),
+        stage_a_classifier=lambda session, case, settings: _persist_stage_a(
+            session, case
+        ),
+        mapping_lookup=MagicMock(return_value=mapping_result),
+        stage_b_classifier=stage_b_classifier,
+        condition_candidate_retriever=retriever,
+        condition_label_selector=selector,
+    )
+
+    assert outcome.stage_b_result is not None
+    assert outcome.stage_b_result.status == "completed"
+    assert [call.args[2] for call in retriever.call_args_list] == [
+        "enterprise",
+        "loan_direction",
+    ]
+    assert stage_b_classifier.call_args.args[4][0].source_row == fallback.source_row
+    assert stage_b_classifier.call_args.args[4][0].match_method == "condition_fallback"
 
 
 @pytest.mark.parametrize(
     ("profile", "multiple"),
     [
-        (GREEN_FINANCE_REGISTRATION, False),
-        (GREEN_FINANCE_REGISTRATION, True),
         (DIGITAL_FINANCE_REGISTRATION, False),
         (DIGITAL_FINANCE_REGISTRATION, True),
         (PENSION_FINANCE_REGISTRATION, False),
@@ -809,8 +865,8 @@ def test_non_technology_finance_same_code_merges_labels_without_regression(
     assert stage_b_classifier.call_args.args[4] == expected_labels
 
 
-@pytest.mark.parametrize("keyword", ["绿色生产", "绿色经营"])
-def test_green_keyword_after_no_condition_match_needs_review(
+@pytest.mark.parametrize("keyword", ["绿色生产", "绿色经营", "节能降耗", "污染减排"])
+def test_green_words_do_not_bypass_condition_mapping(
     green_workflow_context: tuple[Session, NationalEconomyClassificationCase, FiveArticlesMappingVersion],
     keyword: str,
 ) -> None:
@@ -829,9 +885,8 @@ def test_green_keyword_after_no_condition_match_needs_review(
     )
 
     assert outcome.stage_b_result is not None
-    assert outcome.stage_b_result.status == "needs_review"
-    assert "已确认属于绿色金融业务范畴" in (outcome.stage_b_result.consistency_basis or "")
-    assert "具体分类标签" in (outcome.stage_b_result.consistency_basis or "")
+    assert outcome.stage_b_result.status == "not_applicable"
+    assert outcome.stage_b_result.error_detail == "green_finance_condition_no_match"
     assert [call.args[2] for call in retriever.call_args_list] == ["enterprise", "loan_direction"]
     stage_b_classifier.assert_not_called()
 
@@ -853,7 +908,7 @@ def test_green_no_keyword_and_enterprise_text_do_not_change_not_applicable(
 
     assert outcome.stage_b_result is not None
     assert outcome.stage_b_result.status == "not_applicable"
-    assert outcome.stage_b_result.error_detail == "loan_direction_has_no_explicit_mapping"
+    assert outcome.stage_b_result.error_detail == "green_finance_condition_no_match"
     assert [call.args[2] for call in retriever.call_args_list] == ["enterprise", "loan_direction"]
 
 

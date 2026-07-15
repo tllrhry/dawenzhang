@@ -150,8 +150,9 @@ def test_result_model_metadata_contains_design_fields_constraints_and_fks() -> N
         "scenario_id",
         "version",
         "status",
-        "stage_a_result_id",
-        "mapping_version_id",
+            "stage_a_result_id",
+            "mapping_version_id",
+            "decision_policy_version",
         "labels",
         "loan_neic_code",
         "loan_neic_name",
@@ -194,6 +195,12 @@ def test_result_model_metadata_contains_design_fields_constraints_and_fks() -> N
         if index.name == "uq_five_articles_results_case_stage_a_completed"
     )
     assert completed_index.unique
+    assert [column.name for column in completed_index.columns] == [
+        "case_id",
+        "stage_a_result_id",
+        "mapping_version_id",
+        "decision_policy_version",
+    ]
     assert str(completed_index.dialect_options["postgresql"]["where"]) == (
         "status = 'completed'"
     )
@@ -211,6 +218,7 @@ def test_migration_creates_result_table_constraints_indexes_and_fks() -> None:
     assert str(columns["consistency_evidence_refs"]["type"]) == "JSONB"
     assert str(columns["model_output"]["type"]) == "JSONB"
     assert columns["mapping_version_id"]["nullable"]
+    assert not columns["decision_policy_version"]["nullable"]
 
     unique_constraints = inspector.get_unique_constraints("five_articles_results")
     assert any(
@@ -231,7 +239,12 @@ def test_migration_creates_result_table_constraints_indexes_and_fks() -> None:
         if index["name"] == "uq_five_articles_results_case_stage_a_completed"
     )
     assert completed_index["unique"]
-    assert completed_index["column_names"] == ["case_id", "stage_a_result_id"]
+    assert completed_index["column_names"] == [
+        "case_id",
+        "stage_a_result_id",
+        "mapping_version_id",
+        "decision_policy_version",
+    ]
     assert "completed" in str(
         completed_index.get("dialect_options", {}).get("postgresql_where", "")
     )

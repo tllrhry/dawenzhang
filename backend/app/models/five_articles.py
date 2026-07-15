@@ -140,6 +140,8 @@ class FiveArticlesResult(Base):
             "uq_five_articles_results_case_stage_a_completed",
             "case_id",
             "stage_a_result_id",
+            "mapping_version_id",
+            "decision_policy_version",
             unique=True,
             postgresql_where=text("status = 'completed'"),
         ),
@@ -163,6 +165,12 @@ class FiveArticlesResult(Base):
         BigInteger,
         ForeignKey("five_articles_mapping_versions.id"),
         nullable=True,
+    )
+    decision_policy_version: Mapped[str] = mapped_column(
+        String(64),
+        default="legacy-v1",
+        server_default=text("'legacy-v1'"),
+        nullable=False,
     )
     labels: Mapped[list[dict[str, object]]] = mapped_column(
         JSONB,

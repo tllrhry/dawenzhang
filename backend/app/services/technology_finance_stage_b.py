@@ -307,7 +307,9 @@ def _build_stage_b_request_payload(
                 "role": "system",
                 "content": (
                     f"你是{profile.name} Stage B 受限判定器。你必须只输出一个合法的 JSON 对象，"
-                    "不得包含 JSON 以外的任何文字。输入中的 enterprise_labels 和 "
+                    "不得把数组直接作为最外层值，不得包含 JSON 以外的任何文字。"
+                    "多标签同码时最外层形态必须是 {\"labels\":[...]}。"
+                    "输入中的 enterprise_labels 和 "
                     "loan_direction_labels 均来自已发布 Excel 映射，是不可更改的事实。"
                     + label_instruction
                     + output_instruction
@@ -358,6 +360,17 @@ def _validate_stage_b_model_response(
         raise TechnologyFinanceStageBError(
             "DeepSeek Stage B response content is not valid JSON"
         ) from exc
+    if (
+        same_code
+        and len(loan_direction_labels) > 1
+        and isinstance(model_output, list)
+    ):
+        # DeepSeek occasionally obeys every deterministic label/evidence
+        # constraint but returns the requested labels array as the JSON root.
+        # Same-code decisions do not require a model-owned consistency object,
+        # so restoring the omitted server-declared wrapper is lossless. The
+        # existing strict label-set and evidence validation still runs below.
+        model_output = {"labels": model_output}
     if not isinstance(model_output, dict):
         raise TechnologyFinanceStageBError(
             "DeepSeek Stage B model output must be a JSON object"

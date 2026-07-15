@@ -684,7 +684,45 @@ def test_same_code_multiple_labels_prompt_requires_labels_not_label_basis() -> N
     system_prompt = captured["messages"][0]["content"]  # type: ignore[index]
     assert "根对象只能返回 labels，不得返回 consistency。" in system_prompt
     assert "根对象只能返回 label_basis，不得返回 consistency。" not in system_prompt
+    assert "不得把数组直接作为最外层值" in system_prompt
+    assert '最外层形态必须是 {"labels":[...]}' in system_prompt
     assert [label["source_row"] for label in result.labels] == [11, 12]
+
+
+def test_same_code_multiple_labels_accepts_direct_root_array() -> None:
+    first = _label(code="2710", name="化学药品原料药制造", source_row=11)
+    second = _label(
+        code="2710",
+        name="化学药品原料药制造",
+        source_row=12,
+        subject="知识产权(专利)密集型产业",
+        taxonomy_path=("信息通信技术制造业",),
+    )
+    output = [_label_output(first), _label_output(second)]
+
+    result = _run(
+        output,
+        (first, second),
+        (first, second),
+        stage_a=_stage_a(
+            enterprise_code="2710",
+            enterprise_name="化学药品原料药制造",
+            loan_code="2710",
+            loan_name="化学药品原料药制造",
+        ),
+    )
+
+    assert [label["source_row"] for label in result.labels] == [11, 12]
+    assert result.consistency_status == "consistent"
+    assert result.model_output == {"labels": output}
+
+
+def test_different_code_rejects_direct_root_array_without_consistency() -> None:
+    enterprise = _label(code="2710", name="化学药品原料药制造", source_row=11)
+    loan = _label(code="6311", name="基础软件开发", source_row=22)
+
+    with pytest.raises(TechnologyFinanceStageBError, match="must be a JSON object"):
+        _run([_label_output(loan)], (enterprise,), (loan,))
 
 
 def test_single_label_basis_is_attached_to_server_owned_label() -> None:

@@ -39,6 +39,7 @@ class ScenarioRegistration:
     mapping_tier_depth: int = 4
     mapping_path_setting: str | None = None
     mapping_has_condition_criteria: bool = False
+    stage_b_narrows_loan_labels: bool = True
 
     def template_path(self, settings: Settings | None = None) -> Path:
         if self.template_path_setting is None:
@@ -137,6 +138,7 @@ TECHNOLOGY_FINANCE_REGISTRATION = ScenarioRegistration(
         field.key for field in TECHNOLOGY_FINANCE_FIELD_SCHEMA
     ),
     mapping_tier_depth=4,
+    stage_b_narrows_loan_labels=False,
 )
 
 GREEN_FINANCE_ADDITIONAL_FIELDS = (

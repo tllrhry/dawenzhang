@@ -322,11 +322,11 @@ def _build_stage_b_result(
 
     loan_labels = mapping_result.loan_direction_labels
     enterprise_labels = mapping_result.enterprise_labels
-    if len(loan_labels) > 1:
+    if len(loan_labels) > 1 and profile.stage_b_narrows_loan_labels:
         selected = label_selector(profile, case.input_payload, stage_a_result, loan_labels, settings)
         loan_labels = (selected,)
-        if stage_a_result.industry_code == stage_a_result.loan_industry_code:
-            enterprise_labels = loan_labels
+    if stage_a_result.industry_code == stage_a_result.loan_industry_code:
+        enterprise_labels = loan_labels
     decision = stage_b_classifier(
         profile, case.input_payload, stage_a_result, enterprise_labels, loan_labels, settings
     )

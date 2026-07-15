@@ -422,10 +422,9 @@ def test_multiple_candidates_are_narrowed_to_one_before_stage_b(
         stage_b_classifier=stage_b_classifier,
     )
 
-    label_selector.assert_called_once()
-    assert label_selector.call_args.args[2] == candidates
+    label_selector.assert_not_called()
     stage_b_classifier.assert_called_once()
-    assert stage_b_classifier.call_args.args[3] == (candidates[1],)
+    assert stage_b_classifier.call_args.args[3] == candidates
     assert outcome.stage_b_result is not None
     assert outcome.stage_b_result.status == "completed"
 
@@ -487,9 +486,10 @@ def test_same_code_narrows_enterprise_side_to_the_same_winner(
         stage_b_classifier=stage_b_classifier,
     )
 
+    label_selector.assert_not_called()
     stage_b_classifier.assert_called_once()
-    assert stage_b_classifier.call_args.args[2] == (candidates[0],)
-    assert stage_b_classifier.call_args.args[3] == (candidates[0],)
+    assert stage_b_classifier.call_args.args[2] == candidates
+    assert stage_b_classifier.call_args.args[3] == candidates
     assert outcome.stage_b_result is not None
 
 
@@ -660,6 +660,72 @@ def test_green_neic_code_matches_keep_existing_selection_path(
     else:
         label_selector.assert_not_called()
         assert stage_b_classifier.call_args.args[4] == candidates
+
+
+@pytest.mark.parametrize(
+    ("profile", "multiple"),
+    [
+        (GREEN_FINANCE_REGISTRATION, False),
+        (GREEN_FINANCE_REGISTRATION, True),
+        (DIGITAL_FINANCE_REGISTRATION, False),
+        (DIGITAL_FINANCE_REGISTRATION, True),
+        (PENSION_FINANCE_REGISTRATION, False),
+        (PENSION_FINANCE_REGISTRATION, True),
+    ],
+    ids=lambda value: value.id if isinstance(value, ScenarioRegistration) else (
+        "multiple" if value else "single"
+    ),
+)
+def test_non_technology_finance_same_code_merges_labels_without_regression(
+    workflow_context: tuple[Session, NationalEconomyClassificationCase, FiveArticlesMappingVersion],
+    profile: ScenarioRegistration,
+    multiple: bool,
+) -> None:
+    session, case, mapping_version = workflow_context
+    case.scenario = profile.id
+    mapping_version.scenario_id = profile.id
+    session.commit()
+
+    first = FiveArticlesMappingLabel(
+        mapping_version_id=mapping_version.id, scenario_id=profile.id,
+        neic_code="2710", code_level=4, neic_name="化学药品原料药制造",
+        subject=f"{profile.id}主题一", tier1="一级", tier2="二级",
+        tier3=None, tier4=None, source_row=41,
+    )
+    candidates = (first,) if not multiple else (
+        first,
+        replace(first, subject=f"{profile.id}主题二", source_row=42),
+    )
+    mapping_result = FiveArticlesMappingLookupResult(
+        status="mapping_hit", mapping_version_id=mapping_version.id, mapping_version=1,
+        enterprise_labels=(), loan_direction_labels=candidates,
+        detail="loan_direction_mapping_hit",
+    )
+    label_selector = MagicMock(return_value=candidates[-1])
+    stage_b_classifier = MagicMock(return_value=_stage_b_decision())
+
+    outcome = classify_five_articles_case(
+        session, case, profile, _settings(),
+        stage_a_classifier=lambda session, case, settings: _persist_same_code_stage_a(
+            session, case
+        ),
+        mapping_lookup=MagicMock(return_value=mapping_result),
+        label_selector=label_selector,
+        stage_b_classifier=stage_b_classifier,
+    )
+
+    assert outcome.stage_b_result is not None
+    assert outcome.stage_b_result.status == "completed"
+    stage_b_classifier.assert_called_once()
+    if multiple:
+        label_selector.assert_called_once()
+        assert label_selector.call_args.args[3] == candidates
+        expected_labels = (candidates[-1],)
+    else:
+        label_selector.assert_not_called()
+        expected_labels = candidates
+    assert stage_b_classifier.call_args.args[3] == expected_labels
+    assert stage_b_classifier.call_args.args[4] == expected_labels
 
 
 @pytest.mark.parametrize("keyword", ["绿色生产", "绿色经营"])

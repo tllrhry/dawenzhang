@@ -257,6 +257,33 @@ def _build_stage_b_request_payload(
             "不同判 inconsistent，也不得仅凭研发、专利或资质判 consistent。"
         )
     )
+    if len(loan_direction_labels) == 1:
+        label_instruction = (
+            "loan_direction_labels 已由服务端收窄为唯一最匹配标签。你不得输出 labels "
+            "数组，也不得复制标签字段；不得新增、删除、改写或替换标签。"
+            "你只能输出一个 label_basis 对象，"
+        )
+        output_instruction = (
+            "且只能包含 matching_basis 和 business_evidence_refs。"
+            "matching_basis 是唯一标签的中文匹配依据；"
+            "business_evidence_refs 至少一条，每条只能包含 "
+            "type、field_key、field_label、excerpt，type 必须为 business。"
+        )
+        evidence_instruction = ""
+    else:
+        label_instruction = (
+            "loan_direction_labels 包含多个相互独立、互不排斥的主题候选。你必须为每个候选分别生成中文匹配依据，"
+            "输出 labels 数组；数组条目数量必须与候选数量一致，候选集合必须完全一致。"
+            "不得新增、删除、改写或替换任何候选；每个条目必须对应一个原始候选并保留其固定字段。"
+        )
+        output_instruction = (
+            "每个 labels 条目除候选固定字段外只能包含 matching_basis 和 evidence_refs。"
+            "每个条目的 matching_basis 都是对应候选的中文匹配依据，且 evidence_refs 至少一条；"
+        )
+        evidence_instruction = (
+            "evidence_refs 必须包含对应候选的 mapping 证据和至少一条 business 证据；"
+            "每条 business 证据只能包含 type、field_key、field_label、excerpt，type 必须为 business。"
+        )
     return {
         "model": model,
         "response_format": {"type": "json_object"},
@@ -268,12 +295,10 @@ def _build_stage_b_request_payload(
                     f"你是{profile.name} Stage B 受限判定器。你必须只输出一个合法的 JSON 对象，"
                     "不得包含 JSON 以外的任何文字。输入中的 enterprise_labels 和 "
                     "loan_direction_labels 均来自已发布 Excel 映射，是不可更改的事实。"
-                    "loan_direction_labels 已由服务端收窄为唯一最匹配标签。你不得输出 labels "
-                    "数组，也不得复制标签字段；不得新增、删除、改写或替换标签。"
-                    "你只能输出一个 label_basis 对象，"
-                    "且只能包含 matching_basis 和 business_evidence_refs。matching_basis 是唯一标签的"
-                    "中文匹配依据；business_evidence_refs 至少一条，每条只能包含 "
-                    "type、field_key、field_label、excerpt，type 必须为 business。字段必须属于当前场景证据白名单且来自输入，"
+                    + label_instruction
+                    + output_instruction
+                    + evidence_instruction
+                    + "字段必须属于当前场景证据白名单且来自输入，"
                     "label 必须匹配，excerpt 必须是对应 value 的原文子串且不超过输入规定"
                     f"长度。业务证据优先级依次为：{'、'.join(profile.stage_b_evidence_field_keys)}；"
                     "Stage A 贷款投向依据可作为补充。不得捏造"

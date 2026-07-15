@@ -487,14 +487,10 @@ function ResultPanel({ scenarioId, caseData, result, stageBResult, errorMessage,
         </div>
         {stageBResult.labels.length > 0 ? <div className="technology-label-list">
           {stageBResult.labels.map((label, index) => {
-            const [tier1, tier2, tier3, tier4] = label.taxonomy_path
             return <section className="technology-label" key={`${label.subject}-${label.source_row}-${index}`}>
               <div className="technology-label-heading"><Tag color="blue">{label.subject}</Tag><strong>{label.NEIC_Code} · {label.NEIC_Name}</strong></div>
               <Descriptions column={{ xs: 1, sm: 2 }} size="small">
-                <Descriptions.Item label="第一层名称">{tier1 || '--'}</Descriptions.Item>
-                <Descriptions.Item label="第二层名称">{tier2 || '--'}</Descriptions.Item>
-                <Descriptions.Item label="第三层名称">{tier3 || '--'}</Descriptions.Item>
-                <Descriptions.Item label="第四层名称">{tier4 || '--'}</Descriptions.Item>
+                {label.taxonomy_path.map((tier, tierIndex) => <Descriptions.Item key={`tier-${tierIndex}`} label={['第一层名称', '第二层名称', '第三层名称', '第四层名称'][tierIndex]}>{tier}</Descriptions.Item>)}
                 <Descriptions.Item label="映射来源">版本 {label.mapping_version_id} · 源行 {label.source_row}</Descriptions.Item>
                 <Descriptions.Item label="匹配依据" span={2}>{label.matching_basis || '--'}</Descriptions.Item>
               </Descriptions>

@@ -9,6 +9,7 @@ import httpx
 
 from app.core.config import Settings
 from app.services.scenario_registry import (
+    PENSION_FINANCE_SCENARIO,
     ScenarioRegistration,
     TECHNOLOGY_FINANCE_REGISTRATION,
 )
@@ -195,6 +196,7 @@ def classify_five_articles_stage_b(
             enterprise_snapshot,
             loan_snapshot,
             business_sources,
+            profile,
             same_code=same_code,
         )
     except TechnologyFinanceStageBError:
@@ -244,6 +246,11 @@ def _build_stage_b_request_payload(
         "max_excerpt_length": MAX_EVIDENCE_EXCERPT_LENGTH,
     }
     is_single_label = len(loan_direction_labels) == 1
+    missing_enterprise_instruction = (
+        "企业侧未命中但贷款投向侧已命中时，应结合明确的贷款用途判为 inconsistent；"
+        if profile.id == PENSION_FINANCE_SCENARIO
+        else "企业侧未命中、"
+    )
     consistency_instruction = (
         (
             "企业四位码与投向四位码相同，一致性由服务端确定为 consistent；"
@@ -259,7 +266,8 @@ def _build_stage_b_request_payload(
             "inconsistent 或 "
             "needs_review：企业和投向标签存在交集且资金服务企业现有主营或科技活动才可"
             "为 consistent；标签无交集或资金明确流向无关独立活动可为 inconsistent；"
-            "企业侧未命中、用途笼统、证据冲突或不足必须为 needs_review。不得仅凭两码"
+            + missing_enterprise_instruction
+            + "用途笼统、证据冲突或业务证据不足必须为 needs_review。不得仅凭两码"
             "不同判 inconsistent，也不得仅凭研发、专利或资质判 consistent。"
         )
     )
@@ -330,6 +338,7 @@ def _validate_stage_b_model_response(
     enterprise_labels: Sequence[FiveArticlesMappingLabel],
     loan_direction_labels: Sequence[FiveArticlesMappingLabel],
     business_sources: Mapping[str, _EvidenceSource],
+    profile: ScenarioRegistration,
     *,
     same_code: bool,
 ) -> TechnologyFinanceStageBResult:
@@ -409,6 +418,7 @@ def _validate_stage_b_model_response(
         enterprise_labels,
         loan_direction_labels,
         business_sources,
+        profile,
     )
     return TechnologyFinanceStageBResult(
         labels=labels,
@@ -586,6 +596,7 @@ def _validate_consistency_output(
     enterprise_labels: Sequence[FiveArticlesMappingLabel],
     loan_direction_labels: Sequence[FiveArticlesMappingLabel],
     business_sources: Mapping[str, _EvidenceSource],
+    profile: ScenarioRegistration,
 ) -> tuple[
     TechnologyFinanceConsistencyStatus,
     str,
@@ -607,16 +618,28 @@ def _validate_consistency_output(
         )
     status: TechnologyFinanceConsistencyStatus = raw_status
     basis = _required_chinese_text(raw_consistency, "basis", "consistency")
-    evidence_is_insufficient = (
-        not enterprise_labels
-        or "loan_purpose" not in business_sources
+    business_evidence_is_insufficient = (
+        "loan_purpose" not in business_sources
         or "stage_a.loan_matching_basis" not in business_sources
+    )
+    evidence_is_insufficient = business_evidence_is_insufficient or (
+        not enterprise_labels and profile.id != PENSION_FINANCE_SCENARIO
     )
     if evidence_is_insufficient and status != "needs_review":
         raise TechnologyFinanceStageBError(
             "insufficient consistency evidence must result in needs_review"
         )
-    if enterprise_labels and not _labels_intersect(
+    if (
+        profile.id == PENSION_FINANCE_SCENARIO
+        and not enterprise_labels
+        and not business_evidence_is_insufficient
+    ):
+        status = "inconsistent"
+        basis = (
+            f"企业侧未命中已发布{profile.name}映射，贷款投向侧已命中{profile.name}标签，"
+            "且贷款用途与投向依据明确，判定为不一致。"
+        )
+    elif enterprise_labels and not _labels_intersect(
         enterprise_labels, loan_direction_labels
     ):
         status = "inconsistent"

@@ -6,7 +6,10 @@ import httpx
 import pytest
 
 from app.core.config import Settings
-from app.services.scenario_registry import GREEN_FINANCE_REGISTRATION
+from app.services.scenario_registry import (
+    GREEN_FINANCE_REGISTRATION,
+    PENSION_FINANCE_REGISTRATION,
+)
 from app.services.technology_finance_mapping_query import (
     FiveArticlesMappingLabel,
 )
@@ -406,6 +409,34 @@ def test_missing_enterprise_mapping_requires_and_accepts_needs_review() -> None:
 
     assert result.consistency_status == "needs_review"
     assert "证据不足" in result.consistency_basis
+
+
+def test_missing_enterprise_mapping_accepts_grounded_inconsistent() -> None:
+    loan = replace(
+        _label(code="8514", name="老年人、残疾人养护服务", source_row=1520),
+        scenario_id=PENSION_FINANCE_REGISTRATION.id,
+    )
+    output = _model_output((), (loan,), "inconsistent")
+
+    with _client(output) as client:
+        result = classify_five_articles_stage_b(
+            PENSION_FINANCE_REGISTRATION,
+            _input_payload(),
+            _stage_a(
+                enterprise_code="7020",
+                enterprise_name="物业管理",
+                loan_code="8514",
+                loan_name="老年人、残疾人养护服务",
+            ),
+            (),
+            (loan,),
+            _settings(),
+            client=client,
+        )
+
+    assert result.consistency_status == "inconsistent"
+    assert "养老金融映射" in result.consistency_basis
+    assert len(result.consistency_evidence_refs) == 3
 
 
 def test_legacy_consistency_refs_are_ignored_and_rebuilt_by_server() -> None:

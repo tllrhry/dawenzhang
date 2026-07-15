@@ -362,9 +362,12 @@ def test_request_contains_two_candidate_pools_and_loan_decision_tree() -> None:
     assert user_content["dominant_main_business"] is None
     assert user_content["objection"] == {"reason": "经营内容已变化"}
     assert "笼统" in system_prompt
-    assert "不在主营但在营业执照经营范围内" in system_prompt
-    assert "既不在主营也不在经营范围" in system_prompt
-    assert "实际投向" in system_prompt
+    assert "无论是否已登记在营业执照经营范围内" in system_prompt
+    assert "不得作为否定真实贷款投向或拒绝选择候选的门槛" in system_prompt
+    assert "不得仅以不属于主营或不在营业执照经营范围内为由返回无匹配" in system_prompt
+    assert "仍须按实际资金用途完成分类" in system_prompt
+    assert "真实投向既不在主营也不在经营范围" not in system_prompt
+    assert "真实投向" in system_prompt
     assert "贷款用途详细描述是主信号" in system_prompt
     assert "贸易合同核心交易品类用于揭示并校正资金真实流向" in system_prompt
     assert "授信审批意见是资金用途的刚性约束" in system_prompt

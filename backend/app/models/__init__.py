@@ -11,6 +11,10 @@ from app.models.national_economy import (
     NationalEconomyClassificationResult,
     NationalEconomyIndustryChunk,
 )
+from app.models.technology_finance_ip_registry import (
+    TechnologyFinanceIpRegistryEntry,
+    TechnologyFinanceIpRegistryVersion,
+)
 
 __all__ = [
     "FiveArticlesMappingRow",
@@ -22,4 +26,6 @@ __all__ = [
     "NationalEconomyClassificationCase",
     "NationalEconomyClassificationResult",
     "NationalEconomyIndustryChunk",
+    "TechnologyFinanceIpRegistryVersion",
+    "TechnologyFinanceIpRegistryEntry",
 ]

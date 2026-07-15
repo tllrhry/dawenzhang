@@ -231,13 +231,35 @@ function HomePage() {
 
 function FiveArticlesScenario() {
   const navigate = useNavigate()
+  const [showSubScenarios, setShowSubScenarios] = useState(false)
   return (
     <Card className="scenario-card scenario-card-active" bordered={false}>
       <div className="scene-icon scene-icon-active"><BankOutlined /></div>
       <div className="scene-body">
         <h2>五篇大文章分类</h2>
         <p>涵盖科技、绿色、普惠、养老、数字金融；普惠金融采用独立的确定性判定规则。</p>
-        {fiveArticlesScenarioIds.map((scenarioId) => <Button key={scenarioId} type="primary" size="middle" block icon={<ArrowRightOutlined />} iconPosition="end" onClick={() => navigate(scenarioViews[scenarioId].classifyPath)}>进入{scenarioViews[scenarioId].name}</Button>)}
+        <Button
+          type="primary"
+          size="large"
+          block
+          icon={<ArrowRightOutlined />}
+          iconPosition="end"
+          aria-expanded={showSubScenarios}
+          aria-controls="five-articles-sub-scenarios"
+          onClick={() => setShowSubScenarios((visible) => !visible)}
+        >
+          {showSubScenarios ? '收起分类' : '进入分类'}
+        </Button>
+        {showSubScenarios && (
+          <div id="five-articles-sub-scenarios" className="five-articles-sub-scenarios" aria-label="五篇大文章子场景">
+            <span>请选择子场景</span>
+            {fiveArticlesScenarioIds.map((scenarioId) => (
+              <Button key={scenarioId} type="primary" size="middle" block icon={<ArrowRightOutlined />} iconPosition="end" onClick={() => navigate(scenarioViews[scenarioId].classifyPath)}>
+                进入{scenarioViews[scenarioId].name}
+              </Button>
+            ))}
+          </div>
+        )}
       </div>
       <Divider />
       <span className="learn-link is-muted"><InfoCircleOutlined /> 查看专题使用说明 <ArrowRightOutlined /></span>

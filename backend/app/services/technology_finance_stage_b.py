@@ -29,7 +29,12 @@ _ROOT_FIELDS_WITH_CONSISTENCY = frozenset({"labels", "consistency"})
 _ROOT_FIELDS_SAME_CODE = frozenset({"labels"})
 _BASIS_ROOT_FIELDS_WITH_CONSISTENCY = frozenset({"label_basis", "consistency"})
 _BASIS_ROOT_FIELDS_SAME_CODE = frozenset({"label_basis"})
+_MULTI_BASIS_ROOT_FIELDS_WITH_CONSISTENCY = frozenset(
+    {"label_bases", "consistency"}
+)
+_MULTI_BASIS_ROOT_FIELDS_SAME_CODE = frozenset({"label_bases"})
 _LABEL_BASIS_FIELDS = frozenset({"matching_basis", "business_evidence_refs"})
+_COMPACT_LABEL_FIELDS = frozenset({"matching_basis", "evidence_refs"})
 _LABEL_FIELDS = frozenset(
     {
         "mapping_version_id",
@@ -257,11 +262,13 @@ def _build_stage_b_request_payload(
             "根对象只能返回 label_basis，不得返回 consistency。"
             if is_single_label
             else "企业四位码与投向四位码相同，一致性由服务端确定为 consistent；"
-            "根对象只能返回 labels，不得返回 consistency。"
+            "根对象只能返回 label_bases，不得返回 consistency。"
         )
         if same_code
         else (
-            "两码不同，根对象必须返回 label_basis 和 consistency。consistency 只能包含 "
+            "两码不同，根对象必须返回 "
+            + ("label_basis" if is_single_label else "label_bases")
+            + " 和 consistency。consistency 只能包含 "
             "status、basis，不得返回任何 evidence_refs。status 只能是 consistent、"
             "inconsistent 或 "
             "needs_review：企业和投向标签存在交集且资金服务企业现有主营或科技活动才可"
@@ -287,15 +294,15 @@ def _build_stage_b_request_payload(
     else:
         label_instruction = (
             "loan_direction_labels 包含多个相互独立、互不排斥的主题候选。你必须为每个候选分别生成中文匹配依据，"
-            "输出 labels 数组；数组条目数量必须与候选数量一致，候选集合必须完全一致。"
-            "不得新增、删除、改写或替换任何候选；每个条目必须对应一个原始候选并保留其固定字段。"
+            "按输入候选的原始顺序输出 label_bases 数组；数组条目数量必须与候选数量一致。"
+            "不得新增、删除、重排或替换任何候选；标签固定字段不由模型返回。"
         )
         output_instruction = (
-            "每个 labels 条目除候选固定字段外只能包含 matching_basis 和 evidence_refs。"
-            "每个条目的 matching_basis 都是对应候选的中文匹配依据，且 evidence_refs 至少一条；"
+            "每个 label_bases 条目只能包含 matching_basis 和 business_evidence_refs。"
+            "每个条目的 matching_basis 都是对应候选的中文匹配依据，且 business_evidence_refs 至少一条；"
         )
         evidence_instruction = (
-            "evidence_refs 必须至少包含一条 business 证据；对应候选的 mapping 证据由服务端组装。"
+            "business_evidence_refs 必须全部是 business 证据；对应候选的 mapping 证据由服务端组装。"
             "每条 business 证据只能包含 type、field_key、field_label、excerpt，type 必须为 business。"
         )
     return {
@@ -308,7 +315,7 @@ def _build_stage_b_request_payload(
                 "content": (
                     f"你是{profile.name} Stage B 受限判定器。你必须只输出一个合法的 JSON 对象，"
                     "不得把数组直接作为最外层值，不得包含 JSON 以外的任何文字。"
-                    "多标签同码时最外层形态必须是 {\"labels\":[...]}。"
+                    "多标签同码时最外层形态必须是 {\"label_bases\":[...]}。"
                     "输入中的 enterprise_labels 和 "
                     "loan_direction_labels 均来自已发布 Excel 映射，是不可更改的事实。"
                     + label_instruction
@@ -370,7 +377,15 @@ def _validate_stage_b_model_response(
         # Same-code decisions do not require a model-owned consistency object,
         # so restoring the omitted server-declared wrapper is lossless. The
         # existing strict label-set and evidence validation still runs below.
-        model_output = {"labels": model_output}
+        wrapper = (
+            "label_bases"
+            if all(
+                isinstance(item, dict) and "business_evidence_refs" in item
+                for item in model_output
+            )
+            else "labels"
+        )
+        model_output = {wrapper: model_output}
     if not isinstance(model_output, dict):
         raise TechnologyFinanceStageBError(
             "DeepSeek Stage B model output must be a JSON object"
@@ -387,6 +402,21 @@ def _validate_stage_b_model_response(
         )
         labels = _validate_single_label_basis(
             model_output.get("label_basis"),
+            loan_direction_labels,
+            business_sources,
+        )
+    elif "label_bases" in model_output:
+        _require_exact_fields(
+            model_output,
+            (
+                _MULTI_BASIS_ROOT_FIELDS_SAME_CODE
+                if same_code
+                else _MULTI_BASIS_ROOT_FIELDS_WITH_CONSISTENCY
+            ),
+            "root",
+        )
+        labels = _validate_multi_label_bases(
+            model_output.get("label_bases"),
             loan_direction_labels,
             business_sources,
         )
@@ -463,9 +493,20 @@ def _validate_label_outputs(
         fields_without_match_method = {
             field: value for field, value in raw_label.items() if field != "match_method"
         }
-        _require_exact_fields(fields_without_match_method, _LABEL_FIELDS, f"labels[{index}]")
-        key = _label_key_from_output(raw_label, f"labels[{index}]")
-        expected = expected_by_key.get(key)
+        is_compact = frozenset(fields_without_match_method) == _COMPACT_LABEL_FIELDS
+        if is_compact:
+            if len(raw_labels) != len(expected_labels):
+                raise TechnologyFinanceStageBError(
+                    "model output changed deterministic label count"
+                )
+            expected = expected_labels[index]
+            key = _label_key_from_label(expected)
+        else:
+            _require_exact_fields(
+                fields_without_match_method, _LABEL_FIELDS, f"labels[{index}]"
+            )
+            key = _label_key_from_output(raw_label, f"labels[{index}]")
+            expected = expected_by_key.get(key)
         if expected is None:
             if len(expected_by_key) == 1:
                 continue
@@ -506,6 +547,43 @@ def _validate_label_outputs(
     return tuple(
         validated_by_key[_label_key_from_label(label)] for label in expected_labels
     )
+
+
+def _validate_multi_label_bases(
+    raw_bases: object,
+    expected_labels: Sequence[FiveArticlesMappingLabel],
+    business_sources: Mapping[str, _EvidenceSource],
+) -> tuple[dict[str, object], ...]:
+    if len(expected_labels) < 2:
+        raise TechnologyFinanceStageBError(
+            "Stage B multi-label bases require at least two server-owned labels"
+        )
+    if not isinstance(raw_bases, list):
+        raise TechnologyFinanceStageBError("label_bases must be an array")
+    if len(raw_bases) != len(expected_labels):
+        raise TechnologyFinanceStageBError(
+            "model output changed deterministic label count"
+        )
+
+    validated: list[dict[str, object]] = []
+    for index, (raw_basis, expected_label) in enumerate(
+        zip(raw_bases, expected_labels, strict=True)
+    ):
+        if not isinstance(raw_basis, dict):
+            raise TechnologyFinanceStageBError(
+                f"label_bases[{index}] must be a JSON object"
+            )
+        _require_exact_fields(
+            raw_basis, _LABEL_BASIS_FIELDS, f"label_bases[{index}]"
+        )
+        validated.append(
+            _validate_single_label_basis(
+                raw_basis,
+                (expected_label,),
+                business_sources,
+            )[0]
+        )
+    return tuple(validated)
 
 
 def _validate_single_label_basis(

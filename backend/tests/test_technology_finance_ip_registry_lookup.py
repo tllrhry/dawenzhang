@@ -58,3 +58,46 @@ def test_lookup_empty_name_short_circuits_without_database_query() -> None:
 
     assert lookup_technology_finance_ip_registry_match(session, None).matched is False
     assert lookup_technology_finance_ip_registry_match(session, "   ").matched is False
+
+
+def test_lookup_normalizes_invisible_name_characters_in_latest_version() -> None:
+    session = get_sessionmaker()()
+    try:
+        version = _next_version(session)
+        _published_version(
+            session,
+            version,
+            ("江苏超盛汽车零部件有限公司", 11),
+        )
+        session.commit()
+
+        matched = lookup_technology_finance_ip_registry_match(
+            session, "江苏超盛\u200b汽车零部件有限公司"
+        )
+
+        assert matched.matched is True
+        assert matched.source_row == 11
+    finally:
+        session.close()
+
+
+def test_lookup_rejects_ambiguous_normalized_registry_names() -> None:
+    session = get_sessionmaker()()
+    try:
+        version = _next_version(session)
+        _published_version(
+            session,
+            version,
+            ("江苏超盛 汽车零部件有限公司", 11),
+            ("江苏超盛汽车零部件有限公司", 12),
+        )
+        session.commit()
+
+        matched = lookup_technology_finance_ip_registry_match(
+            session, "江苏超盛\u200b汽车零部件有限公司"
+        )
+
+        assert matched.matched is False
+        assert matched.source_row is None
+    finally:
+        session.close()

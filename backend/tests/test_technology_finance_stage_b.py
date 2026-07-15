@@ -138,6 +138,13 @@ def _label_output(label: FiveArticlesMappingLabel) -> dict[str, object]:
     }
 
 
+def _label_basis_output() -> dict[str, object]:
+    return {
+        "matching_basis": "贷款资金用于现有研发平台升级，命中该科技金融类别。",
+        "business_evidence_refs": [_business_ref()],
+    }
+
+
 def _model_output(
     enterprise_labels: tuple[FiveArticlesMappingLabel, ...],
     loan_labels: tuple[FiveArticlesMappingLabel, ...],
@@ -658,7 +665,7 @@ def test_same_code_multiple_labels_prompt_requires_labels_not_label_basis() -> N
         taxonomy_path=("信息通信技术制造业",),
     )
     captured: dict[str, object] = {}
-    output = {"labels": [_label_output(first), _label_output(second)]}
+    output = {"label_bases": [_label_basis_output(), _label_basis_output()]}
 
     def handler(request: httpx.Request) -> httpx.Response:
         captured.update(json.loads(request.content))
@@ -682,11 +689,98 @@ def test_same_code_multiple_labels_prompt_requires_labels_not_label_basis() -> N
         )
 
     system_prompt = captured["messages"][0]["content"]  # type: ignore[index]
-    assert "根对象只能返回 labels，不得返回 consistency。" in system_prompt
+    assert "根对象只能返回 label_bases，不得返回 consistency。" in system_prompt
     assert "根对象只能返回 label_basis，不得返回 consistency。" not in system_prompt
     assert "不得把数组直接作为最外层值" in system_prompt
-    assert '最外层形态必须是 {"labels":[...]}' in system_prompt
+    assert '最外层形态必须是 {"label_bases":[...]}' in system_prompt
     assert [label["source_row"] for label in result.labels] == [11, 12]
+
+
+def test_multiple_label_bases_are_attached_to_server_owned_labels_in_order() -> None:
+    first = _label(code="2710", name="化学药品原料药制造", source_row=11)
+    second = _label(
+        code="2710",
+        name="化学药品原料药制造",
+        source_row=12,
+        subject="知识产权(专利)密集型产业",
+        taxonomy_path=("信息通信技术制造业",),
+    )
+    output = {
+        "label_bases": [
+            _label_basis_output(),
+            {
+                "matching_basis": "企业知识产权活动与该产业候选相匹配。",
+                "business_evidence_refs": [
+                    _business_ref(
+                        "rd_ip_info",
+                        "研发与知识产权情况",
+                        "拥有药物研发相关发明专利",
+                    )
+                ],
+            },
+        ]
+    }
+
+    result = _run(
+        output,
+        (first, second),
+        (first, second),
+        stage_a=_stage_a(
+            enterprise_code="2710",
+            enterprise_name="化学药品原料药制造",
+            loan_code="2710",
+            loan_name="化学药品原料药制造",
+        ),
+    )
+
+    assert [label["source_row"] for label in result.labels] == [11, 12]
+    assert result.labels[1]["matching_basis"] == "企业知识产权活动与该产业候选相匹配。"
+    assert result.labels[1]["evidence_refs"][0] == _mapping_ref(second)
+
+
+def test_compact_legacy_labels_are_attached_to_server_owned_labels_in_order() -> None:
+    first = _label(code="2710", name="化学药品原料药制造", source_row=11)
+    second = _label(
+        code="2710",
+        name="化学药品原料药制造",
+        source_row=12,
+        subject="知识产权(专利)密集型产业",
+        taxonomy_path=("信息通信技术制造业",),
+    )
+    output = {
+        "labels": [
+            {
+                "matching_basis": "首个候选与企业主营及贷款用途相匹配。",
+                "evidence_refs": [_business_ref()],
+            },
+            {
+                "matching_basis": "第二个候选与企业知识产权活动相匹配。",
+                "evidence_refs": [
+                    _business_ref(
+                        "rd_ip_info",
+                        "研发与知识产权情况",
+                        "拥有药物研发相关发明专利",
+                    )
+                ],
+            },
+        ]
+    }
+
+    result = _run(
+        output,
+        (first, second),
+        (first, second),
+        stage_a=_stage_a(
+            enterprise_code="2710",
+            enterprise_name="化学药品原料药制造",
+            loan_code="2710",
+            loan_name="化学药品原料药制造",
+        ),
+    )
+
+    assert [label["source_row"] for label in result.labels] == [11, 12]
+    assert result.labels[0]["mapping_version_id"] == first.mapping_version_id
+    assert result.labels[1]["NEIC_Name"] == second.neic_name
 
 
 def test_same_code_multiple_labels_accepts_direct_root_array() -> None:

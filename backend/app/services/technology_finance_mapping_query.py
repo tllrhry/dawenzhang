@@ -12,6 +12,7 @@ from app.services.technology_finance_mapping_sync import (
 
 
 MappingLookupStatus = Literal["mapping_hit", "not_applicable", "needs_review"]
+MappingMatchMethod = Literal["neic_code", "condition_fallback"]
 FOUR_DIGIT_CODE_PATTERN = re.compile(r"^\d{4}$")
 MAJOR_CATEGORY_CODE_PATTERN = re.compile(r"^[A-Za-z]?(\d{2})$")
 INDUSTRY_CODE_PATTERN = re.compile(r"^[A-Za-z]?(\d{2,4})$")
@@ -31,6 +32,7 @@ class FiveArticlesMappingLabel:
     tier3: str | None
     tier4: str | None
     source_row: int
+    match_method: MappingMatchMethod = "neic_code"
 
     @property
     def taxonomy_path(self) -> tuple[str, ...]:

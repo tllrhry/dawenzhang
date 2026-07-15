@@ -149,6 +149,7 @@ def _persist_workflow_result(
                 "mapping_version_id": 3,
                 "subject": "高技术产业（制造业）",
                 "taxonomy_path": ["医药制造业", "化学药品制造"],
+                "match_method": "neic_code",
                 "NEIC_Code": "2710",
                 "NEIC_Name": "化学药品原料药制造",
                 "source_row": 12,
@@ -174,6 +175,7 @@ def _persist_workflow_result(
                 "mapping_version_id": 3,
                 "subject": "战略性新兴产业",
                 "taxonomy_path": ["生物产业"],
+                "match_method": "neic_code",
                 "NEIC_Code": "27",
                 "NEIC_Name": "医药制造业",
                 "source_row": 28,
@@ -254,6 +256,7 @@ def test_technology_finance_seven_endpoint_types(
     assert classification["stage_a"]["status"] == "completed"
     assert classification["stage_b"]["status"] == "completed"
     assert classification["stage_b"]["labels"][0]["source_row"] == 12
+    assert classification["stage_b"]["labels"][0]["match_method"] == "neic_code"
     assert classification["stage_b"]["consistency_status"] == "consistent"
 
     def fake_reclassify(

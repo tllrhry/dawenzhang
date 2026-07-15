@@ -6,11 +6,13 @@ import httpx
 import pytest
 
 from app.core.config import Settings
+from app.services.scenario_registry import GREEN_FINANCE_REGISTRATION
 from app.services.technology_finance_mapping_query import (
     FiveArticlesMappingLabel,
 )
 from app.services.technology_finance_stage_b import (
     TechnologyFinanceStageBError,
+    classify_five_articles_stage_b,
     classify_technology_finance_stage_b,
 )
 
@@ -92,6 +94,10 @@ def _fixed_label(label: FiveArticlesMappingLabel) -> dict[str, object]:
         "subject": label.subject,
         "taxonomy_path": list(label.taxonomy_path),
     }
+
+
+def _serialized_label(label: FiveArticlesMappingLabel) -> dict[str, object]:
+    return {**_fixed_label(label), "match_method": label.match_method}
 
 
 def _mapping_ref(label: FiveArticlesMappingLabel) -> dict[str, object]:
@@ -200,6 +206,25 @@ def _run(
         )
 
 
+def _run_green(
+    output: dict[str, object],
+    enterprise_labels: tuple[FiveArticlesMappingLabel, ...],
+    loan_labels: tuple[FiveArticlesMappingLabel, ...],
+    *,
+    stage_a: SimpleNamespace,
+):
+    with _client(output) as client:
+        return classify_five_articles_stage_b(
+            GREEN_FINANCE_REGISTRATION,
+            _input_payload(),
+            stage_a,
+            enterprise_labels,
+            loan_labels,
+            _settings(),
+            client=client,
+        )
+
+
 def test_technology_stage_b_rejects_non_technology_candidates() -> None:
     enterprise = replace(
         _label(code="2710", name="化学药品原料药制造", source_row=11),
@@ -273,8 +298,8 @@ def test_prompt_contains_only_whitelisted_inputs_and_immutable_labels() -> None:
     )
     assert "unexpected_secret" not in json.dumps(user_input, ensure_ascii=False)
     assert user_input["stage_a_result"]["stage_a_result_id"] == 41
-    assert user_input["enterprise_labels"] == [_fixed_label(enterprise)]
-    assert user_input["loan_direction_labels"] == [_fixed_label(loan)]
+    assert user_input["enterprise_labels"] == [_serialized_label(enterprise)]
+    assert user_input["loan_direction_labels"] == [_serialized_label(loan)]
     assert {
         source["field_key"] for source in user_input["business_evidence_sources"]
     } == {
@@ -572,12 +597,62 @@ def test_single_label_basis_is_attached_to_server_owned_label() -> None:
 
     assert result.labels == (
         {
-            **_fixed_label(label),
+            **_serialized_label(label),
             "matching_basis": "贷款资金用于现有研发平台升级，命中该科技金融类别。",
             "evidence_refs": [_mapping_ref(label), _business_ref()],
         },
     )
     assert set(result.model_output) == {"label_basis"}
+
+
+@pytest.mark.parametrize(
+    ("enterprise_subject", "enterprise_path", "expected_status"),
+    [
+        ("绿色产业", ("节能环保",), "inconsistent"),
+        ("清洁能源", ("可再生能源",), "consistent"),
+    ],
+    ids=["different-fallback-labels", "same-fallback-labels"],
+)
+def test_same_stage_a_code_condition_fallback_uses_real_consistency_evaluation(
+    enterprise_subject: str,
+    enterprise_path: tuple[str, ...],
+    expected_status: str,
+) -> None:
+    loan = replace(
+        _label(code="2710", name="化学药品原料药制造", source_row=22,
+               subject="清洁能源", taxonomy_path=("可再生能源",)),
+        scenario_id="green_finance", match_method="condition_fallback",
+    )
+    enterprise = replace(
+        _label(code="2710", name="化学药品原料药制造", source_row=11,
+               subject=enterprise_subject, taxonomy_path=enterprise_path),
+        scenario_id="green_finance", match_method="condition_fallback",
+    )
+    stage_a = _stage_a(
+        enterprise_code="2710", enterprise_name="化学药品原料药制造",
+        loan_code="2710", loan_name="化学药品原料药制造",
+    )
+    output = {
+        "label_basis": {
+            "matching_basis": "贷款资金用于现有绿色项目建设，命中清洁能源类别。",
+            "business_evidence_refs": [_business_ref()],
+        },
+        "consistency": {
+            "status": "consistent",
+            "basis": "企业主营与贷款投向均服务于现有绿色项目。",
+        },
+    }
+
+    result = _run_green(output, (enterprise,), (loan,), stage_a=stage_a)
+
+    assert result.consistency_status == expected_status
+    assert result.labels[0]["match_method"] == "condition_fallback"
+    assert "企业四位码与贷款投向四位码均为" not in result.consistency_basis
+    assert result.model_output == output
+    assert [(ref["side"], ref["source_row"]) for ref in result.consistency_evidence_refs[:2]] == [
+        ("enterprise", 11),
+        ("loan_direction", 22),
+    ]
 
 
 def test_consistency_label_refs_are_assembled_from_server_owned_labels() -> None:

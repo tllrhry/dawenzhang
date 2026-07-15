@@ -149,9 +149,8 @@ def classify_five_articles_stage_b(
         profile,
     )
     business_sources = _build_business_sources(input_payload, stage_a_snapshot, profile)
-    same_code = (
-        stage_a_snapshot["enterprise_neic_code"]
-        == stage_a_snapshot["loan_neic_code"]
+    same_code = _has_same_neic_code_match(
+        stage_a_snapshot, enterprise_snapshot, loan_snapshot
     )
     request_payload = _build_stage_b_request_payload(
         input_payload,
@@ -637,16 +636,34 @@ def _validate_deterministic_labels(
             raise TechnologyFinanceStageBError(
                 f"{side} deterministic labels contain duplicates"
             )
-    same_code = (
-        stage_a_snapshot["enterprise_neic_code"]
-        == stage_a_snapshot["loan_neic_code"]
-    )
-    if same_code and {
+    if _has_same_neic_code_match(
+        stage_a_snapshot, enterprise_labels, loan_direction_labels
+    ) and {
         _label_key_from_label(label) for label in enterprise_labels
     } != {_label_key_from_label(label) for label in loan_direction_labels}:
         raise TechnologyFinanceStageBError(
             "same-code enterprise and loan deterministic label sets must be identical"
         )
+
+
+def _has_same_neic_code_match(
+    stage_a_snapshot: Mapping[str, object],
+    enterprise_labels: Sequence[FiveArticlesMappingLabel],
+    loan_direction_labels: Sequence[FiveArticlesMappingLabel],
+) -> bool:
+    """Only pure NEIC lookup can use the same-code consistency shortcut.
+
+    Condition fallbacks are independently selected from side-specific evidence,
+    so equal Stage A codes do not establish equal labels or consistency.
+    """
+    return (
+        stage_a_snapshot["enterprise_neic_code"]
+        == stage_a_snapshot["loan_neic_code"]
+        and all(
+            label.match_method == "neic_code"
+            for label in (*enterprise_labels, *loan_direction_labels)
+        )
+    )
 
 
 def _serialize_stage_a_result(stage_a_result: StageAResult) -> dict[str, object]:
@@ -765,6 +782,7 @@ def _serialize_label(label: FiveArticlesMappingLabel) -> dict[str, object]:
         "NEIC_Name": label.neic_name,
         "subject": label.subject,
         "taxonomy_path": list(label.taxonomy_path),
+        "match_method": label.match_method,
     }
 
 

@@ -386,13 +386,16 @@ function ClassifyPage({ scenarioId }: { scenarioId: ScenarioId }) {
     setIsSubmittingReview(true)
     setErrorMessage(undefined)
     try {
+      setStage('processing')
       const classification = await submitObjection(scenarioId, caseData.id, reviewText.trim())
       applyOutcome(classification)
       setCaseData(await getCase(scenarioId, caseData.id))
       setReviewText('')
       setShowReview(false)
+      setStage('result')
     } catch (error) {
       setErrorMessage(formatError(error))
+      setStage('result')
     } finally {
       setIsSubmittingReview(false)
     }
@@ -512,7 +515,7 @@ function ResultPanel({ scenarioId, caseData, result, stageBResult, errorMessage,
       </Descriptions>
     </Card>
     <Card className="result-card conclusion-result-card" bordered={false} title={isFiveArticles ? 'Stage A · 国民经济行业分类' : 'AI 判定结论'}>
-      <div className={`result-status ${stageAFailed ? 'is-failed' : needsReview ? 'is-review' : ''}`}><span><CheckCircleFilled /></span><div><p>Stage A {stageAStatusLabel}</p><h2>{result.industry_name || stageAStatusLabel}</h2><small>GB/T 4754-2017 · 四级行业分类结果 · 版本 {result.version}</small></div></div>
+      <div className={`result-status ${stageAFailed ? 'is-failed' : needsReview ? 'is-review' : ''}`}><span><CheckCircleFilled /></span><div><p>Stage A {stageAStatusLabel}</p><h2 className="final-decision">{result.industry_name || stageAStatusLabel}</h2><small>GB/T 4754-2017 · 四级行业分类结果 · 版本 {result.version}</small></div></div>
       <Descriptions className="result-details" column={1} size="small">
         <Descriptions.Item label="行业代码">{result.industry_display_code || '--'}</Descriptions.Item>
         <Descriptions.Item label="行业名称">{result.industry_name || '--'}</Descriptions.Item>
@@ -523,16 +526,15 @@ function ResultPanel({ scenarioId, caseData, result, stageBResult, errorMessage,
       <Descriptions className="result-details loan-direction-details" column={1} size="small">
         <Descriptions.Item label="贷款投向代码">{result.loan_industry_display_code || '--'}</Descriptions.Item>
         <Descriptions.Item label="贷款投向名称">{result.loan_industry_name || '--'}</Descriptions.Item>
-        <Descriptions.Item label="贷款投向是否一致"><Tag color={result.loan_matches_enterprise === true ? 'success' : 'warning'}>{loanConsistencyLabel}</Tag></Descriptions.Item>
+        <Descriptions.Item label="贷款投向是否一致"><Tag className="key-decision-tag" color={result.loan_matches_enterprise === true ? 'success' : 'warning'}>{loanConsistencyLabel}</Tag></Descriptions.Item>
         <Descriptions.Item label="贷款投向匹配依据">{result.loan_matching_basis || '--'}</Descriptions.Item>
-        {result.objection?.description && <Descriptions.Item label="关联异议">{result.objection.description}</Descriptions.Item>}
+        {result.objection?.description && <Descriptions.Item label="关联异议"><span className="objection-highlight">{result.objection.description}</span></Descriptions.Item>}
       </Descriptions>
-      <div className="result-actions"><Button onClick={onBackToClassification}>返回{scenarioView.name}</Button><Button icon={<DownloadOutlined />} onClick={() => window.location.assign(exportUrl(scenarioId, caseData.id))}>导出 Excel</Button><Button icon={<HistoryOutlined />} onClick={() => navigate(scenarioView.historyPath)}>查看判定历史</Button><Button type="primary" onClick={toggleReview}>提出异议并复核</Button></div>
     </Card>
     {isFiveArticles && scenarioId !== INCLUSIVE_FINANCE_SCENARIO && scenarioId !== AGRICULTURE_RELATED_SCENARIO && <Card className="result-card technology-result-card" bordered={false} title={stageBTitle}>
       {stageBResult && isFiveArticlesResult(stageBResult) ? <>
         <div className="technology-status-row">
-          <div><span>判定状态</span><Tag color={statusColor(stageBResult.status)}>{stageBStatusLabel(scenarioId, stageBResult.status)}</Tag></div>
+          <div><span>判定状态</span><Tag className="key-decision-tag" color={statusColor(stageBResult.status)}>{stageBStatusLabel(scenarioId, stageBResult.status)}</Tag></div>
           <small>{scenarioView.name}版本 {stageBResult.version} · Stage A 结果 #{stageBResult.stage_a_result_id}{stageBResult.mapping_version_id ? ` · 映射版本 ${stageBResult.mapping_version_id}` : ''}</small>
         </div>
         {stageBResult.labels.length > 0 ? <div className="technology-label-list">
@@ -561,7 +563,7 @@ function ResultPanel({ scenarioId, caseData, result, stageBResult, errorMessage,
     {scenarioId === AGRICULTURE_RELATED_SCENARIO && <AgricultureResultCard stageBResult={stageBResult} stageAFailed={stageAFailed} stageAStatusLabel={stageAStatusLabel} scenarioViewName={scenarioView.name} />}
     {scenarioId === INCLUSIVE_FINANCE_SCENARIO && <Card className="result-card technology-result-card" bordered={false} title="Stage B · 普惠金融判定">
       {stageBResult && isInclusiveFinanceResult(stageBResult) ? <Descriptions column={1} size="small">
-        <Descriptions.Item label="判定状态"><Tag color={statusColor(stageBResult.status)}>{stageBResult.status === 'not_applicable' ? '不属于普惠金融' : stageBStatusLabels[stageBResult.status]}</Tag></Descriptions.Item>
+        <Descriptions.Item label="判定状态"><Tag className="key-decision-tag" color={statusColor(stageBResult.status)}>{stageBResult.status === 'not_applicable' ? '不属于普惠金融' : stageBStatusLabels[stageBResult.status]}</Tag></Descriptions.Item>
         <Descriptions.Item label="借款主体类型">{stageBResult.borrower_type || '--'}</Descriptions.Item>
         <Descriptions.Item label="计算划型">{stageBResult.computed_size || '--'}{stageBResult.size_consistent === false ? '（与填报不一致）' : ''}</Descriptions.Item>
         <Descriptions.Item label="是否经营性贷款">{stageBResult.is_operating_loan === null ? '待人工复核' : stageBResult.is_operating_loan ? '是' : '否'}</Descriptions.Item>
@@ -571,9 +573,10 @@ function ResultPanel({ scenarioId, caseData, result, stageBResult, errorMessage,
         <Descriptions.Item label="判定依据">{stageBResult.basis || stageBResult.error_detail || '--'}</Descriptions.Item>
       </Descriptions> : <Alert type="warning" showIcon message="Stage B 未执行" description="Stage A 完成后才会执行普惠金融判定。" />}
     </Card>}
+    <div className="result-actions"><Button onClick={onBackToClassification}>返回{scenarioView.name}</Button><Button icon={<DownloadOutlined />} onClick={() => window.location.assign(exportUrl(scenarioId, caseData.id))}>导出 Excel</Button><Button icon={<HistoryOutlined />} onClick={() => navigate(scenarioView.historyPath)}>查看判定历史</Button><Button type="primary" onClick={toggleReview}>提出异议并复核</Button></div>
     {showReview && <Card id="classification-review" className="review-card" bordered={false} title="补充异议信息，发起再次判定">
       <p>新的说明会与原始企业资料一同重新检索和判定，原有结论会保留在历史版本中。</p>
-      <Input.TextArea value={reviewText} onChange={(event) => setReviewText(event.target.value)} placeholder="例如：企业实际主要收入来自……，请结合以下情况重新判定" autoSize={{ minRows: 4, maxRows: 6 }} />
+      <Input.TextArea value={reviewText} onChange={(event) => setReviewText(event.target.value)} placeholder="例如：企业实际主要收入来自……，请结合以下情况重新判定" autoSize={{ minRows: 6, maxRows: 10 }} />
       <div><Button onClick={() => setShowReview(false)}>取消</Button><Button type="primary" loading={isSubmittingReview} disabled={!reviewText.trim() || isSubmittingReview} onClick={onReclassify}>提交异议并重新判定</Button></div>
     </Card>}
     <Card className="evidence-card" bordered={false} title="判定过程与候选证据">
@@ -606,7 +609,7 @@ function AgricultureResultCard({ stageBResult, stageAFailed, stageAStatusLabel, 
         : result.basis || '已完成涉农四类判定。'
 
   return <Card className="result-card technology-result-card" bordered={false} title={`Stage B · ${scenarioViewName}判定`}>
-    <div className="technology-status-row"><div><span>判定状态</span><Tag color={statusColor(result.status)}>{result.status === 'completed' ? '判定已完成' : result.status === 'not_applicable' ? '明确不属于涉农贷款' : result.status === 'needs_review' ? '待人工复核' : '判定失败'}</Tag></div><small>涉农版本 {result.version} · Stage A 结果 #{result.stage_a_result_id}</small></div>
+    <div className="technology-status-row"><div><span>判定状态</span><Tag className="key-decision-tag" color={statusColor(result.status)}>{result.status === 'completed' ? '判定已完成' : result.status === 'not_applicable' ? '明确不属于涉农贷款' : result.status === 'needs_review' ? '待人工复核' : '判定失败'}</Tag></div><small>涉农版本 {result.version} · Stage A 结果 #{result.stage_a_result_id}</small></div>
     <Descriptions column={1} size="small">
       <Descriptions.Item label="是否涉农"><Tag color={result.is_agriculture_related === true ? 'success' : result.is_agriculture_related === false ? 'default' : 'warning'}>{result.is_agriculture_related === true ? '是' : result.is_agriculture_related === false ? '否' : '待人工复核'}</Tag></Descriptions.Item>
       <Descriptions.Item label="匹配依据">{statusDescription}</Descriptions.Item>

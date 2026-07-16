@@ -53,6 +53,12 @@ button { font: inherit; }
 .consistency-panel > .ant-tag { position: absolute; top: 0; right: 0; margin: 0; }
 .consistency-panel > p { margin: 0; color: #52647e; line-height: 1.7; }
 
+.result-actions { grid-column: 1 / -1; margin-top: 1px; }
+.review-card { grid-column: 1 / -1; }
+.final-decision { color: #123f85; font-size: 25px; font-weight: 800; letter-spacing: .015em; }
+.key-decision-tag { padding: 2px 9px; font-size: 14px; font-weight: 700; line-height: 22px; }
+.objection-highlight { display: inline-block; padding: 8px 11px; color: #a84b1f; background: #fff2e9; border: 1px solid #ffcda9; border-radius: 7px; font-weight: 700; line-height: 1.7; }
+
 @media (max-width: 760px) {
   .technology-status-row { align-items: flex-start; flex-direction: column; }
   .consistency-panel { padding-right: 0; }

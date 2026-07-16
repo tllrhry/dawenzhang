@@ -215,6 +215,64 @@ def test_green_mapping_publishes_condition_embeddings_and_placeholder_rows(
     )
 
 
+def test_green_mapping_identity_distinguishes_conditions_but_rejects_exact_duplicates(
+    tmp_path: Path,
+    scenario_mapping_context: tuple[Session, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session, embedding_model = scenario_mapping_context
+    monkeypatch.setattr(
+        "app.services.technology_finance_mapping_sync.embed_texts",
+        lambda texts, settings: tuple(
+            (0.1,) * settings.embedding_dimension for _ in texts
+        ),
+    )
+    distinct_path = tmp_path / "green-distinct-conditions.xlsx"
+    shared = (
+        "绿色金融",
+        "能源绿色低碳转型",
+        "新能源与清洁能源装备制造",
+        "新型储能产品制造",
+    )
+    _write_green_mapping(
+        distinct_path,
+        (
+            (*shared, "超级电容储能产品制造", "2710", "化学药品原料药制造"),
+            (*shared, "储能电池制造", "2710", "化学药品原料药制造"),
+        ),
+    )
+
+    distinct = synchronize_scenario_mapping(
+        session,
+        GREEN_FINANCE_REGISTRATION,
+        _settings_for(GREEN_FINANCE_REGISTRATION, distinct_path, embedding_model),
+    )
+
+    assert distinct.version.status == "published"
+    assert distinct.version.validation_report["published_row_count"] == 2
+
+    duplicate_path = tmp_path / "green-exact-duplicate.xlsx"
+    duplicate_row = (
+        *shared,
+        "储能电池制造",
+        "2710",
+        "化学药品原料药制造",
+    )
+    _write_green_mapping(duplicate_path, (duplicate_row, duplicate_row))
+
+    duplicate = synchronize_scenario_mapping(
+        session,
+        GREEN_FINANCE_REGISTRATION,
+        _settings_for(GREEN_FINANCE_REGISTRATION, duplicate_path, embedding_model),
+    )
+
+    assert duplicate.version.status == "invalid"
+    assert any(
+        error["type"] == "exact_duplicate"
+        for error in duplicate.version.validation_report["errors"]
+    )
+
+
 def test_green_mapping_embedding_failure_does_not_publish_a_partial_version(
     tmp_path: Path,
     scenario_mapping_context: tuple[Session, str],

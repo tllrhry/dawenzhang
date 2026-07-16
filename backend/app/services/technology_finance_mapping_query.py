@@ -6,6 +6,10 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import FiveArticlesMappingRow, FiveArticlesMappingVersion
+from app.services.five_articles_mapping_identity import (
+    MappingCandidateIdentity,
+    build_mapping_candidate_identity,
+)
 from app.services.technology_finance_mapping_sync import (
     TECHNOLOGY_FINANCE_SCENARIO_ID,
 )
@@ -44,14 +48,16 @@ class FiveArticlesMappingLabel:
         )
 
     @property
-    def deduplication_key(self) -> tuple[object, ...]:
-        return (
-            self.subject,
-            self.tier1,
-            self.tier2,
-            self.tier3,
-            self.tier4,
-            self.neic_code,
+    def deduplication_key(self) -> MappingCandidateIdentity:
+        return build_mapping_candidate_identity(
+            neic_code=self.neic_code,
+            neic_name=self.neic_name,
+            subject=self.subject,
+            tier1=self.tier1,
+            tier2=self.tier2,
+            tier3=self.tier3,
+            tier4=self.tier4,
+            condition_criteria=self.condition_criteria,
         )
 
 
@@ -315,7 +321,7 @@ def _query_preferred_rows(
 
 
 def _validate_query_rows(rows: tuple[FiveArticlesMappingRow, ...]) -> str | None:
-    deduplication_keys: set[tuple[object, ...]] = set()
+    deduplication_keys: set[MappingCandidateIdentity] = set()
     code_names: dict[tuple[int, str], str] = {}
     source_rows: set[int] = set()
     for row in rows:

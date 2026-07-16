@@ -51,6 +51,7 @@ def _mapping_row(
     tier2: str | None = None,
     tier3: str | None = None,
     tier4: str | None = None,
+    condition_criteria: str | None = None,
 ) -> dict[str, object]:
     return {
         "neic_code": neic_code,
@@ -61,6 +62,7 @@ def _mapping_row(
         "tier2": tier2,
         "tier3": tier3,
         "tier4": tier4,
+        "condition_criteria": condition_criteria,
         "source_row": source_row,
     }
 
@@ -719,6 +721,106 @@ def test_duplicate_query_key_needs_review_instead_of_choosing_a_source_row(
     assert result.status == "needs_review"
     assert result.detail == "mapping_query_duplicate_taxonomy_code"
     assert result.loan_direction_labels == ()
+
+
+def test_same_taxonomy_with_different_conditions_returns_distinct_candidates(
+    mapping_query_context: tuple[Session, str],
+) -> None:
+    session, scenario_id = mapping_query_context
+    shared = dict(
+        neic_code="2710",
+        neic_name="化学药品原料药制造",
+        subject="能源绿色低碳转型",
+        tier1="新能源与清洁能源装备制造",
+        tier2="新型储能产品制造",
+    )
+    _add_version(
+        session,
+        scenario_id,
+        rows=(
+            _mapping_row(
+                **shared,
+                source_row=646,
+                condition_criteria="超级电容储能产品及配套系统设备制造。",
+            ),
+            _mapping_row(
+                **shared,
+                source_row=648,
+                condition_criteria="锂离子、钠离子等储能电池及配套系统设备制造。",
+            ),
+        ),
+    )
+
+    result = _lookup(session, scenario_id)
+
+    assert result.status == "mapping_hit"
+    assert [label.source_row for label in result.loan_direction_labels] == [646, 648]
+    assert [label.condition_criteria for label in result.loan_direction_labels] == [
+        "超级电容储能产品及配套系统设备制造。",
+        "锂离子、钠离子等储能电池及配套系统设备制造。",
+    ]
+
+
+def test_query_code_name_conflict_still_needs_review(
+    mapping_query_context: tuple[Session, str],
+) -> None:
+    session, scenario_id = mapping_query_context
+    first = _mapping_row(
+        neic_code="2710",
+        neic_name="化学药品原料药制造",
+        subject="主题一",
+        tier1="层级一",
+        source_row=2,
+    )
+    _add_version(
+        session,
+        scenario_id,
+        rows=(
+            first,
+            {
+                **first,
+                "neic_name": "冲突行业名称",
+                "subject": "主题二",
+                "source_row": 3,
+            },
+        ),
+    )
+
+    result = _lookup(session, scenario_id)
+
+    assert result.status == "needs_review"
+    assert result.detail == "mapping_query_code_name_conflict"
+
+
+def test_distinct_candidates_with_duplicate_source_row_still_need_review(
+    mapping_query_context: tuple[Session, str],
+) -> None:
+    session, scenario_id = mapping_query_context
+    _add_version(
+        session,
+        scenario_id,
+        rows=(
+            _mapping_row(
+                neic_code="2710",
+                neic_name="化学药品原料药制造",
+                subject="主题一",
+                tier1="层级一",
+                source_row=2,
+            ),
+            _mapping_row(
+                neic_code="2710",
+                neic_name="化学药品原料药制造",
+                subject="主题二",
+                tier1="层级二",
+                source_row=2,
+            ),
+        ),
+    )
+
+    result = _lookup(session, scenario_id)
+
+    assert result.status == "needs_review"
+    assert result.detail == "mapping_query_duplicate_source_row"
 
 
 def test_duplicate_latest_published_version_number_needs_review(

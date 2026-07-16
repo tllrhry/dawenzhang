@@ -715,7 +715,11 @@ def test_green_neic_code_matches_require_condition_validation(
     )
     candidates = (first,) if not multiple else (
         first,
-        replace(first, subject="清洁能源", tier1="清洁能源", source_row=32),
+        replace(
+            first,
+            condition_criteria="用于储能电池生产线节能改造",
+            source_row=32,
+        ),
     )
     mapping_result = FiveArticlesMappingLookupResult(
         status="mapping_hit", mapping_version_id=mapping_version.id, mapping_version=1,
@@ -729,7 +733,9 @@ def test_green_neic_code_matches_require_condition_validation(
 
     outcome = classify_five_articles_case(
         session, case, GREEN_FINANCE_REGISTRATION, _settings(),
-        stage_a_classifier=lambda session, case, settings: _persist_stage_a(session, case),
+        stage_a_classifier=lambda session, case, settings: _persist_same_code_stage_a(
+            session, case
+        ),
         mapping_lookup=MagicMock(return_value=mapping_result),
         label_selector=label_selector, stage_b_classifier=stage_b_classifier,
         condition_candidate_retriever=fallback_retriever,

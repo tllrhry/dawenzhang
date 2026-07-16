@@ -21,6 +21,10 @@ from app.models import (
     NationalEconomyCatalogVersion,
     NationalEconomyIndustryChunk,
 )
+from app.services.five_articles_mapping_identity import (
+    MappingCandidateIdentity,
+    build_mapping_candidate_identity,
+)
 from app.services.scenario_registry import (
     TECHNOLOGY_FINANCE_REGISTRATION,
     ScenarioRegistration,
@@ -77,16 +81,16 @@ class NormalizedMappingRow:
     condition_criteria: str | None
 
     @property
-    def duplicate_key(self) -> tuple[object, ...]:
-        return (
-            self.neic_code,
-            self.comparison_name,
-            self.subject,
-            self.tier1,
-            self.tier2,
-            self.tier3,
-            self.tier4,
-            self.condition_criteria,
+    def duplicate_key(self) -> MappingCandidateIdentity:
+        return build_mapping_candidate_identity(
+            neic_code=self.neic_code,
+            neic_name=self.comparison_name,
+            subject=self.subject,
+            tier1=self.tier1,
+            tier2=self.tier2,
+            tier3=self.tier3,
+            tier4=self.tier4,
+            condition_criteria=self.condition_criteria,
         )
 
 
@@ -710,7 +714,7 @@ def _canonicalize_catalog_names(
 def _find_duplicate_rows(
     rows: Sequence[NormalizedMappingRow],
 ) -> list[dict[str, object]]:
-    first_rows: dict[tuple[object, ...], int] = {}
+    first_rows: dict[MappingCandidateIdentity, int] = {}
     errors: list[dict[str, object]] = []
     for row in rows:
         first_row = first_rows.setdefault(row.duplicate_key, row.source_row)

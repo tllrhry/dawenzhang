@@ -18,6 +18,7 @@ def _payload(**overrides: object) -> dict[str, object]:
         "credit_variety": "流动资金贷款",
         "loan_purpose": "采购原材料用于生产经营",
         "credit_approval_opinion": "",
+        "registered_address": "",
         "farmer_long_term_town_resident": "否",
         "farmer_town_village_resident": "否",
         "farmer_nonlocal_resident_over_one_year": "否",
@@ -60,6 +61,24 @@ def test_farmer_recognition_field_overrides_entity_type() -> None:
 
     assert result["borrower_type"] == "farmer"
     assert result["inclusive_category"] == "农户经营性贷款"
+
+
+def test_farmer_registration_address_is_used_as_supporting_evidence() -> None:
+    result = determine_inclusive_finance(
+        _payload(
+            entity_type="农户",
+            credit_amount="500万元",
+            registered_address="江苏省某乡某村",
+        ),
+        _stage_a(),
+    )
+
+    assert result["status"] == "completed"
+    assert "可作为农户身份的地址佐证" in result["basis"]
+    assert result["determination"]["farmer_registration_address_support"]
+    assert {ref["field_key"] for ref in result["evidence_refs"] if ref["type"] == "field"} >= {
+        "registered_address"
+    }
 
 
 def test_non_operating_loan_is_not_applicable() -> None:

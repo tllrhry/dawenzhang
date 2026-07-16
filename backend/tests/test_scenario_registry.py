@@ -37,10 +37,8 @@ NEW_SCENARIO_CONTRACTS = (
         GREEN_FINANCE_SCENARIO,
         GREEN_FINANCE_REGISTRATION,
         GREEN_FINANCE_ADDITIONAL_FIELDS,
-        20,
+        18,
         {
-            "entity_type": "主体类型",
-            "annual_revenue": "上年度营业收入",
             "green_project_name": "对应绿色项目名称",
             "project_content": "项目建设 / 运营内容",
             "energy_saving_pollution_control": "节能减排 / 污染治理内容",

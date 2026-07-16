@@ -44,7 +44,10 @@ def determine_inclusive_finance(
     input_payload: Mapping[str, object], stage_a_result: StageAResult | Mapping[str, object]
 ) -> dict[str, object]:
     """Return the fully traceable Phase-2 determination for one inclusive case."""
-    raw = {key: _text(input_payload.get(key)) for key in _evidence_keys()}
+    raw = {
+        key: _text(input_payload.get(key))
+        for key in (*_evidence_keys(), "registered_address")
+    }
     borrower_type = _determine_borrower_type(raw)
     is_operating_loan, operating_source = _determine_operating_loan(raw)
     credit_amount_wan = parse_credit_amount_wan(raw["credit_amount"])
@@ -70,6 +73,11 @@ def determine_inclusive_finance(
         missing_elements.append("本次授信额度")
 
     filled_size = _parse_size(raw["enterprise_scale_type"])
+    farmer_registration_address_support = (
+        _farmer_registration_address_support(raw["registered_address"])
+        if borrower_type == "farmer"
+        else None
+    )
     anomalies: list[dict[str, object]] = []
     if (
         borrower_type == "enterprise"
@@ -101,9 +109,12 @@ def determine_inclusive_finance(
         "is_operating_loan": is_operating_loan,
         "operating_determination_source": operating_source,
         "credit_amount_wan": credit_amount_wan,
+        "farmer_registration_address_support": farmer_registration_address_support,
         "missing_elements": tuple(dict.fromkeys(missing_elements)),
     }
-    evidence_refs = _build_evidence_refs(raw, industry_code, industry_major_code)
+    evidence_refs = _build_evidence_refs(
+        raw, industry_code, industry_major_code, borrower_type
+    )
     if missing_elements:
         basis = f"关键要素不可判定：{'、'.join(dict.fromkeys(missing_elements))}"
         return _result(
@@ -140,7 +151,16 @@ def determine_inclusive_finance(
             credit_amount_wan=credit_amount_wan,
             qualifies=False,
             inclusive_category=None,
-            basis="；".join(reasons),
+            basis="；".join(
+                (
+                    *reasons,
+                    *(
+                        (farmer_registration_address_support,)
+                        if farmer_registration_address_support
+                        else ()
+                    ),
+                )
+            ),
             evidence_refs=evidence_refs,
             anomalies=anomalies,
             determination=determination,
@@ -160,7 +180,15 @@ def determine_inclusive_finance(
         credit_amount_wan=credit_amount_wan,
         qualifies=True,
         inclusive_category=category,
-        basis=f"{category}：经营性贷款且授信金额 {credit_amount_wan:g} 万元不超过{limit:g}万元上限",
+        basis=(
+            f"{category}：经营性贷款且授信金额 {credit_amount_wan:g} 万元"
+            f"不超过{limit:g}万元上限"
+            + (
+                f"；{farmer_registration_address_support}"
+                if farmer_registration_address_support
+                else ""
+            )
+        ),
         evidence_refs=evidence_refs,
         anomalies=anomalies,
         determination=determination,
@@ -279,10 +307,18 @@ def _stage_a_value(stage_a_result: StageAResult | Mapping[str, object], field: s
     return _text(value) or None
 
 
-def _build_evidence_refs(raw: Mapping[str, str], industry_code: str | None, industry_major_code: str | None) -> list[dict[str, object]]:
+def _build_evidence_refs(
+    raw: Mapping[str, str],
+    industry_code: str | None,
+    industry_major_code: str | None,
+    borrower_type: str,
+) -> list[dict[str, object]]:
     return [
         {"type": "field", "field_key": key, "raw_value": raw[key]}
-        for key in _evidence_keys()
+        for key in (
+            *_evidence_keys(),
+            *(() if borrower_type != "farmer" else ("registered_address",)),
+        )
     ] + [
         {"type": "stage_a", "field": "industry_code", "raw_value": industry_code},
         {"type": "stage_a", "field": "industry_major_code", "raw_value": industry_major_code},
@@ -299,6 +335,18 @@ def _evidence_keys() -> tuple[str, ...]:
         "employee_count", "credit_amount", "credit_variety", "loan_purpose",
         "credit_approval_opinion", *FARMER_FIELD_KEYS,
     )
+
+
+def _farmer_registration_address_support(address: str) -> str:
+    if not address:
+        return "未填写注册地址，无法作为农户身份佐证"
+    rural = re.search(r"村|乡|(?<!城关)镇", address)
+    urban = re.search(r"城关镇|市辖区|市[^县乡镇村]{0,12}区", address)
+    if rural and not urban:
+        return f"注册地址“{address}”包含“{rural.group(0)}”，可作为农户身份的地址佐证"
+    if urban and not rural:
+        return f"注册地址“{address}”显示城区特征，未能作为农户身份的地址佐证"
+    return f"注册地址“{address}”无法判断城乡特征，未能作为农户身份的地址佐证"
 
 
 def _text(value: object) -> str:

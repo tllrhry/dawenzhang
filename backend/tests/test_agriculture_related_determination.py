@@ -51,6 +51,18 @@ def test_farmer_category_keeps_all_matching_fields() -> None:
     assert [ref["field_key"] for ref in result["evidence_refs"]] == list(FARMER_FIELDS)
 
 
+def test_farmer_category_matches_declared_subject_type() -> None:
+    result = determine_farmer_loan_category(
+        {**{key: "否" for key in FARMER_FIELDS}, "entity_type": "农户"}
+    )
+
+    assert result["result"] == "matched"
+    assert "主体类型填写为“农户”" in result["basis"]
+    assert result["evidence_refs"] == [
+        {"type": "field", "field_key": "entity_type", "raw_value": "农户"}
+    ]
+
+
 @pytest.mark.parametrize("value", [None, "", "否", "no"])
 def test_farmer_category_does_not_review_non_affirmative_values(value: object) -> None:
     result = determine_farmer_loan_category({key: value for key in FARMER_FIELDS})

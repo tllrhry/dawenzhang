@@ -142,8 +142,6 @@ TECHNOLOGY_FINANCE_REGISTRATION = ScenarioRegistration(
 )
 
 GREEN_FINANCE_ADDITIONAL_FIELDS = (
-    ScenarioField("entity_type", "主体类型"),
-    ScenarioField("annual_revenue", "上年度营业收入"),
     ScenarioField("green_project_name", "对应绿色项目名称"),
     ScenarioField("project_content", "项目建设 / 运营内容"),
     ScenarioField("energy_saving_pollution_control", "节能减排 / 污染治理内容"),

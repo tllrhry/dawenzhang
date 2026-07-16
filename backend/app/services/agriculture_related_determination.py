@@ -113,24 +113,48 @@ def determine_agriculture_related(
 def determine_farmer_loan_category(
     input_payload: Mapping[str, object],
 ) -> dict[str, object]:
-    """Determine category one from the four farmer identity fields."""
+    """Determine category one from the declared subject type and farmer fields."""
+    entity_type = _text(input_payload.get("entity_type"))
+    entity_type_is_farmer = "农户" in entity_type
     matched_fields = [
         key for key in FARMER_IDENTITY_FIELD_KEYS if _is_yes(input_payload.get(key))
     ]
-    evidence_refs = [
+    evidence_refs: list[dict[str, object]] = []
+    if entity_type_is_farmer:
+        evidence_refs.append(
+            {
+                "type": "field",
+                "field_key": "entity_type",
+                "raw_value": entity_type,
+            }
+        )
+    evidence_refs.extend(
         {
             "type": "field",
             "field_key": key,
             "raw_value": _text(input_payload.get(key)),
         }
         for key in matched_fields
-    ]
-    if matched_fields:
-        labels = "、".join(FARMER_IDENTITY_FIELD_LABELS[key] for key in matched_fields)
-        basis = f"农户身份字段 {labels} 的填写值为“是”，命中农户贷款类别。"
+    )
+    if entity_type_is_farmer or matched_fields:
+        sources: list[str] = []
+        if entity_type_is_farmer:
+            sources.append(f"主体类型填写为“{entity_type}”")
+        if matched_fields:
+            labels = "、".join(FARMER_IDENTITY_FIELD_LABELS[key] for key in matched_fields)
+            sources.append(f"农户身份字段 {labels} 的填写值为“是”")
+        basis = f"{'；'.join(sources)}，命中农户贷款类别。"
         result = "matched"
     else:
-        basis = "农户身份四项字段均非“是”（空值按未命中处理），不命中农户贷款类别。"
+        entity_note = (
+            f"主体类型填写为“{entity_type}”"
+            if entity_type
+            else "主体类型未填写"
+        )
+        basis = (
+            f"{entity_note}，且农户身份四项字段均非“是”"
+            "（空值按未命中处理），不命中农户贷款类别。"
+        )
         result = "not_matched"
     return _category_result(
         category=1,

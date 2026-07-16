@@ -42,11 +42,16 @@ def parse_technology_finance_ip_registry(source_path: Path) -> list[RegistryRow]
             for table in page.extract_tables():
                 for raw_row in table:
                     cells = [str(cell or "").strip() for cell in raw_row]
+                    is_header = any(cell == "序号" for cell in cells) and any(
+                        cell == "企业名称" for cell in cells
+                    )
                     if not found_header:
-                        if any(cell == "序号" for cell in cells) and any(
-                            cell == "企业名称" for cell in cells
-                        ):
+                        if is_header:
                             found_header = True
+                        continue
+                    # Excel-generated PDFs repeat the table header on every
+                    # page. It is metadata, not an invalid registry row.
+                    if is_header:
                         continue
                     if not any(cells):
                         continue

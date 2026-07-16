@@ -172,12 +172,13 @@ DIGITAL_FINANCE_FIELD_SCHEMA = (*_stage_a_fields(), *DIGITAL_FINANCE_ADDITIONAL_
 PENSION_FINANCE_FIELD_SCHEMA = (*_stage_a_fields(), *PENSION_FINANCE_ADDITIONAL_FIELDS)
 
 INCLUSIVE_FINANCE_STAGE_A_FIELD_KEYS = tuple(
-    key for key in FIELD_LABELS if key != "main_business"
+    key
+    for key in FIELD_LABELS
+    if key not in {"main_business", "counterparty_name"}
 )
 
 INCLUSIVE_FINANCE_ADDITIONAL_FIELDS = (
     ScenarioField("registered_address", "企业注册地址"),
-    ScenarioField("actual_business_address", "实际经营地址"),
     ScenarioField("entity_type", "主体类型"),
     ScenarioField(
         "farmer_long_term_town_resident",
@@ -201,12 +202,6 @@ INCLUSIVE_FINANCE_ADDITIONAL_FIELDS = (
     ScenarioField("employee_count", "从业人员数量"),
     ScenarioField("credit_amount", "本次授信额度"),
     ScenarioField("credit_variety", "授信品种"),
-    ScenarioField("project_name", "对应项目名称"),
-    ScenarioField("project_content", "项目建设 / 运营内容"),
-    ScenarioField("credit_term", "授信期限"),
-    ScenarioField("transaction_amount", "交易金额"),
-    ScenarioField("certifications", "企业核心资质与认证"),
-    ScenarioField("rd_ip_info", "研发与知识产权情况"),
 )
 
 INCLUSIVE_FINANCE_FIELD_SCHEMA = (
@@ -421,8 +416,6 @@ INCLUSIVE_FINANCE_REGISTRATION = ScenarioRegistration(
         "credit_amount",
         "credit_variety",
         "loan_purpose",
-        "project_name",
-        "project_content",
         "farmer_long_term_town_resident",
         "farmer_town_village_resident",
         "farmer_nonlocal_resident_over_one_year",

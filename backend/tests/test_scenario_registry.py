@@ -353,7 +353,7 @@ def test_agriculture_related_schema_matches_template_and_reuses_existing_keys() 
         "project_name": "对应项目名称",
         "project_content": "项目建设 / 运营内容",
     }
-    assert set(fields).issubset(set(FIELD_LABELS) | set(INCLUSIVE_FINANCE_ADDITIONAL_FIELDS[i].key for i in range(len(INCLUSIVE_FINANCE_ADDITIONAL_FIELDS))))
+    assert set(fields) == set(expected_stage_a) | set(expected_additional)
     assert not {
         "core_products_services",
         "industry_chain_position",
@@ -377,14 +377,16 @@ def test_inclusive_finance_profile_is_mapping_free_and_has_real_stage_a_subset()
     assert registration.is_executable_profile is True
     assert registration.stage_a_field_keys == INCLUSIVE_FINANCE_STAGE_A_FIELD_KEYS
     assert registration.stage_a_field_keys == tuple(
-        key for key in FIELD_LABELS if key != "main_business"
+        key
+        for key in FIELD_LABELS
+        if key not in {"main_business", "counterparty_name"}
     )
     assert "main_business" not in fields
-    assert len(fields) == 31
+    assert "counterparty_name" not in fields
+    assert len(fields) == 23
     assert len(fields) == len(registration.field_schema)
     assert additional_fields == {
         "registered_address": "企业注册地址",
-        "actual_business_address": "实际经营地址",
         "entity_type": "主体类型",
         "farmer_long_term_town_resident": "是否指长期（一年以上）居住在乡镇（不包括城关镇）行政管理区域内的住户",
         "farmer_town_village_resident": "是否长期居住在城关镇所辖行政村范围内的住户",
@@ -396,12 +398,6 @@ def test_inclusive_finance_profile_is_mapping_free_and_has_real_stage_a_subset()
         "employee_count": "从业人员数量",
         "credit_amount": "本次授信额度",
         "credit_variety": "授信品种",
-        "project_name": "对应项目名称",
-        "project_content": "项目建设 / 运营内容",
-        "credit_term": "授信期限",
-        "transaction_amount": "交易金额",
-        "certifications": "企业核心资质与认证",
-        "rd_ip_info": "研发与知识产权情况",
     }
     with pytest.raises(ValueError, match="暂未配置映射"):
         registration.mapping_path(Settings(_env_file=None))

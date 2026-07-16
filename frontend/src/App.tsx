@@ -457,6 +457,24 @@ function ProcessingPanel({ scenarioId, fileName }: { scenarioId: ScenarioId; fil
   </section>
 }
 
+function technologyRegistryHits(result: FiveArticlesResult | null): { specializedInnovation: boolean; highTech: boolean } {
+  if (!result) return { specializedInnovation: false, highTech: false }
+
+  const hasNamedRegistryHit = (keyword: string) => result.labels.some((label) => {
+    const classificationText = [label.subject, ...label.taxonomy_path].join('')
+    if (classificationText.includes(keyword)) return true
+
+    return [label.matching_basis, label.ip_intensive_industry_basis, ...label.evidence_refs.map((reference) => reference.excerpt)]
+      .filter((value): value is string => Boolean(value))
+      .some((value) => value.includes(keyword) && /(命中|匹配到)/.test(value) && !/(未命中|未能匹配到)/.test(value))
+  })
+
+  return {
+    specializedInnovation: hasNamedRegistryHit('专精特新'),
+    highTech: result.labels.some((label) => label.ip_intensive_industry_status === 'satisfied') || hasNamedRegistryHit('高新技术'),
+  }
+}
+
 function ResultPanel({ scenarioId, caseData, result, stageBResult, errorMessage, showReview, setShowReview, reviewText, setReviewText, isSubmittingReview, onBackToClassification, onReclassify, onRetry }: {
   scenarioId: ScenarioId; caseData: ClassificationCase; result: ClassificationResult; stageBResult?: FiveArticlesResult | InclusiveFinanceResult | AgricultureRelatedResult | null; errorMessage?: string; showReview: boolean; setShowReview: (value: boolean) => void; reviewText: string; setReviewText: (value: string) => void; isSubmittingReview: boolean; onBackToClassification: () => void; onReclassify: () => void; onRetry: () => void
 }) {
@@ -469,6 +487,15 @@ function ResultPanel({ scenarioId, caseData, result, stageBResult, errorMessage,
   const loanConsistencyLabel = result.loan_matches_enterprise === null
     ? '待人工复核'
     : result.loan_matches_enterprise ? '与企业主营一致' : '与企业主营不一致'
+  const technologyResult = stageBResult && isFiveArticlesResult(stageBResult) ? stageBResult : null
+  const registryHits = scenarioId === TECHNOLOGY_FINANCE_SCENARIO
+    ? technologyRegistryHits(technologyResult)
+    : { specializedInnovation: false, highTech: false }
+  const stageBTitle = <span className="technology-card-title">
+    <span>{`Stage B · ${scenarioView.name}判定`}</span>
+    {registryHits.specializedInnovation && <Tag color="success" icon={<CheckCircleFilled />}>命中专精特新企业名单</Tag>}
+    {registryHits.highTech && <Tag color="processing" icon={<SafetyCertificateOutlined />}>命中高新技术名单</Tag>}
+  </span>
   const toggleReview = () => {
     const shouldShow = !showReview
     setShowReview(shouldShow)
@@ -502,7 +529,7 @@ function ResultPanel({ scenarioId, caseData, result, stageBResult, errorMessage,
       </Descriptions>
       <div className="result-actions"><Button onClick={onBackToClassification}>返回{scenarioView.name}</Button><Button icon={<DownloadOutlined />} onClick={() => window.location.assign(exportUrl(scenarioId, caseData.id))}>导出 Excel</Button><Button icon={<HistoryOutlined />} onClick={() => navigate(scenarioView.historyPath)}>查看判定历史</Button><Button type="primary" onClick={toggleReview}>提出异议并复核</Button></div>
     </Card>
-    {isFiveArticles && scenarioId !== INCLUSIVE_FINANCE_SCENARIO && scenarioId !== AGRICULTURE_RELATED_SCENARIO && <Card className="result-card technology-result-card" bordered={false} title={`Stage B · ${scenarioView.name}判定`}>
+    {isFiveArticles && scenarioId !== INCLUSIVE_FINANCE_SCENARIO && scenarioId !== AGRICULTURE_RELATED_SCENARIO && <Card className="result-card technology-result-card" bordered={false} title={stageBTitle}>
       {stageBResult && isFiveArticlesResult(stageBResult) ? <>
         <div className="technology-status-row">
           <div><span>判定状态</span><Tag color={statusColor(stageBResult.status)}>{stageBStatusLabel(scenarioId, stageBResult.status)}</Tag></div>

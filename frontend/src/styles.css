@@ -34,6 +34,8 @@ button { font: inherit; }
 .result-status.is-review > span { background: #d99a2b; }
 .result-status.is-failed > span { background: #d95757; }
 .technology-result-card { grid-column: 1 / -1; }
+.technology-card-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; }
+.technology-card-title > .ant-tag { margin: 0; font-size: 13px; font-weight: 500; }
 .technology-status-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding-bottom: 18px; border-bottom: 1px solid #edf1f7; }
 .technology-status-row > div { display: flex; align-items: center; gap: 12px; color: #52647e; font-weight: 700; }
 .technology-status-row small { color: #7b899e; }

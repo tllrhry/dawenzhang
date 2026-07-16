@@ -32,8 +32,6 @@ REQUIRED_DETERMINATION_FIELD_KEYS = {
     "credit_amount",
     "credit_variety",
     "loan_purpose",
-    "project_name",
-    "project_content",
     *FARMER_FIELD_KEYS,
 }
 
@@ -67,7 +65,7 @@ def _validate_inclusive_docx_asset(path: Path) -> None:
     rows = _field_rows(Document(path))
     labels = tuple(row[0] for row in rows)
 
-    assert len(rows) == 31
+    assert len(rows) == 23
     assert len(labels) == len(set(labels))
     assert set(labels) == _expected_template_labels()
     assert not {
@@ -78,19 +76,22 @@ def _validate_inclusive_docx_asset(path: Path) -> None:
     }
 
 
-def test_inclusive_finance_docx_asset_matches_exact_31_field_schema() -> None:
+def test_inclusive_finance_docx_asset_matches_exact_23_field_schema() -> None:
     rows = _field_rows(Document(TEMPLATE_PATH))
     labels = tuple(row[0] for row in rows)
     schema = INCLUSIVE_FINANCE_REGISTRATION.field_schema
     schema_keys = {field.key for field in schema}
 
     _validate_inclusive_docx_asset(TEMPLATE_PATH)
-    assert len(schema) == 31
+    assert len(schema) == 23
     assert len(schema_keys) == len(schema)
     assert INCLUSIVE_FINANCE_REGISTRATION.stage_a_field_keys == tuple(
-        key for key in FIELD_LABELS if key != "main_business"
+        key
+        for key in FIELD_LABELS
+        if key not in {"main_business", "counterparty_name"}
     )
     assert "main_business" not in schema_keys
+    assert "counterparty_name" not in schema_keys
     assert REQUIRED_DETERMINATION_FIELD_KEYS <= schema_keys
 
 
@@ -109,7 +110,7 @@ def test_real_inclusive_template_creates_case_without_template_validation_issues
     assert list(case.input_payload) == [
         field.key for field in INCLUSIVE_FINANCE_REGISTRATION.field_schema
     ]
-    assert len(case.input_payload) == 31
+    assert len(case.input_payload) == 23
     assert "main_business" not in case.input_payload
     session.add.assert_called_once_with(case)
     session.commit.assert_called_once_with()

@@ -114,6 +114,9 @@ EXPECTED_ADDITIONAL_FIELDS = {
     "employee_count": "从业人员数量",
     "certifications": "企业核心资质与认证",
     "rd_ip_info": "研发与知识产权情况",
+    "rd_staff_ratio": "研发人员占比",
+    "rd_investment": "研发投入",
+    "patent_software_copyright_info": "专利或软著等",
 }
 
 
@@ -147,6 +150,18 @@ def test_technology_finance_schema_contains_all_additional_fields() -> None:
     }
 
     assert additional_fields == EXPECTED_ADDITIONAL_FIELDS
+    assert TECHNOLOGY_FINANCE_REGISTRATION.stage_b_evidence_field_keys[:10] == (
+        "loan_purpose",
+        "project_name",
+        "project_content",
+        "certifications",
+        "rd_staff_ratio",
+        "rd_investment",
+        "annual_revenue",
+        "patent_software_copyright_info",
+        "rd_ip_info",
+        "trade_goods_services",
+    )
 
 
 def test_new_finance_scenario_schema_contracts_are_stable() -> None:

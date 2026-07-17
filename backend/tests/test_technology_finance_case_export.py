@@ -243,6 +243,66 @@ def test_export_writes_ip_intensive_industry_condition_per_label() -> None:
     assert rows[1]["知识产权条件"] == "不满足：企业名称未在名录中匹配到。"
 
 
+def test_technology_export_writes_direction_and_auxiliary_evidence_columns() -> None:
+    case, stage_a = _case_with_stage_a()
+    stage_b = _completed_stage_b(
+        stage_a_result_id=stage_a.id,
+        consistency_status="consistent",
+    )
+    stage_b.consistency_evidence_refs = [
+        {
+            "type": "technology_direction",
+            "mapping_hit": True,
+            "NEIC_Code": "2710",
+            "NEIC_Name": "化学药品原料药制造",
+            "taxonomy_path": ["高技术产业", "医药制造"],
+        },
+        {
+            "type": "technology_auxiliary",
+            "evidence_role": "official_qualification",
+            "status": "satisfied",
+            "excerpt": "高新技术企业",
+        },
+        {
+            "type": "technology_auxiliary",
+            "evidence_role": "rd_staff_ratio",
+            "status": "satisfied",
+            "normalized_percent": 10.0,
+        },
+        {
+            "type": "technology_auxiliary",
+            "evidence_role": "rd_investment_ratio",
+            "status": "unsatisfied",
+            "normalized_amount_wan": 299.0,
+            "derived_ratio_percent": 2.99,
+            "warning": "研发投入占营收比例低于3%参考阈值",
+        },
+        {
+            "type": "technology_auxiliary",
+            "evidence_role": "patent_software_copyright",
+            "status": "satisfied",
+            "excerpt": "拥有发明专利3项",
+        },
+    ]
+
+    workbook = load_workbook(
+        BytesIO(export_case_workbook(case, five_articles_results=[stage_b]))
+    )
+    sheet = workbook["科技金融判定"]
+    headers = tuple(cell.value for cell in sheet[1])
+    row = dict(zip(headers, tuple(cell.value for cell in sheet[2]), strict=True))
+
+    assert row["贷款实际投向依据"] == (
+        "命中科技金融映射：2710 化学药品原料药制造 · 高技术产业 / 医药制造"
+    )
+    assert row["官方科技资质"] == "满足：高新技术企业"
+    assert row["研发人员占比"] == "满足：10%"
+    assert row["研发投入"] == "299万元"
+    assert row["研发投入占营收比例"] == "未满足：2.99%"
+    assert row["专利或软著等"] == "满足：拥有发明专利3项"
+    assert row["辅助证据预警"] == "研发投入占营收比例低于3%参考阈值"
+
+
 @pytest.mark.parametrize(
     (
         "result_status",

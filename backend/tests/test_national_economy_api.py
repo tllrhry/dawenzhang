@@ -213,7 +213,7 @@ def test_existing_technology_finance_template_creates_case_and_detail_keeps_all_
     assert [(item["field"], item["label"]) for item in payload["input_fields"]] == [
         (field.key, field.label) for field in TECHNOLOGY_FINANCE_FIELD_SCHEMA
     ]
-    assert len(payload["input_fields"]) == 20
+    assert len(payload["input_fields"]) == len(TECHNOLOGY_FINANCE_FIELD_SCHEMA)
     assert {item["field"] for item in payload["input_fields"]} >= {
         "entity_type",
         "annual_revenue",

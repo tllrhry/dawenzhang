@@ -61,6 +61,13 @@ _TECHNOLOGY_FINANCE_HEADERS = (
     "匹配依据",
     "业务证据摘要",
     "知识产权条件",
+    "贷款实际投向依据",
+    "官方科技资质",
+    "研发人员占比",
+    "研发投入",
+    "研发投入占营收比例",
+    "专利或软著等",
+    "辅助证据预警",
     TECHNOLOGY_FINANCE_CONSISTENCY_LABEL,
     "一致性依据",
 )
@@ -306,6 +313,13 @@ def _write_technology_finance_result(
                 "",
                 "",
                 "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
                 "不适用",
                 "尚无科技金融判定结果，一致性不适用。",
             )
@@ -317,6 +331,7 @@ def _write_technology_finance_result(
     status_detail = _technology_finance_status_detail(current)
     consistency_label = _consistency_status_label(current)
     consistency_basis = _consistency_basis(current)
+    technology_values = _technology_auxiliary_export_values(current)
     common_values = (
         current.version,
         status_label,
@@ -343,6 +358,7 @@ def _write_technology_finance_result(
                 "",
                 "",
                 "",
+                *technology_values,
                 consistency_label,
                 consistency_basis,
             )
@@ -361,10 +377,105 @@ def _write_technology_finance_result(
                 _cell_value(label.get("matching_basis")),
                 _business_evidence_summary(label.get("evidence_refs")),
                 _ip_intensive_industry_condition(label),
+                *technology_values,
                 consistency_label,
                 consistency_basis,
             )
         )
+
+
+def _technology_auxiliary_export_values(
+    result: FiveArticlesResult,
+) -> tuple[str, ...]:
+    refs = [
+        ref
+        for ref in (result.consistency_evidence_refs or [])
+        if isinstance(ref, dict)
+    ]
+    direction = next(
+        (ref for ref in refs if ref.get("type") == "technology_direction"),
+        None,
+    )
+    auxiliary = {
+        str(ref.get("evidence_role")): ref
+        for ref in refs
+        if ref.get("type") == "technology_auxiliary"
+    }
+    qualification = auxiliary.get("official_qualification")
+    staff = auxiliary.get("rd_staff_ratio")
+    investment = auxiliary.get("rd_investment_ratio")
+    patent = auxiliary.get("patent_software_copyright")
+    warnings = [
+        str(ref["warning"])
+        for ref in auxiliary.values()
+        if ref.get("warning")
+    ]
+    return (
+        _technology_direction_summary(direction),
+        _technology_auxiliary_summary(qualification),
+        _technology_percentage_summary(staff, "normalized_percent"),
+        _technology_amount_summary(investment),
+        _technology_percentage_summary(investment, "derived_ratio_percent"),
+        _technology_auxiliary_summary(patent),
+        "\n".join(warnings),
+    )
+
+
+def _technology_direction_summary(reference: Mapping[str, object] | None) -> str:
+    if reference is None:
+        return ""
+    if reference.get("mapping_hit"):
+        path = " / ".join(
+            str(value)
+            for value in (reference.get("taxonomy_path") or [])
+            if value
+        )
+        mapped = " ".join(
+            str(value)
+            for value in (
+                reference.get("NEIC_Code"),
+                reference.get("NEIC_Name"),
+            )
+            if value
+        )
+        return f"命中科技金融映射：{mapped}{f' · {path}' if path else ''}"
+    return "未命中科技金融映射"
+
+
+def _technology_auxiliary_summary(
+    reference: Mapping[str, object] | None,
+) -> str:
+    if reference is None:
+        return ""
+    status = _technology_auxiliary_status(reference.get("status"))
+    excerpt = _cell_value(reference.get("excerpt"))
+    return f"{status}：{excerpt}" if excerpt else status
+
+
+def _technology_percentage_summary(
+    reference: Mapping[str, object] | None,
+    value_key: str,
+) -> str:
+    if reference is None:
+        return ""
+    status = _technology_auxiliary_status(reference.get("status"))
+    value = reference.get(value_key)
+    return f"{status}：{float(value):g}%" if isinstance(value, (int, float)) else status
+
+
+def _technology_amount_summary(reference: Mapping[str, object] | None) -> str:
+    if reference is None:
+        return ""
+    value = reference.get("normalized_amount_wan")
+    return f"{float(value):g}万元" if isinstance(value, (int, float)) else "未知"
+
+
+def _technology_auxiliary_status(value: object) -> str:
+    return {
+        "satisfied": "满足",
+        "unsatisfied": "未满足",
+        "unknown": "未知",
+    }.get(str(value), "未知")
 
 
 def _ip_intensive_industry_condition(label: Mapping[str, object]) -> str:

@@ -21,6 +21,7 @@ from app.services.scenario_registry import (
     MULTI_SCENARIO_FINANCE_REGISTRATIONS,
     PENSION_FINANCE_REGISTRATION,
     ScenarioRegistration,
+    TECHNOLOGY_FINANCE_REGISTRATION,
 )
 
 
@@ -178,6 +179,37 @@ def test_previous_green_template_without_violation_field_is_accepted() -> None:
     assert payload["major_environmental_violation"] == ""
     assert list(payload) == [
         field.key for field in GREEN_FINANCE_REGISTRATION.field_schema
+    ]
+
+
+def test_previous_technology_template_with_combined_rd_field_is_accepted() -> None:
+    document = Document(
+        BytesIO(TECHNOLOGY_FINANCE_REGISTRATION.template_path().read_bytes())
+    )
+    table = document.tables[0]
+    for label in ("研发人员占比", "研发投入", "专利或软著等"):
+        row = next(
+            row for row in table.rows if row.cells[0].text.strip() == label
+        )
+        table._tbl.remove(row._tr)
+    cells = table.add_row().cells
+    cells[0].text = "研发与知识产权情况"
+    cells[1].text = "研发人员占比12%，研发投入300万元，拥有软件著作权"
+    cells[2].text = "旧模板合并字段"
+    output = BytesIO()
+    document.save(output)
+
+    payload = parse_five_articles_template(
+        output.getvalue(),
+        TECHNOLOGY_FINANCE_REGISTRATION,
+    )
+
+    assert payload["rd_ip_info"].startswith("研发人员占比12%")
+    assert payload["rd_staff_ratio"] == ""
+    assert payload["rd_investment"] == ""
+    assert payload["patent_software_copyright_info"] == ""
+    assert list(payload) == [
+        field.key for field in TECHNOLOGY_FINANCE_REGISTRATION.field_schema
     ]
 
 

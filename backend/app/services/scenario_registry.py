@@ -107,7 +107,18 @@ TECHNOLOGY_FINANCE_ADDITIONAL_FIELDS = (
     ScenarioField("project_content", "项目建设 / 运营内容"),
     ScenarioField("employee_count", "从业人员数量"),
     ScenarioField("certifications", "企业核心资质与认证"),
-    ScenarioField("rd_ip_info", "研发与知识产权情况"),
+    ScenarioField(
+        "rd_ip_info",
+        "研发与知识产权情况",
+        required=False,
+    ),
+    ScenarioField("rd_staff_ratio", "研发人员占比", required=False),
+    ScenarioField("rd_investment", "研发投入", required=False),
+    ScenarioField(
+        "patent_software_copyright_info",
+        "专利或软著等",
+        required=False,
+    ),
 )
 
 TECHNOLOGY_FINANCE_FIELD_SCHEMA = (
@@ -134,8 +145,18 @@ TECHNOLOGY_FINANCE_REGISTRATION = ScenarioRegistration(
     export_sheet_name="科技金融判定",
     field_schema=TECHNOLOGY_FINANCE_FIELD_SCHEMA,
     stage_a_field_keys=tuple(FIELD_LABELS),
-    stage_b_evidence_field_keys=tuple(
-        field.key for field in TECHNOLOGY_FINANCE_FIELD_SCHEMA
+    stage_b_evidence_field_keys=_prioritize_evidence_fields(
+        TECHNOLOGY_FINANCE_FIELD_SCHEMA,
+        "loan_purpose",
+        "project_name",
+        "project_content",
+        "certifications",
+        "rd_staff_ratio",
+        "rd_investment",
+        "annual_revenue",
+        "patent_software_copyright_info",
+        "rd_ip_info",
+        "trade_goods_services",
     ),
     mapping_tier_depth=4,
 )

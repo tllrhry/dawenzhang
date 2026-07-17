@@ -54,6 +54,11 @@ export interface EvidenceReference {
   excerpt?: string
   raw_value?: unknown
   normalized_percent?: number | null
+  normalized_amount_wan?: number | null
+  annual_revenue_raw?: unknown
+  annual_revenue_wan?: number | null
+  derived_ratio_percent?: number | null
+  threshold_percent?: number
   parse_status?: 'valid' | 'missing' | 'invalid' | 'ambiguous'
   matrix_branch?: string
   warning?: string | null
@@ -65,6 +70,8 @@ export interface EvidenceReference {
   decision_policy_version?: string
   evidence_role?: 'industry_positioning' | 'core_competitiveness' | 'rd_ip' | string
   evidence_status?: 'positive' | 'provided' | 'missing' | 'unrecognized'
+  status?: 'satisfied' | 'unsatisfied' | 'unknown'
+  mapping_hit?: boolean
 }
 
 export interface TechnologyFinanceLabel {

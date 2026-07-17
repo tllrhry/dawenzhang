@@ -70,7 +70,61 @@ function evidenceSummary(reference: EvidenceReference): string {
   if (reference.type === 'green_auxiliary' || reference.type === 'green_violation') {
     return reference.warning || `${reference.field_label || '绿色辅助证据'}：${reference.excerpt || '--'}`
   }
+  if (reference.type === 'technology_direction') {
+    const path = reference.taxonomy_path?.filter(Boolean).join(' / ')
+    return reference.mapping_hit
+      ? `命中科技金融映射：${reference.NEIC_Code || '--'} ${reference.NEIC_Name || ''}${path ? ` · ${path}` : ''}`
+      : '贷款实际投向未命中科技金融映射'
+  }
+  if (reference.type === 'technology_auxiliary') {
+    return reference.warning || `${reference.field_label || '科技辅助证据'}：${reference.excerpt || '--'}`
+  }
   return `${reference.field_label || reference.field_key || '业务证据'}：${reference.excerpt || '--'}`
+}
+
+function auxiliaryStatusLabel(status: unknown): string {
+  if (status === 'satisfied') return '满足'
+  if (status === 'unsatisfied') return '未满足'
+  return '未知'
+}
+
+function technologyAuxiliaryValue(reference: EvidenceReference): string {
+  const status = auxiliaryStatusLabel(reference.status)
+  if (reference.evidence_role === 'rd_staff_ratio') {
+    return reference.normalized_percent === null || reference.normalized_percent === undefined
+      ? status
+      : `${status} · ${reference.normalized_percent}%（参考阈值 10%）`
+  }
+  if (reference.evidence_role === 'rd_investment_ratio') {
+    const amount = reference.normalized_amount_wan === null || reference.normalized_amount_wan === undefined
+      ? '研发投入未知'
+      : `研发投入 ${reference.normalized_amount_wan} 万元`
+    const ratio = reference.derived_ratio_percent === null || reference.derived_ratio_percent === undefined
+      ? '研发投入占营收比例未知'
+      : `研发投入占营收 ${reference.derived_ratio_percent}%（参考阈值 3%）`
+    return `${status} · ${amount} · ${ratio}`
+  }
+  return `${status}${reference.excerpt ? ` · ${reference.excerpt}` : ''}`
+}
+
+function technologyAuxiliaryLabel(reference: EvidenceReference): string {
+  if (reference.evidence_role === 'official_qualification') return '企业核心资质与认证'
+  if (reference.evidence_role === 'rd_staff_ratio') return '研发人员占比'
+  if (reference.evidence_role === 'rd_investment_ratio') return '研发投入占营收比例'
+  if (reference.evidence_role === 'patent_software_copyright') return '专利或软著等'
+  return reference.field_label || '科技辅助证据'
+}
+
+function technologyDecisionDetails(result: FiveArticlesResult | null) {
+  if (!result) return null
+  const directionRef = result.consistency_evidence_refs.find((reference) => reference.type === 'technology_direction')
+  const auxiliaryRefs = result.consistency_evidence_refs.filter((reference) => reference.type === 'technology_auxiliary')
+  if (!directionRef && auxiliaryRefs.length === 0) return null
+  return {
+    directionRef,
+    auxiliaryRefs,
+    warnings: auxiliaryRefs.map((reference) => reference.warning).filter((warning): warning is string => Boolean(warning)),
+  }
 }
 
 function pensionDecisionDetails(result: FiveArticlesResult | null) {
@@ -153,6 +207,9 @@ export function FiveArticlesResultCard({ scenarioId, result, stageAFailed, stage
   const greenDetails = scenarioId === GREEN_FINANCE_SCENARIO
     ? greenDecisionDetails(result)
     : null
+  const technologyDetails = scenarioId === TECHNOLOGY_FINANCE_SCENARIO
+    ? technologyDecisionDetails(result)
+    : null
   const title = <span className="technology-card-title">
     <span>{`Stage B · ${scenarioView.name}判定`}</span>
     {registryHits.specializedInnovation && <Tag color="success" icon={<CheckCircleFilled />}>命中专精特新企业名单</Tag>}
@@ -177,6 +234,33 @@ export function FiveArticlesResultCard({ scenarioId, result, stageAFailed, stage
           <div className="evidence-summary"><b>映射与业务证据</b>{label.evidence_refs.map((reference, evidenceIndex) => <span key={`${reference.type || 'evidence'}-${evidenceIndex}`}>{evidenceSummary(reference)}</span>)}</div>
         </section>)}
       </div> : <Alert className="technology-empty-state" type={result.status === 'classification_failed' ? 'error' : result.status === 'needs_review' ? 'warning' : 'info'} showIcon message={stageBStatusLabel(scenarioId, result.status)} description={stageBEmptyDescription(scenarioId, result)} />}
+      {technologyDetails && <>
+        <Divider />
+        <section className="consistency-panel technology-decision-panel">
+          <h3>科技金融判定依据</h3>
+          <div className="green-evidence-list">
+            <div className="green-evidence-row">
+              <span>是否属于科技金融</span>
+              <p>{result.status === 'completed' ? '是' : result.status === 'not_applicable' ? '否' : '待人工复核'}</p>
+            </div>
+            <div className="green-evidence-row">
+              <span>贷款实际投向</span>
+              <p>{technologyDetails.directionRef ? evidenceSummary(technologyDetails.directionRef) : '未形成投向映射证据'}</p>
+            </div>
+            {technologyDetails.auxiliaryRefs.map((reference) => <div className="green-evidence-row" key={`${reference.evidence_role}-${reference.field_key}`}>
+              <span>{technologyAuxiliaryLabel(reference)}</span>
+              <p>{technologyAuxiliaryValue(reference)}</p>
+            </div>)}
+            <div className="green-evidence-row">
+              <span>最终判定依据</span>
+              <p>{result.consistency_basis || result.error_detail || '暂无说明'}</p>
+            </div>
+          </div>
+          {technologyDetails.warnings.length > 0
+            ? <Alert type="warning" showIcon message="科技辅助证据预警" description={<div className="green-warning-list">{technologyDetails.warnings.map((warning) => <p key={warning}>{warning}</p>)}</div>} />
+            : <Alert type="success" showIcon message="科技辅助证据完整" description="官方科技资质、研发人员占比、研发投入与知识产权均形成正向辅助佐证。" />}
+        </section>
+      </>}
       {pensionDetails && <>
         <Divider />
         <section className="consistency-panel pension-decision-panel">

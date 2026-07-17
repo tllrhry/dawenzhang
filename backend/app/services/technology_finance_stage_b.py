@@ -8,6 +8,7 @@ from app.core.config import Settings
 from app.services.five_articles_stage_b_evidence import (
     build_business_sources as _build_business_sources,
 )
+from app.services.five_articles_policies import get_five_articles_policy
 from app.services.five_articles_stage_b_prompt import (
     build_stage_b_request_payload as _build_stage_b_request_payload,
 )
@@ -71,6 +72,14 @@ def classify_five_articles_stage_b(
         stage_a_snapshot,
         profile,
     )
+    deterministic_result = get_five_articles_policy(profile.id).preclassify_stage_b(
+        input_payload,
+        stage_a_result,
+        enterprise_snapshot,
+        loan_snapshot,
+    )
+    if deterministic_result is not None:
+        return deterministic_result
     business_sources = _build_business_sources(input_payload, stage_a_snapshot, profile)
     same_code = _has_same_neic_code_match(
         stage_a_snapshot, enterprise_snapshot, loan_snapshot

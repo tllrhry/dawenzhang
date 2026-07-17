@@ -352,6 +352,7 @@ def _write_five_articles_result(
                 *("" for _ in range(15)),
                 "不适用",
                 f"尚无{profile.name}判定结果，一致性不适用。",
+                *_pension_export_values(None, profile),
             )
         )
         return
@@ -379,6 +380,7 @@ def _write_five_articles_result(
                 *("" for _ in range(10)),
                 consistency_label,
                 consistency_basis,
+                *_pension_export_values(current, profile),
             )
         )
         return
@@ -395,6 +397,7 @@ def _write_five_articles_result(
                 _business_evidence_summary(label.get("evidence_refs")),
                 consistency_label,
                 consistency_basis,
+                *_pension_export_values(current, profile),
             )
         )
 
@@ -421,7 +424,66 @@ def _five_articles_headers(profile: ScenarioRegistration) -> tuple[str, ...]:
         "业务证据摘要",
         "贷款对应的五篇大文章类别与企业类别是否一致",
         "一致性依据",
+        *(
+            (
+                "养老矩阵分支",
+                "贷款养老投向占比原始值",
+                "贷款养老投向占比规范化",
+                "主营业务及营收占比原始值",
+                "主营业务及营收占比规范化",
+                "主体辅助依据",
+                "养老资质预警",
+            )
+            if profile.id == "pension_finance"
+            else ()
+        ),
     )
+
+
+def _pension_export_values(
+    result: FiveArticlesResult | None,
+    profile: ScenarioRegistration,
+) -> tuple[object, ...]:
+    if profile.id != "pension_finance":
+        return ()
+    if result is None:
+        return ("", "", "", "", "", "", "")
+    matrix_refs = {
+        ref.get("field_key"): ref
+        for ref in result.consistency_evidence_refs
+        if ref.get("type") == "pension_matrix"
+    }
+    loan_share = matrix_refs.get("pension_loan_direction_share", {})
+    revenue_share = matrix_refs.get("main_business_revenue_share", {})
+    qualification = next(
+        (
+            ref
+            for ref in result.consistency_evidence_refs
+            if ref.get("type") == "pension_qualification"
+        ),
+        {},
+    )
+    branch = loan_share.get("matrix_branch") or revenue_share.get("matrix_branch")
+    subject_basis = (
+        "企业养老映射命中"
+        if branch == "PENSION_ENTERPRISE_UNKNOWN_LOAN_SHARE"
+        else "养老产业营业收入占比达到50%（含）"
+        if branch == "PENSION_REVENUE_AT_LEAST_50_UNKNOWN_LOAN_SHARE"
+        else "主体辅助规则未触发"
+    )
+    return (
+        _cell_value(branch),
+        _cell_value(loan_share.get("raw_value")),
+        _percentage_cell(loan_share.get("normalized_percent")),
+        _cell_value(revenue_share.get("raw_value")),
+        _percentage_cell(revenue_share.get("normalized_percent")),
+        subject_basis,
+        _cell_value(qualification.get("warning")),
+    )
+
+
+def _percentage_cell(value: object) -> str:
+    return "" if value is None else f"{value}%"
 
 
 def _five_articles_status_label(

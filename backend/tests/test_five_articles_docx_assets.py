@@ -59,7 +59,7 @@ def test_previous_pension_layout_fails_when_fields_are_embedded_in_hints(
         validate_docx_asset(broken_path, spec)
 
     message = str(error.value)
-    assert "字段行应为 18，实际 16" in message
+    assert "字段行应为 19，实际 17" in message
     assert "项目建设 / 运营内容" in message
     assert "核心交易品类 / 服务内容" in message
 

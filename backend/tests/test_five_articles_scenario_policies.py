@@ -7,6 +7,9 @@ from app.services.five_articles_policies.green import (
     GREEN_FINANCE_POLICY,
 )
 from app.services.five_articles_policies.pension import PENSION_FINANCE_POLICY
+from app.services.five_articles_policies.pension import (
+    PENSION_FINANCE_DECISION_POLICY_VERSION,
+)
 from app.services.five_articles_policies.technology import (
     TECHNOLOGY_FINANCE_POLICY,
 )
@@ -44,9 +47,12 @@ def test_policy_metadata_owns_scenario_behavior_flags() -> None:
         == GREEN_FINANCE_DECISION_POLICY_VERSION
     )
     assert DIGITAL_FINANCE_POLICY.decision_policy_version == "legacy-v1"
+    assert (
+        PENSION_FINANCE_POLICY.decision_policy_version
+        == PENSION_FINANCE_DECISION_POLICY_VERSION
+    )
 
 
 def test_unknown_scenario_has_no_implicit_policy() -> None:
     with pytest.raises(LookupError, match="未注册五篇大文章策略"):
         get_five_articles_policy("unknown")
-

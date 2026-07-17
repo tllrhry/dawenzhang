@@ -321,7 +321,7 @@ def _build_stage_b_result(
     )
     labels = policy.postprocess_labels(session, case.input_payload, decision.labels)
     return _new_result(
-        session, case=case, stage_a_result=stage_a_result, status="completed",
+        session, case=case, stage_a_result=stage_a_result, status=decision.result_status,
         mapping_version_id=mapping_result.mapping_version_id,
         decision_policy_version=_decision_policy_version(profile), labels=labels,
         consistency_status=decision.consistency_status, consistency_basis=decision.consistency_basis,

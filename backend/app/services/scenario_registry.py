@@ -20,6 +20,7 @@ class ScenarioField:
     key: str
     label: str
     aliases: tuple[str, ...] = ()
+    required: bool = True
 
 
 @dataclass(frozen=True)
@@ -160,6 +161,11 @@ PENSION_FINANCE_ADDITIONAL_FIELDS = (
     ScenarioField("annual_revenue", "上年度营业收入"),
     ScenarioField("project_name", "对应项目名称"),
     ScenarioField("project_content", "项目建设 / 运营内容"),
+    ScenarioField(
+        "pension_loan_direction_share",
+        "该笔贷款实际投向养老产业占总贷款额度比",
+        required=False,
+    ),
     ScenarioField("certifications", "企业核心资质与认证"),
 )
 
@@ -384,6 +390,8 @@ PENSION_FINANCE_REGISTRATION = ScenarioRegistration(
         "loan_purpose",
         "project_name",
         "project_content",
+        "pension_loan_direction_share",
+        "main_business_revenue_share",
         "certifications",
         "trade_goods_services",
     ),

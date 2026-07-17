@@ -6,6 +6,10 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.services.scenario_registry import ScenarioRegistration
+from app.services.five_articles_stage_b_types import (
+    StageAResult,
+    TechnologyFinanceStageBResult,
+)
 from app.services.technology_finance_mapping_query import (
     FiveArticlesMappingLabel,
     FiveArticlesMappingLookupResult,
@@ -27,6 +31,17 @@ class FiveArticlesScenarioPolicy:
     scenario_id: str
     decision_policy_version: str = LEGACY_DECISION_POLICY_VERSION
     narrows_loan_labels: bool = True
+
+    def preclassify_stage_b(
+        self,
+        input_payload: Mapping[str, object],
+        stage_a_result: StageAResult,
+        enterprise_labels: Sequence[FiveArticlesMappingLabel],
+        loan_direction_labels: Sequence[FiveArticlesMappingLabel],
+    ) -> TechnologyFinanceStageBResult | None:
+        """Return a server-owned decision, or defer to the shared model flow."""
+        del input_payload, stage_a_result, enterprise_labels, loan_direction_labels
+        return None
 
     def resolve_mapping(
         self,

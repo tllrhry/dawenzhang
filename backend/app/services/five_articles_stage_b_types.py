@@ -5,6 +5,7 @@ from typing import Literal, Protocol
 TechnologyFinanceConsistencyStatus = Literal[
     "consistent", "inconsistent", "needs_review"
 ]
+FiveArticlesResultStatus = Literal["completed", "not_applicable", "needs_review"]
 
 
 class StageAResult(Protocol):
@@ -30,4 +31,4 @@ class TechnologyFinanceStageBResult:
     consistency_basis: str
     consistency_evidence_refs: tuple[dict[str, object], ...]
     model_output: dict[str, object]
-
+    result_status: FiveArticlesResultStatus = "completed"

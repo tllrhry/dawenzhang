@@ -23,6 +23,7 @@ def parse_five_articles_template(
             for field in profile.field_schema
             if field.aliases
         },
+        frozenset(field.key for field in profile.field_schema if not field.required),
     )
 
 

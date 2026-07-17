@@ -64,6 +64,7 @@ def parse_template_fields(
     document_bytes: bytes,
     field_labels: Mapping[str, str],
     field_aliases: Mapping[str, tuple[str, ...]] | None = None,
+    optional_fields: frozenset[str] = frozenset(),
 ) -> dict[str, str]:
     try:
         document = Document(BytesIO(document_bytes))
@@ -119,7 +120,9 @@ def parse_template_fields(
             add_value(label, value)
 
     missing_labels = [
-        label for field, label in field_labels.items() if field not in values
+        label
+        for field, label in field_labels.items()
+        if field not in values and field not in optional_fields
     ]
     issues = TemplateValidationIssues(
         missing=tuple(missing_labels),
@@ -129,7 +132,7 @@ def parse_template_fields(
     if issues.missing or issues.duplicate or issues.unrecognized:
         raise NationalEconomyTemplateError(issues)
 
-    return {field: values[field] for field in field_labels}
+    return {field: values.get(field, "") for field in field_labels}
 
 
 def create_case_from_template(

@@ -52,6 +52,11 @@ export interface EvidenceReference {
   field_key?: string
   field_label?: string
   excerpt?: string
+  raw_value?: unknown
+  normalized_percent?: number | null
+  parse_status?: 'valid' | 'missing' | 'invalid' | 'ambiguous'
+  matrix_branch?: string
+  warning?: string | null
 }
 
 export interface TechnologyFinanceLabel {

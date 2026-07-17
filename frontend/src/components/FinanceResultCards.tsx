@@ -1,7 +1,7 @@
 import { Alert, Card, Descriptions, Divider, Tag } from 'antd'
 import { CheckCircleFilled, SafetyCertificateOutlined } from '@ant-design/icons'
 
-import { TECHNOLOGY_FINANCE_SCENARIO } from '../api'
+import { PENSION_FINANCE_SCENARIO, TECHNOLOGY_FINANCE_SCENARIO } from '../api'
 import type { EvidenceReference, FiveArticlesResult, InclusiveFinanceResult, ScenarioId } from '../api'
 import { scenarioViews } from '../scenarios'
 
@@ -47,7 +47,28 @@ function evidenceSummary(reference: EvidenceReference): string {
     const path = reference.taxonomy_path?.filter(Boolean).join(' / ')
     return `映射版本 ${reference.mapping_version_id ?? '--'} · 源行 ${reference.source_row ?? '--'} · ${reference.NEIC_Code || '--'} ${reference.NEIC_Name || ''}${path ? ` · ${path}` : ''}`
   }
+  if (reference.type === 'pension_matrix') {
+    const normalized = reference.normalized_percent === null || reference.normalized_percent === undefined
+      ? '未知'
+      : `${reference.normalized_percent}%`
+    return `${reference.field_label || '比例字段'}：原始值 ${String(reference.raw_value ?? '--')} · 规范化 ${normalized}`
+  }
+  if (reference.type === 'pension_qualification') {
+    return reference.warning || `${reference.field_label || '养老资质'}：${reference.excerpt || '--'}`
+  }
   return `${reference.field_label || reference.field_key || '业务证据'}：${reference.excerpt || '--'}`
+}
+
+function pensionDecisionDetails(result: FiveArticlesResult | null) {
+  if (!result) return null
+  const matrixRefs = result.consistency_evidence_refs.filter((reference) => reference.type === 'pension_matrix')
+  const qualificationRef = result.consistency_evidence_refs.find((reference) => reference.type === 'pension_qualification')
+  if (matrixRefs.length === 0) return null
+  return {
+    matrixRefs,
+    qualificationWarning: qualificationRef?.warning,
+    qualificationEvidence: qualificationRef?.excerpt,
+  }
 }
 
 const ipIntensiveIndustrySubjects = new Set(['知识产权（专利）密集型产业', '知识产权(专利)密集型产业'])
@@ -80,6 +101,9 @@ export function FiveArticlesResultCard({ scenarioId, result, stageAFailed, stage
   const registryHits = scenarioId === TECHNOLOGY_FINANCE_SCENARIO
     ? technologyRegistryHits(result)
     : { specializedInnovation: false, highTech: false }
+  const pensionDetails = scenarioId === PENSION_FINANCE_SCENARIO
+    ? pensionDecisionDetails(result)
+    : null
   const title = <span className="technology-card-title">
     <span>{`Stage B · ${scenarioView.name}判定`}</span>
     {registryHits.specializedInnovation && <Tag color="success" icon={<CheckCircleFilled />}>命中专精特新企业名单</Tag>}
@@ -104,6 +128,31 @@ export function FiveArticlesResultCard({ scenarioId, result, stageAFailed, stage
           <div className="evidence-summary"><b>映射与业务证据</b>{label.evidence_refs.map((reference, evidenceIndex) => <span key={`${reference.type || 'evidence'}-${evidenceIndex}`}>{evidenceSummary(reference)}</span>)}</div>
         </section>)}
       </div> : <Alert className="technology-empty-state" type={result.status === 'classification_failed' ? 'error' : result.status === 'needs_review' ? 'warning' : 'info'} showIcon message={stageBStatusLabel(scenarioId, result.status)} description={stageBEmptyDescription(scenarioId, result)} />}
+      {pensionDetails && <>
+        <Divider />
+        <section className="consistency-panel pension-decision-panel">
+          <h3>养老投向判定依据</h3>
+          <div className="pension-matrix-list">
+            {pensionDetails.matrixRefs.map((reference) => {
+              const hasNormalizedValue = reference.normalized_percent !== null && reference.normalized_percent !== undefined
+              const rawValue = String(reference.raw_value ?? '').trim()
+              return <div className="pension-matrix-row" key={reference.field_key}>
+                <span>{reference.field_label || '比例字段'}</span>
+                <div className={hasNormalizedValue ? 'pension-percent-value' : undefined}>
+                  {hasNormalizedValue ? `${reference.normalized_percent}%` : rawValue || '未填写'}
+                </div>
+              </div>
+            })}
+            <div className="pension-matrix-row">
+              <span>主体辅助依据</span>
+              <div>{result.consistency_basis || '--'}</div>
+            </div>
+          </div>
+          {pensionDetails.qualificationWarning
+            ? <Alert type="warning" showIcon message="养老资质预警" description={`${pensionDetails.qualificationWarning}；该预警不改变投向矩阵结论。`} />
+            : <Alert type="success" showIcon message="养老资质辅助佐证" description={pensionDetails.qualificationEvidence || '已提供养老相关资质。'} />}
+        </section>
+      </>}
       <Divider />
       <section className="consistency-panel">
         <h3>贷款对应的五篇大文章类别与企业类别是否一致</h3>
@@ -129,4 +178,3 @@ export function InclusiveFinanceResultCard({ result }: { result: InclusiveFinanc
     </Descriptions> : <Alert type="warning" showIcon message="Stage B 未执行" description="Stage A 完成后才会执行普惠金融判定。" />}
   </Card>
 }
-

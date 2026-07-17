@@ -442,7 +442,9 @@ def test_missing_enterprise_mapping_accepts_grounded_inconsistent() -> None:
         )
 
     assert result.consistency_status == "inconsistent"
-    assert "养老金融映射" in result.consistency_basis
+    assert result.result_status == "not_applicable"
+    assert result.labels == ()
+    assert "主体辅助条件不成立" in result.consistency_basis
     assert len(result.consistency_evidence_refs) == 3
 
 

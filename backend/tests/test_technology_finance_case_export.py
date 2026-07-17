@@ -495,3 +495,83 @@ def test_new_finance_export_uses_profile_sheet_and_readable_statuses(
         assert row["映射源行"] is None
         assert row["业务证据摘要"] is None
         assert row["一致性依据"]
+
+
+def test_pension_export_includes_matrix_shares_subject_basis_and_warning() -> None:
+    profile = PENSION_FINANCE_REGISTRATION
+    case = NationalEconomyClassificationCase(
+        id=1,
+        scenario=profile.id,
+        original_filename="养老金融案例.docx",
+        input_payload={
+            field.key: f"{field.label}内容" for field in profile.field_schema
+        },
+        status="completed",
+    )
+    result = FiveArticlesResult(
+        id=21,
+        case_id=case.id,
+        scenario_id=profile.id,
+        version=1,
+        status="completed",
+        stage_a_result_id=11,
+        mapping_version_id=3,
+        decision_policy_version="pension-direction-share-v2",
+        labels=[
+            {
+                "subject": "养老产业",
+                "taxonomy_path": ["养老服务"],
+                "NEIC_Code": "8514",
+                "NEIC_Name": "老年人、残疾人养护服务",
+                "source_row": 12,
+                "matching_basis": "养老投向矩阵认定。",
+                "evidence_refs": [],
+            }
+        ],
+        loan_neic_code="8514",
+        loan_neic_name="老年人、残疾人养护服务",
+        enterprise_neic_code="7020",
+        enterprise_neic_name="物业管理",
+        consistency_status="inconsistent",
+        consistency_basis="养老营收占比达到50%，以主体属性辅助认定。",
+        consistency_evidence_refs=[
+            {
+                "type": "pension_matrix",
+                "field_key": "pension_loan_direction_share",
+                "raw_value": "",
+                "normalized_percent": None,
+                "matrix_branch": "PENSION_REVENUE_AT_LEAST_50_UNKNOWN_LOAN_SHARE",
+            },
+            {
+                "type": "pension_matrix",
+                "field_key": "main_business_revenue_share",
+                "raw_value": "养老服务占60%",
+                "normalized_percent": 60.0,
+                "matrix_branch": "PENSION_REVENUE_AT_LEAST_50_UNKNOWN_LOAN_SHARE",
+            },
+            {
+                "type": "pension_qualification",
+                "warning": "未提供养老许可、备案或重点项目清单等辅助资质",
+            },
+        ],
+    )
+
+    workbook = load_workbook(
+        BytesIO(
+            export_case_workbook(
+                case,
+                five_articles_results=[result],
+                profile=profile,
+            )
+        )
+    )
+    sheet = workbook[profile.export_sheet_name]
+    headers = tuple(cell.value for cell in sheet[1])
+    row = dict(zip(headers, tuple(cell.value for cell in sheet[2]), strict=True))
+
+    assert row["养老矩阵分支"] == "PENSION_REVENUE_AT_LEAST_50_UNKNOWN_LOAN_SHARE"
+    assert row["贷款养老投向占比规范化"] is None
+    assert row["主营业务及营收占比原始值"] == "养老服务占60%"
+    assert row["主营业务及营收占比规范化"] == "60.0%"
+    assert row["主体辅助依据"] == "养老产业营业收入占比达到50%（含）"
+    assert row["养老资质预警"] == "未提供养老许可、备案或重点项目清单等辅助资质"

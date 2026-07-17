@@ -100,6 +100,32 @@ def test_formal_three_column_template_creates_profile_owned_case(
     session.refresh.assert_called_once_with(case)
 
 
+def test_previous_pension_template_without_new_optional_share_field_is_accepted() -> None:
+    document = Document(
+        BytesIO(PENSION_FINANCE_REGISTRATION.template_path().read_bytes())
+    )
+    table = document.tables[0]
+    optional_row = next(
+        row
+        for row in table.rows
+        if row.cells[0].text.strip()
+        == "该笔贷款实际投向养老产业占总贷款额度比"
+    )
+    table._tbl.remove(optional_row._tr)
+    output = BytesIO()
+    document.save(output)
+
+    payload = parse_five_articles_template(
+        output.getvalue(),
+        PENSION_FINANCE_REGISTRATION,
+    )
+
+    assert payload["pension_loan_direction_share"] == ""
+    assert list(payload) == [
+        field.key for field in PENSION_FINANCE_REGISTRATION.field_schema
+    ]
+
+
 @pytest.mark.parametrize(
     ("profile", "issue", "issue_name"),
     [

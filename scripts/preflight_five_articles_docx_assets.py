@@ -103,7 +103,11 @@ ASSET_SPECS = (
         scenario_id="pension_finance",
         filename="养老金融模版.docx",
         fields=COMMON_DIGITAL_PENSION_FIELDS
-        + ("企业核心资质与认证", "授信审批意见"),
+        + (
+            "该笔贷款实际投向养老产业占总贷款额度比",
+            "企业核心资质与认证",
+            "授信审批意见",
+        ),
     ),
 )
 

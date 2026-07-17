@@ -121,7 +121,21 @@ export interface InclusiveFinanceResult {
   basis: string | null
   evidence_refs: EvidenceReference[]
   anomalies: Array<{ type?: string; message?: string }>
-  determination: Record<string, unknown> | null
+  determination: {
+    size_consistent?: boolean | null
+    operating_determination_source?: string | null
+    credit_amount_source?: string
+    credit_amount_consistent?: boolean | null
+    structured_credit_amount_raw?: string
+    structured_credit_amount_wan?: number | null
+    approval_credit_amount_raw?: string
+    approval_credit_amounts_wan?: number[]
+    credit_amount_conflict?: boolean
+    farmer_matched_conditions?: string[]
+    borrower_type_basis?: string
+    farmer_registration_address_support?: string
+    missing_elements?: string[]
+  } | null
   error_detail: string | null
   created_at: string
 }

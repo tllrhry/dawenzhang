@@ -69,7 +69,16 @@ def _decision(*, status: str = "completed") -> dict[str, object]:
         "filled_size": "小型", "qualifies": status == "completed",
         "inclusive_category": "小微企业贷款" if status == "completed" else None,
         "basis": "deterministic test", "evidence_refs": [], "anomalies": [],
-        "determination": {"size_consistent": True}, "is_operating_loan": True,
+        "determination": {
+            "size_consistent": True,
+            "borrower_type_basis": "主体类型填报：小型企业",
+            "structured_credit_amount_wan": 500.0,
+            "approval_credit_amounts_wan": [500.0],
+            "credit_amount_source": "structured_and_approval_consistent",
+            "credit_amount_consistent": True,
+            "credit_amount_conflict": False,
+            "farmer_registration_address_support": "注册地址未形成农户身份依据",
+        }, "is_operating_loan": True,
         "credit_amount_wan": 500.0,
     }
 
@@ -144,10 +153,16 @@ def test_inclusive_seven_endpoints_export_and_scenario_mismatch(client: TestClie
 
     classified = client.post(f"/api/v1/scenarios/{SCENARIO_ID}/cases/{case_id}/classifications")
     assert classified.status_code == 200 and classified.json()["stage_b"]["status"] == "completed"
+    assert classified.json()["stage_b"]["determination"]["credit_amount_source"] == "structured_and_approval_consistent"
     objection = client.post(f"/api/v1/scenarios/{SCENARIO_ID}/cases/{case_id}/objections", json={"objection_text": "需要复核"})
     assert objection.status_code == 200 and objection.json()["stage_b"]["status"] == "needs_review"
     history = client.get(f"/api/v1/scenarios/{SCENARIO_ID}/cases/{case_id}/history")
     assert [item["status"] for item in history.json()["items"]] == ["completed", "needs_review"]
+    assert history.json()["items"][0]["determination"]["approval_credit_amounts_wan"] == [500.0]
     exported = client.get(f"/api/v1/scenarios/{SCENARIO_ID}/cases/{case_id}/export")
-    assert load_workbook(BytesIO(exported.content)).sheetnames == ["案例输入", "当前结论", "判定历史", "普惠金融判定"]
+    workbook = load_workbook(BytesIO(exported.content))
+    assert workbook.sheetnames == ["案例输入", "当前结论", "判定历史", "普惠金融判定"]
+    headers = [cell.value for cell in workbook["普惠金融判定"][1]]
+    assert "审批意见批复额度(万元)" in headers
+    assert "额度来源及一致性" in headers
     assert client.get(f"/api/v1/scenarios/{SCENARIO_ID}/cases/999999").status_code == 404

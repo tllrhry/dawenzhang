@@ -259,17 +259,62 @@ export function FiveArticlesResultCard({ scenarioId, result, stageAFailed, stage
   </Card>
 }
 
+const inclusiveCreditSourceLabels: Record<string, string> = {
+  structured_and_approval_consistent: '结构化额度与审批意见一致',
+  structured: '仅采用结构化授信额度',
+  approval_opinion: '仅采用授信审批意见批复额度',
+  approval_opinion_multiple: '审批意见存在多个批复额度',
+  conflict: '结构化额度与审批意见冲突',
+  missing: '两处均无明确额度',
+}
+
+export function inclusiveCreditSummary(result: InclusiveFinanceResult): string {
+  const determination = result.determination
+  const source = determination?.credit_amount_source || 'missing'
+  const adopted = result.credit_amount_wan === null ? '未采用' : `${result.credit_amount_wan} 万元`
+  return `${adopted} · ${inclusiveCreditSourceLabels[source] || source}`
+}
+
+export function inclusiveBorrowerBasis(result: InclusiveFinanceResult): string {
+  return result.determination?.borrower_type_basis || `主体类型：${result.borrower_type || '待人工确认'}`
+}
+
+function inclusiveCreditConsistencySummary(result: InclusiveFinanceResult): string {
+  const determination = result.determination
+  if (determination?.credit_amount_conflict) return '冲突，已转人工复核'
+  if (determination?.credit_amount_consistent === true) return '双来源一致'
+  if (determination?.credit_amount_source === 'structured' || determination?.credit_amount_source === 'approval_opinion') return '仅有一个明确来源'
+  if (determination?.credit_amount_source === 'approval_opinion_multiple') return '存在多个不同批复额度，已转人工复核'
+  return '两处均无明确额度，已转人工复核'
+}
+
 export function InclusiveFinanceResultCard({ result }: { result: InclusiveFinanceResult | null }) {
   return <Card className="result-card technology-result-card" bordered={false} title="Stage B · 普惠金融判定">
-    {result ? <Descriptions column={1} size="small">
-      <Descriptions.Item label="判定状态"><Tag className="key-decision-tag" color={statusColor(result.status)}>{result.status === 'not_applicable' ? '不属于普惠金融' : stageBStatusLabels[result.status]}</Tag></Descriptions.Item>
-      <Descriptions.Item label="借款主体类型">{result.borrower_type || '--'}</Descriptions.Item>
-      <Descriptions.Item label="计算划型">{result.computed_size || '--'}{result.size_consistent === false ? '（与填报不一致）' : ''}</Descriptions.Item>
-      <Descriptions.Item label="是否经营性贷款">{result.is_operating_loan === null ? '待人工复核' : result.is_operating_loan ? '是' : '否'}</Descriptions.Item>
-      <Descriptions.Item label="授信金额">{result.credit_amount_wan ?? '--'} 万元</Descriptions.Item>
-      <Descriptions.Item label="是否属于普惠">{result.qualifies === null ? '待人工复核' : result.qualifies ? '是' : '否'}</Descriptions.Item>
-      <Descriptions.Item label="普惠子类别">{result.inclusive_category || '--'}</Descriptions.Item>
-      <Descriptions.Item label="判定依据">{result.basis || result.error_detail || '--'}</Descriptions.Item>
-    </Descriptions> : <Alert type="warning" showIcon message="Stage B 未执行" description="Stage A 完成后才会执行普惠金融判定。" />}
+    {result ? <>
+      <div className="technology-status-row">
+        <div><span>判定状态</span><Tag className="key-decision-tag" color={statusColor(result.status)}>{result.status === 'not_applicable' ? '不属于普惠金融' : stageBStatusLabels[result.status]}</Tag></div>
+        <small>普惠版本 {result.version} · Stage A 结果 #{result.stage_a_result_id}</small>
+      </div>
+      <section className="consistency-panel inclusive-decision-panel">
+        <h3>普惠金融判定依据</h3>
+        <div className="inclusive-evidence-list">
+          <div className="inclusive-evidence-row"><span>是否属于普惠金融</span><p>{result.qualifies === null ? '待人工复核' : result.qualifies ? '是' : '否'}</p></div>
+          <div className="inclusive-evidence-row"><span>普惠子类别</span><p>{result.inclusive_category || '未形成普惠子类别'}</p></div>
+          <div className="inclusive-evidence-row"><span>借款主体类型</span><p>{result.borrower_type || '待人工确认'}</p></div>
+          <div className="inclusive-evidence-row"><span>主体条件</span><p>{inclusiveBorrowerBasis(result)}</p></div>
+          <div className="inclusive-evidence-row"><span>计算企业规模</span><p>{result.computed_size || '不适用或待复核'}</p></div>
+          <div className="inclusive-evidence-row"><span>填写企业规模</span><p>{result.filled_size || '未填写或不适用'}</p></div>
+          <div className="inclusive-evidence-row"><span>规模一致性</span><p>{result.size_consistent === null ? '未判定' : result.size_consistent ? '一致' : '不一致，以计算规模为准'}</p></div>
+          <div className="inclusive-evidence-row"><span>是否经营性贷款</span><p>{result.is_operating_loan === null ? '待人工复核' : result.is_operating_loan ? '是' : '否'}</p></div>
+          <div className="inclusive-evidence-row"><span>结构化授信额度</span><p>{result.determination?.structured_credit_amount_wan === null || result.determination?.structured_credit_amount_wan === undefined ? '未解析' : `${result.determination.structured_credit_amount_wan} 万元`}{result.determination?.structured_credit_amount_raw ? `（原文：${result.determination.structured_credit_amount_raw}）` : ''}</p></div>
+          <div className="inclusive-evidence-row"><span>审批意见批复额度</span><p>{result.determination?.approval_credit_amounts_wan?.length ? `${result.determination.approval_credit_amounts_wan.join('、')} 万元` : '未提取到明确批复额度'}</p></div>
+          <div className="inclusive-evidence-row"><span>最终采用额度</span><p>{inclusiveCreditSummary(result)}</p></div>
+          <div className="inclusive-evidence-row"><span>额度一致性</span><p>{inclusiveCreditConsistencySummary(result)}</p></div>
+          <div className="inclusive-evidence-row"><span>注册地址辅助</span><p>{result.determination?.farmer_registration_address_support || '无地址辅助信息'}</p></div>
+          <div className="inclusive-evidence-row"><span>最终判定依据</span><p>{result.basis || result.error_detail || '暂无说明'}</p></div>
+        </div>
+        {result.anomalies.length > 0 && <Alert type="warning" showIcon message="需关注的判定异常" description={<div className="inclusive-warning-list">{result.anomalies.map((anomaly, index) => <p key={`${anomaly.type || 'anomaly'}-${index}`}>{anomaly.message || anomaly.type || '未知异常'}</p>)}</div>} />}
+      </section>
+    </> : <Alert type="warning" showIcon message="Stage B 未执行" description="Stage A 完成后才会执行普惠金融判定。" />}
   </Card>
 }

@@ -2,8 +2,10 @@ import pytest
 
 from app.services.inclusive_finance_determination import (
     determine_inclusive_finance,
+    extract_approved_credit_amounts_wan,
     parse_credit_amount_wan,
     parse_count,
+    resolve_credit_amount,
 )
 
 
@@ -171,6 +173,82 @@ def test_credit_amount_parser_uses_wan_and_accepts_billion_and_thousands_separat
 
 
 @pytest.mark.parametrize(
+    ("opinion", "expected"),
+    (
+        ("经审查，同意授信额度人民币1,000万元。", (1000.0,)),
+        ("申请授信1200万元，批复同意800万元。", (800.0,)),
+        ("申请金额1000万元；核定授信额度500万元。", (500.0,)),
+        ("授信额度0.1亿元，用于生产经营。", (1000.0,)),
+        ("申请授信额度1000万元，期限12个月。", ()),
+        ("批复额度金额待定，期限12个月。", ()),
+    ),
+)
+def test_extract_approved_credit_amounts_ignores_application_amounts_and_invalid_text(
+    opinion: str, expected: tuple[float, ...]
+) -> None:
+    assert extract_approved_credit_amounts_wan(opinion) == expected
+
+
+def test_extract_approved_credit_amounts_preserves_distinct_multiple_values() -> None:
+    opinion = "批复流动资金贷款300万元；核定固定资产贷款200万元。"
+
+    assert extract_approved_credit_amounts_wan(opinion) == (300.0, 200.0)
+
+
+@pytest.mark.parametrize(
+    ("structured", "opinion", "amount", "source", "consistent"),
+    (
+        ("800万元", "同意授信额度800万元", 800.0, "structured_and_approval_consistent", True),
+        ("800万元", "同意本笔经营性贷款", 800.0, "structured", None),
+        ("", "批复同意授信额度500万元", 500.0, "approval_opinion", None),
+    ),
+)
+def test_credit_amount_resolution_records_the_adopted_value_and_source(
+    structured: str,
+    opinion: str,
+    amount: float,
+    source: str,
+    consistent: bool | None,
+) -> None:
+    resolution = resolve_credit_amount(structured, opinion)
+
+    assert resolution["adopted_amount_wan"] == amount
+    assert resolution["source"] == source
+    assert resolution["consistent"] is consistent
+
+
+def test_conflicting_credit_amount_sources_need_review_and_preserve_both_values() -> None:
+    result = determine_inclusive_finance(
+        _payload(
+            credit_amount="1000万元",
+            credit_approval_opinion="批复同意授信额度800万元，用于生产经营",
+        ),
+        _stage_a(),
+    )
+
+    assert result["status"] == "needs_review"
+    assert result["credit_amount_wan"] is None
+    assert result["determination"]["structured_credit_amount_wan"] == 1000.0
+    assert result["determination"]["approval_credit_amounts_wan"] == [800.0]
+    assert result["determination"]["credit_amount_conflict"] is True
+    assert result["anomalies"][0]["type"] == "credit_amount_conflict"
+
+
+def test_multiple_distinct_approved_amounts_need_review() -> None:
+    result = determine_inclusive_finance(
+        _payload(
+            credit_amount="",
+            credit_approval_opinion="批复流动资金贷款300万元；核定固定资产贷款200万元。",
+        ),
+        _stage_a(),
+    )
+
+    assert result["status"] == "needs_review"
+    assert "多个不同批复额度" in result["basis"]
+    assert result["anomalies"][0]["type"] == "multiple_approved_credit_amounts"
+
+
+@pytest.mark.parametrize(
     ("raw_value", "expected"),
     (("14 人，其中研发技术人员 4 人", 14.0), ("20名员工", 20.0)),
 )
@@ -204,6 +282,50 @@ def test_enterprise_with_missing_sizing_input_needs_review() -> None:
 
     assert result["status"] == "needs_review"
     assert "总资产" in result["basis"]
+    assert any(item["type"] == "missing_sizing_metrics" for item in result["anomalies"])
+
+
+def test_enterprise_with_missing_stage_a_industry_records_a_structured_anomaly() -> None:
+    result = determine_inclusive_finance(_payload(), _stage_a("", ""))
+
+    assert result["status"] == "needs_review"
+    assert "Stage A 企业行业信息" in result["basis"]
+    assert result["anomalies"][0]["type"] == "missing_sizing_metrics"
+    assert result["anomalies"][0]["missing_metrics"] == ["Stage A 企业行业信息"]
+
+
+def test_address_alone_does_not_change_a_non_farmer_borrower_type() -> None:
+    result = determine_inclusive_finance(
+        _payload(registered_address="江苏省某乡某村"), _stage_a()
+    )
+
+    assert result["borrower_type"] == "enterprise"
+    assert result["determination"]["farmer_matched_conditions"] == []
+    assert "可作为农户身份的地址佐证" in result["determination"][
+        "farmer_registration_address_support"
+    ]
+
+
+@pytest.mark.parametrize("field", tuple(_payload())[-4:])
+def test_each_farmer_identity_condition_has_priority_over_entity_type(field: str) -> None:
+    result = determine_inclusive_finance(
+        _payload(**{field: "是", "credit_amount": "500万元"}), _stage_a()
+    )
+
+    assert result["status"] == "completed"
+    assert result["borrower_type"] == "farmer"
+    assert len(result["determination"]["farmer_matched_conditions"]) == 1
+
+
+def test_identical_input_produces_an_identical_deterministic_decision() -> None:
+    payload = _payload(
+        credit_amount="500万元",
+        credit_approval_opinion="批复同意授信额度500万元，用于生产经营",
+    )
+
+    assert determine_inclusive_finance(payload, _stage_a()) == determine_inclusive_finance(
+        payload, _stage_a()
+    )
 
 
 @pytest.mark.parametrize(

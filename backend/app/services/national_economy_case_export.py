@@ -222,11 +222,30 @@ def _agriculture_method_label(method: object) -> str:
     }.get(str(method), str(method) if method else "未记录")
 
 def _write_inclusive_finance_result(sheet: Worksheet, results: Sequence[InclusiveFinanceResult]) -> None:
-    headers = ("Stage B版本", "普惠状态", "借款主体", "计算划型", "填报划型", "划型一致性", "是否经营性", "授信金额(万元)", "是否属于普惠", "普惠子类别", "判定依据", "业务证据摘要", "异常")
+    headers = (
+        "Stage B版本", "普惠状态", "借款主体", "主体条件", "计算划型",
+        "填报划型", "划型一致性", "是否经营性", "结构化授信额度(万元)",
+        "审批意见批复额度(万元)", "最终采用额度(万元)", "额度来源及一致性",
+        "是否属于普惠", "普惠子类别", "注册地址辅助", "最终判定依据",
+        "业务证据摘要", "异常",
+    )
     sheet.append(headers)
     if not results:
-        sheet.append(("", "尚未判定", "", "", "", "", "", "", "", "", "尚无普惠金融判定结果。", "", "")); return
+        empty_row = [""] * len(headers)
+        empty_row[1] = "尚未判定"
+        empty_row[headers.index("最终判定依据")] = "尚无普惠金融判定结果。"
+        sheet.append(empty_row)
+        return
     result = max(results, key=lambda item: (item.version, item.id or 0))
+    determination = result.determination or {}
+    source_labels = {
+        "structured_and_approval_consistent": "结构化额度与审批意见一致",
+        "structured": "仅采用结构化授信额度",
+        "approval_opinion": "仅采用授信审批意见批复额度",
+        "approval_opinion_multiple": "审批意见存在多个批复额度",
+        "conflict": "结构化额度与审批意见冲突",
+        "missing": "两处均无明确额度",
+    }
     field_labels = {field.key: field.label for field in INCLUSIVE_FINANCE_FIELD_SCHEMA}
     evidence = "\n".join(
         f"{ref.get('field_label') or field_labels.get(str(ref.get('field_key') or ref.get('field')), ref.get('field_key', ref.get('field', '证据')))}：{ref.get('raw_value', '')}"
@@ -234,7 +253,30 @@ def _write_inclusive_finance_result(sheet: Worksheet, results: Sequence[Inclusiv
         if isinstance(ref, dict)
     )
     anomalies = "\n".join(str(item.get("message", item)) for item in result.anomalies if isinstance(item, dict))
-    sheet.append((result.version, _RESULT_STATUS_LABELS.get(result.status, result.status), BORROWER_TYPE_LABELS.get(result.borrower_type or "", result.borrower_type), result.computed_size, result.filled_size, "一致" if result.size_consistent else ("不一致" if result.size_consistent is False else "未判定"), "是" if result.is_operating_loan else ("否" if result.is_operating_loan is False else "未判定"), result.credit_amount_wan, "是" if result.qualifies else ("否" if result.qualifies is False else "未判定"), result.inclusive_category, result.basis, evidence, anomalies))
+    approval_amounts = determination.get("approval_credit_amounts_wan") or []
+    credit_source = str(determination.get("credit_amount_source") or "missing")
+    sheet.append(
+        (
+            result.version,
+            _RESULT_STATUS_LABELS.get(result.status, result.status),
+            BORROWER_TYPE_LABELS.get(result.borrower_type or "", result.borrower_type),
+            determination.get("borrower_type_basis"),
+            result.computed_size,
+            result.filled_size,
+            "一致" if result.size_consistent else ("不一致" if result.size_consistent is False else "未判定"),
+            "是" if result.is_operating_loan else ("否" if result.is_operating_loan is False else "未判定"),
+            determination.get("structured_credit_amount_wan"),
+            "、".join(f"{float(value):g}" for value in approval_amounts),
+            result.credit_amount_wan,
+            source_labels.get(credit_source, credit_source),
+            "是" if result.qualifies else ("否" if result.qualifies is False else "未判定"),
+            result.inclusive_category,
+            determination.get("farmer_registration_address_support"),
+            result.basis,
+            evidence,
+            anomalies,
+        )
+    )
 
 
 def _write_technology_finance_result(

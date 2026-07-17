@@ -57,6 +57,10 @@ export interface EvidenceReference {
   parse_status?: 'valid' | 'missing' | 'invalid' | 'ambiguous'
   matrix_branch?: string
   warning?: string | null
+  digital_category?: '数字产业化' | '产业数字化' | '数字化效率提升' | null
+  decision_policy_version?: string
+  evidence_role?: 'industry_positioning' | 'core_competitiveness' | 'rd_ip' | string
+  evidence_status?: 'positive' | 'missing' | 'unrecognized'
 }
 
 export interface TechnologyFinanceLabel {
@@ -70,6 +74,8 @@ export interface TechnologyFinanceLabel {
   evidence_refs: EvidenceReference[]
   ip_intensive_industry_status?: 'satisfied' | 'unsatisfied'
   ip_intensive_industry_basis?: string
+  digital_category?: '数字产业化' | '产业数字化' | '数字化效率提升'
+  decision_policy_version?: string
 }
 
 export interface FiveArticlesResult {

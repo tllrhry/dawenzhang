@@ -1,7 +1,10 @@
 import pytest
 
 from app.services.five_articles_policies import get_five_articles_policy
-from app.services.five_articles_policies.digital import DIGITAL_FINANCE_POLICY
+from app.services.five_articles_policies.digital import (
+    DIGITAL_FINANCE_DECISION_POLICY_VERSION,
+    DIGITAL_FINANCE_POLICY,
+)
 from app.services.five_articles_policies.green import (
     GREEN_FINANCE_DECISION_POLICY_VERSION,
     GREEN_FINANCE_POLICY,
@@ -46,7 +49,10 @@ def test_policy_metadata_owns_scenario_behavior_flags() -> None:
         GREEN_FINANCE_POLICY.decision_policy_version
         == GREEN_FINANCE_DECISION_POLICY_VERSION
     )
-    assert DIGITAL_FINANCE_POLICY.decision_policy_version == "legacy-v1"
+    assert (
+        DIGITAL_FINANCE_POLICY.decision_policy_version
+        == DIGITAL_FINANCE_DECISION_POLICY_VERSION
+    )
     assert (
         PENSION_FINANCE_POLICY.decision_policy_version
         == PENSION_FINANCE_DECISION_POLICY_VERSION

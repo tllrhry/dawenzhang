@@ -153,6 +153,11 @@ DIGITAL_FINANCE_ADDITIONAL_FIELDS = (
     ScenarioField("annual_revenue", "上年度营业收入"),
     ScenarioField("project_name", "对应项目名称"),
     ScenarioField("project_content", "项目建设 / 运营内容"),
+    ScenarioField(
+        "digital_core_competitiveness",
+        "数字核心竞争力",
+        required=False,
+    ),
     ScenarioField("rd_ip_info", "研发与知识产权情况"),
 )
 
@@ -367,6 +372,8 @@ DIGITAL_FINANCE_REGISTRATION = ScenarioRegistration(
         "loan_purpose",
         "project_name",
         "project_content",
+        "industry_position_competitiveness",
+        "digital_core_competitiveness",
         "rd_ip_info",
         "trade_goods_services",
     ),

@@ -63,7 +63,7 @@ import {
   stageBStatusLabels,
   statusColor,
 } from './components/FinanceResultCards'
-import { caseMatchesScenario, currentCaseStorageKey, fiveArticlesScenarioIds, INCLUSIVE_FINANCE_SCENARIO, isFiveArticlesScenario, PENSION_FINANCE_SCENARIO, scenarioViews } from './scenarios'
+import { caseMatchesScenario, currentCaseStorageKey, DIGITAL_FINANCE_SCENARIO, fiveArticlesScenarioIds, INCLUSIVE_FINANCE_SCENARIO, isFiveArticlesScenario, PENSION_FINANCE_SCENARIO, scenarioViews } from './scenarios'
 
 function isTechnologyFinanceWorkflow(result: ClassificationOutcome): result is TechnologyFinanceWorkflowResult | InclusiveFinanceWorkflowResult | AgricultureRelatedWorkflowResult {
   return 'stage_a' in result
@@ -92,6 +92,16 @@ function pensionHistorySummary(scenarioId: ScenarioId, result: FiveArticlesResul
   const values = matrixRefs.map((reference) => `${reference.field_label || '比例字段'}：${reference.normalized_percent === null || reference.normalized_percent === undefined ? '未知' : `${reference.normalized_percent}%`}`)
   const warning = result.consistency_evidence_refs.find((reference) => reference.type === 'pension_qualification')?.warning
   return `${values.join('；')}；${warning || '养老资质已提供'}`
+}
+
+function digitalHistorySummary(scenarioId: ScenarioId, result: FiveArticlesResult): string | null {
+  if (scenarioId !== DIGITAL_FINANCE_SCENARIO) return null
+  const direction = result.consistency_evidence_refs.find((reference) => reference.type === 'digital_direction')
+  const category = result.labels.find((label) => label.digital_category)?.digital_category || direction?.digital_category
+  const warnings = result.consistency_evidence_refs
+    .filter((reference) => reference.type === 'digital_auxiliary' && reference.warning)
+    .map((reference) => reference.warning)
+  return `${category || '数字类别待确认'}${warnings.length > 0 ? ` · ${warnings.join('；')}` : ' · 辅助证据完整'}`
 }
 
 const flowSteps = [
@@ -554,7 +564,7 @@ function HistoryPage({ scenarioId }: { scenarioId: ScenarioId }) {
       <div className="history-row history-row-head"><span>企业名称</span><span>行业结论</span><span>匹配依据</span><span>状态</span><span>最近更新时间</span><span>操作</span></div>
       {errorMessage && <div className="history-row empty-row"><Alert type="error" showIcon message={errorMessage} /></div>}
       {history.map((item) => isFiveArticlesResult(item)
-        ? <div className="history-row" key={`stage-b-${item.id}`}><b>{caseData?.original_filename || '当前企业案例'}<small>{scenarioView.name}版本 {item.version} · Stage A #{item.stage_a_result_id}</small></b><span className="history-conclusion"><span><strong>{item.loan_neic_code || '--'}</strong> {item.loan_neic_name || '暂无正式标签'}</span><small>{item.labels.length} 个{scenarioView.name}标签{item.consistency_status ? ` · ${consistencyLabels[item.consistency_status]}` : ''}</small></span><span className="history-basis">{stageBEmptyDescription(scenarioId, item)}{pensionHistorySummary(scenarioId, item) && <small>{pensionHistorySummary(scenarioId, item)}</small>}</span><span><Tag color={statusColor(item.status)}>{stageBStatusLabel(scenarioId, item.status)}</Tag></span><span>{new Date(item.created_at).toLocaleString('zh-CN')}</span><button type="button" onClick={() => navigate(scenarioView.classifyPath)}>查看详情 <ArrowRightOutlined /></button></div>
+        ? <div className="history-row" key={`stage-b-${item.id}`}><b>{caseData?.original_filename || '当前企业案例'}<small>{scenarioView.name}版本 {item.version} · Stage A #{item.stage_a_result_id}</small></b><span className="history-conclusion"><span><strong>{item.loan_neic_code || '--'}</strong> {item.loan_neic_name || '暂无正式标签'}</span><small>{item.labels.length} 个{scenarioView.name}标签{item.consistency_status ? ` · ${consistencyLabels[item.consistency_status]}` : ''}</small></span><span className="history-basis">{stageBEmptyDescription(scenarioId, item)}{pensionHistorySummary(scenarioId, item) && <small>{pensionHistorySummary(scenarioId, item)}</small>}{digitalHistorySummary(scenarioId, item) && <small>{digitalHistorySummary(scenarioId, item)}</small>}</span><span><Tag color={statusColor(item.status)}>{stageBStatusLabel(scenarioId, item.status)}</Tag></span><span>{new Date(item.created_at).toLocaleString('zh-CN')}</span><button type="button" onClick={() => navigate(scenarioView.classifyPath)}>查看详情 <ArrowRightOutlined /></button></div>
         : isAgricultureRelatedResult(item)
           ? <div className="history-row" key={`agriculture-${item.id}`}><b>{caseData?.original_filename || '当前企业案例'}<small>涉农版本 {item.version} · Stage A #{item.stage_a_result_id}</small></b><span className="history-conclusion"><strong>{item.is_agriculture_related === true ? '属于涉农贷款' : item.is_agriculture_related === false ? '不属于涉农贷款' : '涉农结论待复核'}</strong><small>{item.matched_categories.filter((category) => category.result === 'matched').map((category) => category.category_name).join('、') || '暂无命中类别'}</small></span><span className="history-basis">{item.basis || item.error_detail || '暂无说明'}</span><span><Tag color={statusColor(item.status)}>{item.status === 'completed' ? '判定已完成' : item.status === 'not_applicable' ? '明确不属于涉农贷款' : item.status === 'needs_review' ? '待人工复核' : '判定失败'}</Tag></span><span>{new Date(item.created_at).toLocaleString('zh-CN')}</span><button type="button" onClick={() => navigate(scenarioView.classifyPath)}>查看详情 <ArrowRightOutlined /></button></div>
         : isInclusiveFinanceResult(item)

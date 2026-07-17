@@ -60,6 +60,16 @@ button { font: inherit; }
 .pension-matrix-row > div { min-width: 0; overflow-wrap: anywhere; }
 .pension-percent-value { color: #173f78; font-size: 16px; font-weight: 700; }
 .pension-decision-panel > .ant-alert { margin-top: 16px; }
+.digital-decision-panel { padding-right: 0; }
+.digital-category-summary { display: flex; align-items: center; gap: 18px; margin-bottom: 14px; padding: 16px 18px; background: linear-gradient(135deg, #f0f6ff, #f8fbff); border: 1px solid #d8e7fb; border-radius: 11px; }
+.digital-category-summary > span { color: #6b7d97; font-weight: 600; }
+.digital-category-summary > strong { color: #174f9b; font-size: 19px; }
+.digital-evidence-list { overflow: hidden; margin-bottom: 16px; background: #fff; border: 1px solid #e1e9f5; border-radius: 11px; }
+.digital-evidence-row { display: grid; grid-template-columns: minmax(180px, 240px) minmax(0, 1fr); gap: 24px; padding: 16px 18px; border-top: 1px solid #e8eef7; }
+.digital-evidence-row:first-child { border-top: 0; }
+.digital-evidence-row > span { color: #71809a; font-weight: 600; }
+.digital-evidence-row > p { min-width: 0; margin: 0; color: #263b5e; line-height: 1.75; overflow-wrap: anywhere; }
+.digital-decision-panel > .ant-alert { margin-top: 16px; }
 
 .result-actions { grid-column: 1 / -1; margin-top: 1px; }
 .review-card { grid-column: 1 / -1; }
@@ -72,4 +82,6 @@ button { font: inherit; }
   .consistency-panel { padding-right: 0; }
   .consistency-panel > .ant-tag { position: static; margin-bottom: 10px; }
   .pension-matrix-row { grid-template-columns: 1fr; gap: 5px; }
+  .digital-category-summary { align-items: flex-start; flex-direction: column; gap: 6px; }
+  .digital-evidence-row { grid-template-columns: 1fr; gap: 6px; }
 }

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import {
@@ -48,4 +49,14 @@ test('API 路径和 session key 完整携带场景，切换和错配均不复用
   }
   assert.equal(caseMatchesScenario(GREEN_FINANCE_SCENARIO, DIGITAL_FINANCE_SCENARIO), false)
   assert.notEqual(currentCaseStorageKey(NATIONAL_ECONOMY_SCENARIO), currentCaseStorageKey(TECHNOLOGY_FINANCE_SCENARIO))
+})
+
+test('数字金融前台展示业务结论与辅助证据但不展示决策策略版本', () => {
+  const resultCardsSource = readFileSync(new URL('../src/components/FinanceResultCards.tsx', import.meta.url), 'utf8')
+  const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+
+  assert.match(resultCardsSource, /数字金融判定依据/)
+  assert.match(resultCardsSource, /数字投向类别/)
+  assert.doesNotMatch(resultCardsSource, /决策策略版本|policyVersion/)
+  assert.doesNotMatch(appSource, /策略 \$\{policyVersion/)
 })

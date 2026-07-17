@@ -24,6 +24,7 @@ class MappingResolution:
     mapping_result: FiveArticlesMappingLookupResult
     not_applicable_basis: str | None = None
     not_applicable_error_detail: str | None = None
+    terminal_result: TechnologyFinanceStageBResult | None = None
 
 
 @dataclass(frozen=True)

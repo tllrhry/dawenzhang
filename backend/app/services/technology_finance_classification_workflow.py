@@ -297,6 +297,22 @@ def _build_stage_b_result(
         condition_label_selector=condition_label_selector,
     )
     mapping_result = resolution.mapping_result
+    if resolution.terminal_result is not None:
+        decision = resolution.terminal_result
+        labels = policy.postprocess_labels(session, case.input_payload, decision.labels)
+        return _new_result(
+            session,
+            case=case,
+            stage_a_result=stage_a_result,
+            status=decision.result_status,
+            mapping_version_id=mapping_result.mapping_version_id,
+            decision_policy_version=_decision_policy_version(profile),
+            labels=labels,
+            consistency_status=decision.consistency_status,
+            consistency_basis=decision.consistency_basis,
+            consistency_evidence_refs=list(decision.consistency_evidence_refs),
+            model_output=dict(decision.model_output),
+        )
     if mapping_result.status == "not_applicable":
         return _new_result(
             session, case=case, stage_a_result=stage_a_result, status="not_applicable",

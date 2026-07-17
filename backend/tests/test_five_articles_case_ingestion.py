@@ -126,6 +126,31 @@ def test_previous_pension_template_without_new_optional_share_field_is_accepted(
     ]
 
 
+def test_previous_digital_template_without_core_competitiveness_field_is_accepted() -> None:
+    document = Document(
+        BytesIO(DIGITAL_FINANCE_REGISTRATION.template_path().read_bytes())
+    )
+    table = document.tables[0]
+    optional_row = next(
+        row
+        for row in table.rows
+        if row.cells[0].text.strip() == "数字核心竞争力"
+    )
+    table._tbl.remove(optional_row._tr)
+    output = BytesIO()
+    document.save(output)
+
+    payload = parse_five_articles_template(
+        output.getvalue(),
+        DIGITAL_FINANCE_REGISTRATION,
+    )
+
+    assert payload["digital_core_competitiveness"] == ""
+    assert list(payload) == [
+        field.key for field in DIGITAL_FINANCE_REGISTRATION.field_schema
+    ]
+
+
 @pytest.mark.parametrize(
     ("profile", "issue", "issue_name"),
     [

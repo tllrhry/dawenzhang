@@ -352,6 +352,7 @@ def _write_five_articles_result(
                 *("" for _ in range(15)),
                 "不适用",
                 f"尚无{profile.name}判定结果，一致性不适用。",
+                *_digital_export_values(None, profile),
                 *_pension_export_values(None, profile),
             )
         )
@@ -380,6 +381,7 @@ def _write_five_articles_result(
                 *("" for _ in range(10)),
                 consistency_label,
                 consistency_basis,
+                *_digital_export_values(current, profile),
                 *_pension_export_values(current, profile),
             )
         )
@@ -397,6 +399,7 @@ def _write_five_articles_result(
                 _business_evidence_summary(label.get("evidence_refs")),
                 consistency_label,
                 consistency_basis,
+                *_digital_export_values(current, profile, label),
                 *_pension_export_values(current, profile),
             )
         )
@@ -426,6 +429,18 @@ def _five_articles_headers(profile: ScenarioRegistration) -> tuple[str, ...]:
         "一致性依据",
         *(
             (
+                "数字类别",
+                "数字决策策略版本",
+                "行业定位原文",
+                "数字核心竞争力原文",
+                "研发知识产权原文",
+                "辅助证据预警",
+            )
+            if profile.id == "digital_finance"
+            else ()
+        ),
+        *(
+            (
                 "养老矩阵分支",
                 "贷款养老投向占比原始值",
                 "贷款养老投向占比规范化",
@@ -437,6 +452,47 @@ def _five_articles_headers(profile: ScenarioRegistration) -> tuple[str, ...]:
             if profile.id == "pension_finance"
             else ()
         ),
+    )
+
+
+def _digital_export_values(
+    result: FiveArticlesResult | None,
+    profile: ScenarioRegistration,
+    label: Mapping[str, object] | None = None,
+) -> tuple[object, ...]:
+    if profile.id != "digital_finance":
+        return ()
+    if result is None:
+        return ("", "", "", "", "", "")
+
+    auxiliary_refs = {
+        str(ref.get("evidence_role")): ref
+        for ref in result.consistency_evidence_refs
+        if ref.get("type") == "digital_auxiliary"
+    }
+    direction_ref = next(
+        (
+            ref
+            for ref in result.consistency_evidence_refs
+            if ref.get("type") == "digital_direction"
+        ),
+        {},
+    )
+    warnings = [
+        str(ref["warning"])
+        for ref in auxiliary_refs.values()
+        if ref.get("warning")
+    ]
+    return (
+        _cell_value(
+            (label or {}).get("digital_category")
+            or direction_ref.get("digital_category")
+        ),
+        _cell_value(result.decision_policy_version),
+        _cell_value(auxiliary_refs.get("industry_positioning", {}).get("excerpt")),
+        _cell_value(auxiliary_refs.get("core_competitiveness", {}).get("excerpt")),
+        _cell_value(auxiliary_refs.get("rd_ip", {}).get("excerpt")),
+        "；".join(warnings),
     )
 
 

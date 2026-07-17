@@ -497,6 +497,92 @@ def test_new_finance_export_uses_profile_sheet_and_readable_statuses(
         assert row["一致性依据"]
 
 
+def test_digital_export_includes_category_policy_auxiliary_raw_text_and_warnings() -> None:
+    profile = DIGITAL_FINANCE_REGISTRATION
+    case = NationalEconomyClassificationCase(
+        id=81,
+        scenario=profile.id,
+        original_filename="数字金融案例.docx",
+        input_payload={field.key: "" for field in profile.field_schema},
+        status="completed",
+    )
+    result = FiveArticlesResult(
+        id=101,
+        case_id=case.id,
+        scenario_id=profile.id,
+        version=1,
+        status="completed",
+        stage_a_result_id=91,
+        mapping_version_id=7,
+        decision_policy_version="digital-direction-v1",
+        labels=[
+            {
+                "subject": "数字经济及其核心产业",
+                "taxonomy_path": ["数字化效率提升业", "智能制造"],
+                "NEIC_Code": "6513",
+                "NEIC_Name": "应用软件开发",
+                "source_row": 12,
+                "digital_category": "产业数字化",
+                "matching_basis": "贷款实际投向命中产业数字化服务器归一规则。",
+                "evidence_refs": [],
+            }
+        ],
+        loan_neic_code="6513",
+        loan_neic_name="应用软件开发",
+        enterprise_neic_code="3011",
+        enterprise_neic_name="水泥制造",
+        consistency_status="inconsistent",
+        consistency_basis="以该笔资金投向为准。",
+        consistency_evidence_refs=[
+            {
+                "type": "digital_direction",
+                "digital_category": "产业数字化",
+            },
+            {
+                "type": "digital_auxiliary",
+                "evidence_role": "industry_positioning",
+                "excerpt": "传统制造企业数字化转型主体",
+                "warning": None,
+            },
+            {
+                "type": "digital_auxiliary",
+                "evidence_role": "core_competitiveness",
+                "excerpt": "仅采购外部平台",
+                "warning": "企业数字化核心竞争力佐证不足",
+            },
+            {
+                "type": "digital_auxiliary",
+                "evidence_role": "rd_ip",
+                "excerpt": "仅有商标",
+                "warning": "知识产权佐证不足",
+            },
+        ],
+        model_output={"digital_decision": {"digital_category": "产业数字化"}},
+    )
+
+    workbook = load_workbook(
+        BytesIO(
+            export_case_workbook(
+                case,
+                five_articles_results=[result],
+                profile=profile,
+            )
+        )
+    )
+    sheet = workbook[profile.export_sheet_name]
+    headers = tuple(cell.value for cell in sheet[1])
+    row = dict(zip(headers, tuple(cell.value for cell in sheet[2]), strict=True))
+
+    assert row["数字类别"] == "产业数字化"
+    assert row["数字决策策略版本"] == "digital-direction-v1"
+    assert row["行业定位原文"] == "传统制造企业数字化转型主体"
+    assert row["数字核心竞争力原文"] == "仅采购外部平台"
+    assert row["研发知识产权原文"] == "仅有商标"
+    assert row["辅助证据预警"] == (
+        "企业数字化核心竞争力佐证不足；知识产权佐证不足"
+    )
+
+
 def test_pension_export_includes_matrix_shares_subject_basis_and_warning() -> None:
     profile = PENSION_FINANCE_REGISTRATION
     case = NationalEconomyClassificationCase(

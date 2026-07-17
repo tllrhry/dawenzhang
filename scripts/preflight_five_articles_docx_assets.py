@@ -97,7 +97,7 @@ ASSET_SPECS = (
         scenario_id="digital_finance",
         filename="数字金融模版.docx",
         fields=COMMON_DIGITAL_PENSION_FIELDS
-        + ("研发与知识产权情况", "授信审批意见"),
+        + ("数字核心竞争力", "研发与知识产权情况", "授信审批意见"),
     ),
     DocxAssetSpec(
         scenario_id="pension_finance",

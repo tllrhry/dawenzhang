@@ -1,7 +1,7 @@
 import { Alert, Card, Descriptions, Divider, Tag } from 'antd'
 import { CheckCircleFilled, SafetyCertificateOutlined } from '@ant-design/icons'
 
-import { PENSION_FINANCE_SCENARIO, TECHNOLOGY_FINANCE_SCENARIO } from '../api'
+import { DIGITAL_FINANCE_SCENARIO, PENSION_FINANCE_SCENARIO, TECHNOLOGY_FINANCE_SCENARIO } from '../api'
 import type { EvidenceReference, FiveArticlesResult, InclusiveFinanceResult, ScenarioId } from '../api'
 import { scenarioViews } from '../scenarios'
 
@@ -56,6 +56,13 @@ function evidenceSummary(reference: EvidenceReference): string {
   if (reference.type === 'pension_qualification') {
     return reference.warning || `${reference.field_label || '养老资质'}：${reference.excerpt || '--'}`
   }
+  if (reference.type === 'digital_direction') {
+    const path = reference.taxonomy_path?.filter(Boolean).join(' / ')
+    return `${reference.digital_category || '数字类别待确认'}${path ? ` · ${path}` : ''}`
+  }
+  if (reference.type === 'digital_auxiliary') {
+    return reference.warning || `${reference.field_label || '数字辅助证据'}：${reference.excerpt || '--'}`
+  }
   return `${reference.field_label || reference.field_key || '业务证据'}：${reference.excerpt || '--'}`
 }
 
@@ -68,6 +75,19 @@ function pensionDecisionDetails(result: FiveArticlesResult | null) {
     matrixRefs,
     qualificationWarning: qualificationRef?.warning,
     qualificationEvidence: qualificationRef?.excerpt,
+  }
+}
+
+function digitalDecisionDetails(result: FiveArticlesResult | null) {
+  if (!result) return null
+  const directionRef = result.consistency_evidence_refs.find((reference) => reference.type === 'digital_direction')
+  const auxiliaryRefs = result.consistency_evidence_refs.filter((reference) => reference.type === 'digital_auxiliary')
+  const category = result.labels.find((label) => label.digital_category)?.digital_category || directionRef?.digital_category
+  if (!category && auxiliaryRefs.length === 0) return null
+  return {
+    category,
+    auxiliaryRefs,
+    warnings: auxiliaryRefs.map((reference) => reference.warning).filter((warning): warning is string => Boolean(warning)),
   }
 }
 
@@ -103,6 +123,9 @@ export function FiveArticlesResultCard({ scenarioId, result, stageAFailed, stage
     : { specializedInnovation: false, highTech: false }
   const pensionDetails = scenarioId === PENSION_FINANCE_SCENARIO
     ? pensionDecisionDetails(result)
+    : null
+  const digitalDetails = scenarioId === DIGITAL_FINANCE_SCENARIO
+    ? digitalDecisionDetails(result)
     : null
   const title = <span className="technology-card-title">
     <span>{`Stage B · ${scenarioView.name}判定`}</span>
@@ -151,6 +174,25 @@ export function FiveArticlesResultCard({ scenarioId, result, stageAFailed, stage
           {pensionDetails.qualificationWarning
             ? <Alert type="warning" showIcon message="养老资质预警" description={`${pensionDetails.qualificationWarning}；该预警不改变投向矩阵结论。`} />
             : <Alert type="success" showIcon message="养老资质辅助佐证" description={pensionDetails.qualificationEvidence || '已提供养老相关资质。'} />}
+        </section>
+      </>}
+      {digitalDetails && <>
+        <Divider />
+        <section className="consistency-panel digital-decision-panel">
+          <h3>数字金融判定依据</h3>
+          <div className="digital-category-summary">
+            <span>数字投向类别</span>
+            <strong>{digitalDetails.category || '待人工确认'}</strong>
+          </div>
+          <div className="digital-evidence-list">
+            {digitalDetails.auxiliaryRefs.map((reference) => <div className="digital-evidence-row" key={`${reference.evidence_role}-${reference.field_key}`}>
+              <span>{reference.field_label || '辅助证据'}</span>
+              <p>{reference.excerpt || '未提供'}</p>
+            </div>)}
+          </div>
+          {digitalDetails.warnings.length > 0
+            ? <Alert type="warning" showIcon message="数字辅助证据预警" description={`${digitalDetails.warnings.join('；')}；该预警不改变已成立的贷款投向结论。`} />
+            : <Alert type="success" showIcon message="数字辅助证据完整" description="行业定位、数字核心竞争力与研发知识产权已形成正向辅助佐证。" />}
         </section>
       </>}
       <Divider />

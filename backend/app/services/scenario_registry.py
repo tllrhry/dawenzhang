@@ -143,9 +143,22 @@ TECHNOLOGY_FINANCE_REGISTRATION = ScenarioRegistration(
 GREEN_FINANCE_ADDITIONAL_FIELDS = (
     ScenarioField("green_project_name", "对应绿色项目名称"),
     ScenarioField("project_content", "项目建设 / 运营内容"),
-    ScenarioField("energy_saving_pollution_control", "节能减排 / 污染治理内容"),
-    ScenarioField("green_certifications", "环保与绿色资质认证"),
-    ScenarioField("carbon_environmental_benefits", "碳排放与环境效益"),
+    ScenarioField(
+        "energy_saving_pollution_control",
+        "节能减排 / 污染治理内容",
+        required=False,
+    ),
+    ScenarioField("green_certifications", "环保与绿色资质认证", required=False),
+    ScenarioField(
+        "carbon_environmental_benefits",
+        "碳排放与环境效益",
+        required=False,
+    ),
+    ScenarioField(
+        "major_environmental_violation",
+        "重大环保违法失信情况",
+        required=False,
+    ),
 )
 
 DIGITAL_FINANCE_ADDITIONAL_FIELDS = (
@@ -348,6 +361,7 @@ GREEN_FINANCE_REGISTRATION = ScenarioRegistration(
         "energy_saving_pollution_control",
         "carbon_environmental_benefits",
         "green_certifications",
+        "major_environmental_violation",
         "trade_goods_services",
     ),
     mapping_tier_depth=2,

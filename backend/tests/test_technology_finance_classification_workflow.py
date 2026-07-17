@@ -697,7 +697,10 @@ def test_green_condition_fallback_completes_and_serializes_match_method(
     assert outcome.stage_b_result.labels[0]["match_method"] == "condition_fallback"
     assert [call.args[2] for call in retriever.call_args_list] == ["enterprise", "loan_direction"]
     selector.assert_called_once()
-    assert stage_b_classifier.call_args.args[4][0].match_method == "condition_fallback"
+    stage_b_classifier.assert_not_called()
+    assert outcome.stage_b_result.model_output["green_decision"]["branch"] == (
+        "GREEN_DIRECTION_INCLUDED"
+    )
 
 
 @pytest.mark.parametrize("multiple", [False, True], ids=["single", "multiple"])
@@ -747,7 +750,8 @@ def test_green_neic_code_matches_require_condition_validation(
     fallback_retriever.assert_not_called()
     label_selector.assert_not_called()
     assert condition_selector.call_count == 2
-    assert stage_b_classifier.call_args.args[4] == (candidates[-1],)
+    stage_b_classifier.assert_not_called()
+    assert outcome.stage_b_result.labels[0]["source_row"] == candidates[-1].source_row
 
 
 def test_green_neic_condition_miss_falls_back_to_full_condition_index(
@@ -803,8 +807,9 @@ def test_green_neic_condition_miss_falls_back_to_full_condition_index(
         "enterprise",
         "loan_direction",
     ]
-    assert stage_b_classifier.call_args.args[4][0].source_row == fallback.source_row
-    assert stage_b_classifier.call_args.args[4][0].match_method == "condition_fallback"
+    stage_b_classifier.assert_not_called()
+    assert outcome.stage_b_result.labels[0]["source_row"] == fallback.source_row
+    assert outcome.stage_b_result.labels[0]["match_method"] == "condition_fallback"
 
 
 @pytest.mark.parametrize(

@@ -583,6 +583,105 @@ def test_digital_export_includes_category_policy_auxiliary_raw_text_and_warnings
     )
 
 
+def test_green_export_includes_directory_match_method_auxiliary_and_violation() -> None:
+    profile = GREEN_FINANCE_REGISTRATION
+    case = NationalEconomyClassificationCase(
+        id=82,
+        scenario=profile.id,
+        original_filename="绿色金融案例.docx",
+        input_payload={field.key: "" for field in profile.field_schema},
+        status="completed",
+    )
+    result = FiveArticlesResult(
+        id=102,
+        case_id=case.id,
+        scenario_id=profile.id,
+        version=1,
+        status="needs_review",
+        stage_a_result_id=92,
+        mapping_version_id=7,
+        decision_policy_version="green-direction-v3",
+        labels=[
+            {
+                "subject": "绿色金融支持项目目录（2025年版）",
+                "taxonomy_path": ["清洁能源产业", "太阳能利用"],
+                "NEIC_Code": "4415",
+                "NEIC_Name": "太阳能发电",
+                "source_row": 12,
+                "match_method": "condition_fallback",
+                "matching_basis": "贷款实际投向命中绿色目录。",
+                "evidence_refs": [],
+            }
+        ],
+        loan_neic_code="4415",
+        loan_neic_name="太阳能发电",
+        enterprise_neic_code="3011",
+        enterprise_neic_name="水泥制造",
+        consistency_status="needs_review",
+        consistency_basis="存在重大环保违法失信，转人工尽调。",
+        consistency_evidence_refs=[
+            {
+                "type": "green_direction",
+                "subject": "绿色金融支持项目目录（2025年版）",
+                "taxonomy_path": ["清洁能源产业", "太阳能利用"],
+                "match_method": "condition_fallback",
+            },
+            {
+                "type": "green_auxiliary",
+                "field_key": "green_certifications",
+                "excerpt": "绿色项目认定文件",
+                "warning": None,
+            },
+            {
+                "type": "green_auxiliary",
+                "field_key": "energy_saving_pollution_control",
+                "excerpt": "",
+                "warning": "缺少节能减排/污染治理内容",
+            },
+            {
+                "type": "green_auxiliary",
+                "field_key": "carbon_environmental_benefits",
+                "excerpt": "预计年减排1200吨",
+                "warning": None,
+            },
+            {
+                "type": "green_violation",
+                "raw_value": "有",
+                "violation_status": "yes",
+                "warning": "存在重大环保违法失信，需开展人工尽职调查并核验潜在漂绿风险",
+            },
+        ],
+    )
+
+    workbook = load_workbook(
+        BytesIO(
+            export_case_workbook(
+                case,
+                five_articles_results=[result],
+                profile=profile,
+            )
+        )
+    )
+    sheet = workbook[profile.export_sheet_name]
+    headers = tuple(cell.value for cell in sheet[1])
+    row = dict(zip(headers, tuple(cell.value for cell in sheet[2]), strict=True))
+
+    assert row["绿色目录标签"] == (
+        "绿色金融支持项目目录（2025年版） / 清洁能源产业 / 太阳能利用"
+    )
+    assert row["条件匹配方式"] == "条件回退命中"
+    assert row["绿色决策策略版本"] == "green-direction-v3"
+    assert row["环保与绿色资质认证原文"] == "绿色项目认定文件"
+    assert row["节能减排污染治理原文"] is None
+    assert row["碳排放与环境效益原文"] == "预计年减排1200吨"
+    assert row["重大环保违法失信原文"] == "有"
+    assert row["重大环保违法失信状态"] == "yes"
+    assert row["辅助证据预警"] == (
+        "缺少节能减排/污染治理内容；"
+        "存在重大环保违法失信，需开展人工尽职调查并核验潜在漂绿风险"
+    )
+
+
 def test_pension_export_includes_matrix_shares_subject_basis_and_warning() -> None:
     profile = PENSION_FINANCE_REGISTRATION
     case = NationalEconomyClassificationCase(

@@ -49,7 +49,12 @@ def _three_column_template(
         for field in profile.field_schema
     ]
     if issue == "missing":
-        rows.pop()
+        required_index = next(
+            index
+            for index, field in enumerate(profile.field_schema)
+            if field.required
+        )
+        rows.pop(required_index)
     elif issue == "duplicate":
         rows.append(rows[0].copy())
     elif issue == "unrecognized":
@@ -148,6 +153,31 @@ def test_previous_digital_template_without_core_competitiveness_field_is_accepte
     assert payload["digital_core_competitiveness"] == ""
     assert list(payload) == [
         field.key for field in DIGITAL_FINANCE_REGISTRATION.field_schema
+    ]
+
+
+def test_previous_green_template_without_violation_field_is_accepted() -> None:
+    document = Document(
+        BytesIO(GREEN_FINANCE_REGISTRATION.template_path().read_bytes())
+    )
+    table = document.tables[0]
+    optional_row = next(
+        row
+        for row in table.rows
+        if row.cells[0].text.strip() == "重大环保违法失信情况"
+    )
+    table._tbl.remove(optional_row._tr)
+    output = BytesIO()
+    document.save(output)
+
+    payload = parse_five_articles_template(
+        output.getvalue(),
+        GREEN_FINANCE_REGISTRATION,
+    )
+
+    assert payload["major_environmental_violation"] == ""
+    assert list(payload) == [
+        field.key for field in GREEN_FINANCE_REGISTRATION.field_schema
     ]
 
 

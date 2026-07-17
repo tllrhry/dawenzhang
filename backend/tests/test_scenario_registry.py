@@ -37,13 +37,14 @@ NEW_SCENARIO_CONTRACTS = (
         GREEN_FINANCE_SCENARIO,
         GREEN_FINANCE_REGISTRATION,
         GREEN_FINANCE_ADDITIONAL_FIELDS,
-        18,
+        19,
         {
             "green_project_name": "对应绿色项目名称",
             "project_content": "项目建设 / 运营内容",
             "energy_saving_pollution_control": "节能减排 / 污染治理内容",
             "green_certifications": "环保与绿色资质认证",
             "carbon_environmental_benefits": "碳排放与环境效益",
+            "major_environmental_violation": "重大环保违法失信情况",
         },
         (
             "loan_purpose",
@@ -52,6 +53,7 @@ NEW_SCENARIO_CONTRACTS = (
             "energy_saving_pollution_control",
             "carbon_environmental_benefits",
             "green_certifications",
+            "major_environmental_violation",
             "trade_goods_services",
         ),
     ),

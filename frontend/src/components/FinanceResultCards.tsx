@@ -1,7 +1,7 @@
 import { Alert, Card, Descriptions, Divider, Tag } from 'antd'
 import { CheckCircleFilled, SafetyCertificateOutlined } from '@ant-design/icons'
 
-import { DIGITAL_FINANCE_SCENARIO, PENSION_FINANCE_SCENARIO, TECHNOLOGY_FINANCE_SCENARIO } from '../api'
+import { DIGITAL_FINANCE_SCENARIO, GREEN_FINANCE_SCENARIO, PENSION_FINANCE_SCENARIO, TECHNOLOGY_FINANCE_SCENARIO } from '../api'
 import type { EvidenceReference, FiveArticlesResult, InclusiveFinanceResult, ScenarioId } from '../api'
 import { scenarioViews } from '../scenarios'
 
@@ -63,6 +63,13 @@ function evidenceSummary(reference: EvidenceReference): string {
   if (reference.type === 'digital_auxiliary') {
     return reference.warning || `${reference.field_label || '数字辅助证据'}：${reference.excerpt || '--'}`
   }
+  if (reference.type === 'green_direction') {
+    const path = reference.taxonomy_path?.filter(Boolean).join(' / ')
+    return `${reference.subject || '绿色目录'}${path ? ` · ${path}` : ''} · ${reference.match_method === 'condition_fallback' ? '条件回退命中' : '行业编码命中'}`
+  }
+  if (reference.type === 'green_auxiliary' || reference.type === 'green_violation') {
+    return reference.warning || `${reference.field_label || '绿色辅助证据'}：${reference.excerpt || '--'}`
+  }
   return `${reference.field_label || reference.field_key || '业务证据'}：${reference.excerpt || '--'}`
 }
 
@@ -88,6 +95,22 @@ function digitalDecisionDetails(result: FiveArticlesResult | null) {
     category,
     auxiliaryRefs,
     warnings: auxiliaryRefs.map((reference) => reference.warning).filter((warning): warning is string => Boolean(warning)),
+  }
+}
+
+function greenDecisionDetails(result: FiveArticlesResult | null) {
+  if (!result) return null
+  const directionRef = result.consistency_evidence_refs.find((reference) => reference.type === 'green_direction')
+  const auxiliaryRefs = result.consistency_evidence_refs.filter((reference) => reference.type === 'green_auxiliary')
+  const violationRef = result.consistency_evidence_refs.find((reference) => reference.type === 'green_violation')
+  if (!directionRef && auxiliaryRefs.length === 0 && !violationRef) return null
+  return {
+    directionRef,
+    auxiliaryRefs,
+    violationRef,
+    warnings: [...auxiliaryRefs, ...(violationRef ? [violationRef] : [])]
+      .map((reference) => reference.warning)
+      .filter((warning): warning is string => Boolean(warning)),
   }
 }
 
@@ -126,6 +149,9 @@ export function FiveArticlesResultCard({ scenarioId, result, stageAFailed, stage
     : null
   const digitalDetails = scenarioId === DIGITAL_FINANCE_SCENARIO
     ? digitalDecisionDetails(result)
+    : null
+  const greenDetails = scenarioId === GREEN_FINANCE_SCENARIO
+    ? greenDecisionDetails(result)
     : null
   const title = <span className="technology-card-title">
     <span>{`Stage B · ${scenarioView.name}判定`}</span>
@@ -193,6 +219,33 @@ export function FiveArticlesResultCard({ scenarioId, result, stageAFailed, stage
           {digitalDetails.warnings.length > 0
             ? <Alert type="warning" showIcon message="数字辅助证据预警" description={`${digitalDetails.warnings.join('；')}；该预警不改变已成立的贷款投向结论。`} />
             : <Alert type="success" showIcon message="数字辅助证据完整" description="行业定位、数字核心竞争力与研发知识产权已形成正向辅助佐证。" />}
+        </section>
+      </>}
+      {greenDetails && <>
+        <Divider />
+        <section className="consistency-panel green-decision-panel">
+          <h3>绿色金融判定依据</h3>
+          <div className="green-evidence-list">
+            <div className="green-evidence-row">
+              <span>绿色目录命中</span>
+              <p>{greenDetails.directionRef ? `${greenDetails.directionRef.subject || '绿色目录'}${greenDetails.directionRef.taxonomy_path?.length ? ` / ${greenDetails.directionRef.taxonomy_path.join(' / ')}` : ''}` : '未形成目录命中证据'}</p>
+            </div>
+            <div className="green-evidence-row">
+              <span>条件匹配方式</span>
+              <p>{greenDetails.directionRef?.match_method === 'condition_fallback' ? '条件回退命中' : '行业编码命中'}</p>
+            </div>
+            {greenDetails.auxiliaryRefs.map((reference) => <div className="green-evidence-row" key={`${reference.evidence_role}-${reference.field_key}`}>
+              <span>{reference.field_label || '辅助证据'}</span>
+              <p>{reference.excerpt || '未提供'}</p>
+            </div>)}
+            <div className="green-evidence-row">
+              <span>重大环保违法失信</span>
+              <p>{greenDetails.violationRef?.violation_status === 'yes' ? '有' : greenDetails.violationRef?.violation_status === 'no' ? '无' : '未知'}</p>
+            </div>
+          </div>
+          {greenDetails.warnings.length > 0
+            ? <Alert type="warning" showIcon message="绿色辅助证据预警" description={<div className="green-warning-list">{greenDetails.warnings.map((warning) => <p key={warning}>{warning}</p>)}</div>} />
+            : <Alert type="success" showIcon message="绿色辅助证据完整" description="绿色资质、治理措施、环境效益及环保违法失信信息均已提供。" />}
         </section>
       </>}
       <Divider />

@@ -57,10 +57,14 @@ export interface EvidenceReference {
   parse_status?: 'valid' | 'missing' | 'invalid' | 'ambiguous'
   matrix_branch?: string
   warning?: string | null
+  match_method?: 'neic_code' | 'condition_fallback'
+  condition_criteria?: string | null
+  subject?: string
+  violation_status?: 'yes' | 'no' | 'unknown'
   digital_category?: '数字产业化' | '产业数字化' | '数字化效率提升' | null
   decision_policy_version?: string
   evidence_role?: 'industry_positioning' | 'core_competitiveness' | 'rd_ip' | string
-  evidence_status?: 'positive' | 'missing' | 'unrecognized'
+  evidence_status?: 'positive' | 'provided' | 'missing' | 'unrecognized'
 }
 
 export interface TechnologyFinanceLabel {

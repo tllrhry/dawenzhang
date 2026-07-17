@@ -352,6 +352,7 @@ def _write_five_articles_result(
                 *("" for _ in range(15)),
                 "不适用",
                 f"尚无{profile.name}判定结果，一致性不适用。",
+                *_green_export_values(None, profile),
                 *_digital_export_values(None, profile),
                 *_pension_export_values(None, profile),
             )
@@ -374,13 +375,17 @@ def _write_five_articles_result(
         _cell_value(current.enterprise_neic_name),
     )
 
-    if current.status != "completed" or not current.labels:
+    if (
+        current.status != "completed"
+        and not (profile.id == "green_finance" and current.labels)
+    ) or not current.labels:
         sheet.append(
             (
                 *common_values,
                 *("" for _ in range(10)),
                 consistency_label,
                 consistency_basis,
+                *_green_export_values(current, profile),
                 *_digital_export_values(current, profile),
                 *_pension_export_values(current, profile),
             )
@@ -399,6 +404,7 @@ def _write_five_articles_result(
                 _business_evidence_summary(label.get("evidence_refs")),
                 consistency_label,
                 consistency_basis,
+                *_green_export_values(current, profile, label),
                 *_digital_export_values(current, profile, label),
                 *_pension_export_values(current, profile),
             )
@@ -429,6 +435,21 @@ def _five_articles_headers(profile: ScenarioRegistration) -> tuple[str, ...]:
         "一致性依据",
         *(
             (
+                "绿色目录标签",
+                "条件匹配方式",
+                "绿色决策策略版本",
+                "环保与绿色资质认证原文",
+                "节能减排污染治理原文",
+                "碳排放与环境效益原文",
+                "重大环保违法失信原文",
+                "重大环保违法失信状态",
+                "辅助证据预警",
+            )
+            if profile.id == "green_finance"
+            else ()
+        ),
+        *(
+            (
                 "数字类别",
                 "数字决策策略版本",
                 "行业定位原文",
@@ -452,6 +473,72 @@ def _five_articles_headers(profile: ScenarioRegistration) -> tuple[str, ...]:
             if profile.id == "pension_finance"
             else ()
         ),
+    )
+
+
+def _green_export_values(
+    result: FiveArticlesResult | None,
+    profile: ScenarioRegistration,
+    label: Mapping[str, object] | None = None,
+) -> tuple[object, ...]:
+    if profile.id != "green_finance":
+        return ()
+    if result is None:
+        return ("", "", "", "", "", "", "", "", "")
+
+    direction = next(
+        (
+            ref
+            for ref in result.consistency_evidence_refs
+            if ref.get("type") == "green_direction"
+        ),
+        {},
+    )
+    auxiliary = {
+        str(ref.get("field_key")): ref
+        for ref in result.consistency_evidence_refs
+        if ref.get("type") == "green_auxiliary"
+    }
+    violation = next(
+        (
+            ref
+            for ref in result.consistency_evidence_refs
+            if ref.get("type") == "green_violation"
+        ),
+        {},
+    )
+    warnings = [
+        str(ref["warning"])
+        for ref in (*auxiliary.values(), violation)
+        if ref.get("warning")
+    ]
+    taxonomy_path = (label or {}).get("taxonomy_path") or direction.get(
+        "taxonomy_path"
+    )
+    path_values = taxonomy_path if isinstance(taxonomy_path, (list, tuple)) else ()
+    directory_label = " / ".join(
+        str(value)
+        for value in (
+            (label or {}).get("subject") or direction.get("subject"),
+            *path_values,
+        )
+        if value
+    )
+    match_method = (label or {}).get("match_method") or direction.get("match_method")
+    return (
+        directory_label,
+        "条件回退命中" if match_method == "condition_fallback" else "行业编码命中",
+        _cell_value(result.decision_policy_version),
+        _cell_value(auxiliary.get("green_certifications", {}).get("excerpt")),
+        _cell_value(
+            auxiliary.get("energy_saving_pollution_control", {}).get("excerpt")
+        ),
+        _cell_value(
+            auxiliary.get("carbon_environmental_benefits", {}).get("excerpt")
+        ),
+        _cell_value(violation.get("raw_value")),
+        _cell_value(violation.get("violation_status")),
+        "；".join(warnings),
     )
 
 

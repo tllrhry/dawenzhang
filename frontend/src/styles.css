@@ -69,7 +69,16 @@ button { font: inherit; }
 .digital-evidence-row:first-child { border-top: 0; }
 .digital-evidence-row > span { color: #71809a; font-weight: 600; }
 .digital-evidence-row > p { min-width: 0; margin: 0; color: #263b5e; line-height: 1.75; overflow-wrap: anywhere; }
+.green-decision-panel { padding-right: 0; }
+.green-evidence-list { overflow: hidden; margin-bottom: 16px; background: #fbfdff; border: 1px solid #e1e9f5; border-radius: 11px; }
+.green-evidence-row { display: grid; grid-template-columns: minmax(230px, 320px) minmax(0, 1fr); gap: 24px; padding: 15px 18px; border-top: 1px solid #e8eef7; color: #263b5e; line-height: 1.7; }
+.green-evidence-row:first-child { border-top: 0; }
+.green-evidence-row > span { color: #71809a; font-weight: 600; }
+.green-evidence-row > p { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.green-warning-list { display: grid; gap: 4px; }
+.green-warning-list p { margin: 0; }
 .digital-decision-panel > .ant-alert { margin-top: 16px; }
+.green-decision-panel > .ant-alert { margin-top: 16px; }
 
 .result-actions { grid-column: 1 / -1; margin-top: 1px; }
 .review-card { grid-column: 1 / -1; }
@@ -84,4 +93,5 @@ button { font: inherit; }
   .pension-matrix-row { grid-template-columns: 1fr; gap: 5px; }
   .digital-category-summary { align-items: flex-start; flex-direction: column; gap: 6px; }
   .digital-evidence-row { grid-template-columns: 1fr; gap: 6px; }
+  .green-evidence-row { grid-template-columns: 1fr; gap: 5px; }
 }

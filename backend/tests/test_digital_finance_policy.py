@@ -99,7 +99,7 @@ def test_traditional_enterprise_with_digital_industrialization_direction_is_incl
     assert decision.result_status == "completed"
     assert decision.consistency_status == "inconsistent"
     assert decision.labels[0]["digital_category"] == DIGITAL_INDUSTRIALIZATION
-    assert decision.labels[0]["decision_policy_version"] == "digital-direction-v1"
+    assert decision.labels[0]["decision_policy_version"] == "digital-direction-v2"
     assert "按该笔资金投向认定为数字金融" in decision.consistency_basis
     warnings = [
         ref.get("warning")
@@ -162,6 +162,33 @@ def test_unclassified_efficiency_improvement_is_not_included() -> None:
     assert direction["digital_category"] == DIGITAL_EFFICIENCY_IMPROVEMENT
 
 
+def test_industrial_digitalization_mapping_without_digital_means_needs_review() -> None:
+    decision = DIGITAL_FINANCE_POLICY.preclassify_stage_b(
+        {
+            "loan_purpose": "本次贷款资金用于采购汽车售卖",
+            "trade_goods_services": "汽车",
+            "industry_position_competitiveness": "数字金融技术服务商",
+        },
+        _stage_a(),
+        (_label(tier1="数字技术应用业", tier2="软件开发"),),
+        (
+            _label(
+                tier1="数字化效率提升业",
+                tier2="数字商贸",
+            ),
+        ),
+    )
+
+    assert decision is not None
+    assert decision.result_status == "needs_review"
+    assert decision.consistency_status == "needs_review"
+    assert decision.labels == ()
+    assert "未说明数字技术或数字化手段" in decision.consistency_basis
+    assert decision.model_output["digital_decision"]["branch"] == (
+        "INDUSTRIAL_DIGITALIZATION_MEANS_UNCLEAR"
+    )
+
+
 def test_unmapped_vague_direction_becomes_needs_review() -> None:
     mapping_result = FiveArticlesMappingLookupResult(
         status="not_applicable",
@@ -218,7 +245,7 @@ def test_workflow_persists_policy_terminal_needs_review_without_model_call() -> 
     )
 
     assert result.status == "needs_review"
-    assert result.decision_policy_version == "digital-direction-v1"
+    assert result.decision_policy_version == "digital-direction-v2"
     assert result.model_output["digital_decision"]["branch"] == (
         "DIGITAL_DIRECTION_EVIDENCE_INSUFFICIENT"
     )
@@ -246,6 +273,39 @@ def test_unmapped_explicit_non_digital_direction_stays_not_applicable() -> None:
 
     assert resolution.terminal_result is None
     assert resolution.mapping_result.status == "not_applicable"
+
+
+def test_digital_enterprise_with_explicit_non_digital_direction_needs_review() -> None:
+    mapping_result = FiveArticlesMappingLookupResult(
+        status="not_applicable",
+        mapping_version_id=7,
+        mapping_version=3,
+        enterprise_labels=(
+            _label(tier1="数字技术应用业", tier2="软件开发"),
+        ),
+        loan_direction_labels=(),
+        detail="loan_direction_has_no_explicit_mapping",
+    )
+
+    resolution = DIGITAL_FINANCE_POLICY.resolve_mapping(
+        MagicMock(),
+        {
+            "loan_purpose": "采购汽车售卖",
+            "trade_goods_services": "汽车",
+        },
+        mapping_result,
+        Settings(_env_file=None),
+        condition_candidate_retriever=MagicMock(),
+        condition_label_selector=MagicMock(),
+    )
+
+    assert resolution.terminal_result is not None
+    assert resolution.terminal_result.result_status == "needs_review"
+    assert resolution.terminal_result.consistency_status == "needs_review"
+    assert "企业属性与资金投向冲突" in resolution.terminal_result.consistency_basis
+    assert resolution.terminal_result.model_output["digital_decision"]["branch"] == (
+        "DIGITAL_ENTERPRISE_DIRECTION_CONFLICT"
+    )
 
 
 def test_old_template_combined_field_can_supply_core_competitiveness_evidence() -> None:

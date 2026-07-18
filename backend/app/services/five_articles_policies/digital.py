@@ -22,7 +22,7 @@ from app.services.technology_finance_mapping_query import (
 )
 
 
-DIGITAL_FINANCE_DECISION_POLICY_VERSION = "digital-direction-v1"
+DIGITAL_FINANCE_DECISION_POLICY_VERSION = "digital-direction-v2"
 
 DIGITAL_INDUSTRIALIZATION = "数字产业化"
 INDUSTRIAL_DIGITALIZATION = "产业数字化"
@@ -79,7 +79,13 @@ _DIGITAL_DIRECTION_KEYWORDS = (
     "物联网",
     "工业互联网",
     "平台",
+    "智慧",
+    "智能",
     "智能化",
+    "线上",
+    "电子商务",
+    "电商",
+    "自动化",
 )
 _CORE_COMPETITIVENESS_KEYWORDS = (
     "自研",
@@ -143,14 +149,23 @@ class DigitalFinancePolicy(FiveArticlesScenarioPolicy):
             condition_candidate_retriever=condition_candidate_retriever,
             condition_label_selector=condition_label_selector,
         )
-        if (
-            mapping_result.status == "not_applicable"
-            and _direction_requires_review(input_payload)
+        direction_requires_review = _direction_requires_review(input_payload)
+        enterprise_direction_conflict = bool(mapping_result.enterprise_labels)
+        if mapping_result.status == "not_applicable" and (
+            direction_requires_review or enterprise_direction_conflict
         ):
-            basis = (
-                "贷款用途、项目内容和交易品类不足以确定数字产业化或产业数字化投向，"
-                "不得以企业数字属性替代该笔贷款实际投向，需人工复核。"
-            )
+            if enterprise_direction_conflict and not direction_requires_review:
+                basis = (
+                    "企业侧命中数字金融，但该笔贷款实际投向未命中数字产业化或产业数字化；"
+                    "企业属性与资金投向冲突，不自动认定数字金融，需人工复核。"
+                )
+                branch = "DIGITAL_ENTERPRISE_DIRECTION_CONFLICT"
+            else:
+                basis = (
+                    "贷款用途、项目内容和交易品类不足以确定数字产业化或产业数字化投向，"
+                    "不得以企业数字属性替代该笔贷款实际投向，需人工复核。"
+                )
+                branch = "DIGITAL_DIRECTION_EVIDENCE_INSUFFICIENT"
             return replace(
                 resolution,
                 terminal_result=TechnologyFinanceStageBResult(
@@ -163,7 +178,7 @@ class DigitalFinancePolicy(FiveArticlesScenarioPolicy):
                     model_output={
                         "digital_decision": {
                             "digital_category": None,
-                            "branch": "DIGITAL_DIRECTION_EVIDENCE_INSUFFICIENT",
+                            "branch": branch,
                             "warnings": [basis],
                         }
                     },
@@ -210,6 +225,33 @@ class DigitalFinancePolicy(FiveArticlesScenarioPolicy):
                     }
                 },
                 result_status="not_applicable",
+            )
+
+        if (
+            category == INDUSTRIAL_DIGITALIZATION
+            and not _has_explicit_digital_means(input_payload)
+        ):
+            basis = (
+                "贷款投向行业目录命中产业数字化，但贷款用途、项目内容和交易品类"
+                "未说明数字技术或数字化手段，不自动认定数字金融，需人工复核。"
+            )
+            return TechnologyFinanceStageBResult(
+                labels=(),
+                consistency_status="needs_review",
+                consistency_basis=basis,
+                consistency_evidence_refs=(
+                    _digital_direction_ref(loan_direction_labels[0], category),
+                    *direction_refs,
+                    *auxiliary_refs,
+                ),
+                model_output={
+                    "digital_decision": {
+                        "digital_category": category,
+                        "branch": "INDUSTRIAL_DIGITALIZATION_MEANS_UNCLEAR",
+                        "warnings": [basis, *warnings],
+                    }
+                },
+                result_status="needs_review",
             )
 
         enterprise_categories = {
@@ -327,6 +369,14 @@ def _direction_requires_review(input_payload: Mapping[str, object]) -> bool:
     if not values or all(value in _VAGUE_DIRECTION_TEXTS for value in values):
         return True
     combined = " ".join(values).lower()
+    return any(keyword in combined for keyword in _DIGITAL_DIRECTION_KEYWORDS)
+
+
+def _has_explicit_digital_means(input_payload: Mapping[str, object]) -> bool:
+    combined = " ".join(
+        _clean(input_payload.get(field_key))
+        for field_key in _DIRECTION_FIELDS
+    ).lower()
     return any(keyword in combined for keyword in _DIGITAL_DIRECTION_KEYWORDS)
 
 

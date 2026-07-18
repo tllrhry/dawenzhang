@@ -594,7 +594,7 @@ def test_digital_export_includes_category_policy_auxiliary_raw_text_and_warnings
         status="completed",
         stage_a_result_id=91,
         mapping_version_id=7,
-        decision_policy_version="digital-direction-v1",
+        decision_policy_version="digital-direction-v2",
         labels=[
             {
                 "subject": "数字经济及其核心产业",
@@ -654,7 +654,7 @@ def test_digital_export_includes_category_policy_auxiliary_raw_text_and_warnings
     row = dict(zip(headers, tuple(cell.value for cell in sheet[2]), strict=True))
 
     assert row["数字类别"] == "产业数字化"
-    assert row["数字决策策略版本"] == "digital-direction-v1"
+    assert row["数字决策策略版本"] == "digital-direction-v2"
     assert row["行业定位原文"] == "传统制造企业数字化转型主体"
     assert row["数字核心竞争力原文"] == "仅采购外部平台"
     assert row["研发知识产权原文"] == "仅有商标"

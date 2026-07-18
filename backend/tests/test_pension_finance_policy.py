@@ -89,7 +89,7 @@ def test_reused_main_business_share_extracts_explicit_pension_percentage(
         (False, "49", "80%", "not_applicable", "NON_PENSION_ENTERPRISE_LOAN_SHARE_BELOW_50"),
         (True, "", "", "completed", "PENSION_ENTERPRISE_UNKNOWN_LOAN_SHARE"),
         (False, "", "50%", "completed", "PENSION_REVENUE_AT_LEAST_50_UNKNOWN_LOAN_SHARE"),
-        (False, "", "49.99%", "not_applicable", "NON_PENSION_SUBJECT_UNKNOWN_LOAN_SHARE"),
+        (False, "", "49.99%", "needs_review", "NON_PENSION_SUBJECT_UNKNOWN_LOAN_SHARE"),
     ],
 )
 def test_pension_seven_cell_matrix(
@@ -100,6 +100,11 @@ def test_pension_seven_cell_matrix(
     expected_branch: str,
 ) -> None:
     label = _label()
+    stage_a_result = SimpleNamespace(
+        industry_name=(
+            "老年人、残疾人养护服务" if enterprise_hit else "其他房屋建筑业"
+        )
+    )
     result = PENSION_FINANCE_POLICY.preclassify_stage_b(
         {
             "loan_purpose": "建设养老服务中心",
@@ -107,7 +112,7 @@ def test_pension_seven_cell_matrix(
             "main_business_revenue_share": revenue_share,
             "certifications": "民政部门养老机构备案",
         },
-        SimpleNamespace(),
+        stage_a_result,
         (label,) if enterprise_hit else (),
         (label,),
     )
@@ -116,6 +121,34 @@ def test_pension_seven_cell_matrix(
     assert result.result_status == expected_status
     assert result.model_output["pension_decision"]["matrix_branch"] == expected_branch
     assert bool(result.labels) is (expected_status == "completed")
+
+
+def test_direction_catalog_match_does_not_turn_non_pension_enterprise_into_pension_subject() -> None:
+    label = _label()
+    result = PENSION_FINANCE_POLICY.preclassify_stage_b(
+        {
+            "loan_purpose": "建设养老服务中心",
+            "pension_loan_direction_share": "",
+            "main_business_revenue_share": (
+                "商品房、商业建筑土建施工83%；市政道路配套工程12%；"
+                "建筑设备租赁劳务5%"
+            ),
+            "certifications": "建筑工程施工总承包一级资质",
+        },
+        SimpleNamespace(industry_name="其他房屋建筑业"),
+        (label,),
+        (label,),
+    )
+
+    assert result is not None
+    assert result.result_status == "needs_review"
+    assert result.consistency_status == "needs_review"
+    assert result.labels == ()
+    assert "企业行业不属于养老产业" in result.consistency_basis
+    assert (
+        result.model_output["pension_decision"]["matrix_branch"]
+        == "NON_PENSION_SUBJECT_UNKNOWN_LOAN_SHARE"
+    )
 
 
 @pytest.mark.parametrize("field_value", ["0.5", "-1", "101%", "未知"])
@@ -191,6 +224,32 @@ def test_ambiguous_revenue_breakdown_requires_review_when_loan_share_is_missing(
     assert result.result_status == "needs_review"
     assert result.consistency_status == "needs_review"
     assert "主营业务及营收占比" in result.consistency_basis
+
+
+def test_pension_enterprise_identity_takes_priority_over_ambiguous_revenue_breakdown() -> None:
+    label = _label()
+    result = PENSION_FINANCE_POLICY.preclassify_stage_b(
+        {
+            "loan_purpose": "扩建社区医养综合体",
+            "pension_loan_direction_share": "",
+            "main_business_revenue_share": (
+                "机构养老服务65%；社区居家养老服务25%；适老化产品销售10%"
+            ),
+            "certifications": "养老服务标准化试点单位",
+        },
+        SimpleNamespace(industry_name="老年人、残疾人养护服务"),
+        (label,),
+        (label,),
+    )
+
+    assert result is not None
+    assert result.result_status == "completed"
+    assert result.consistency_status == "consistent"
+    assert result.labels
+    assert (
+        result.model_output["pension_decision"]["matrix_branch"]
+        == "PENSION_ENTERPRISE_UNKNOWN_LOAN_SHARE"
+    )
 
 
 def test_missing_qualification_warns_without_changing_positive_decision() -> None:

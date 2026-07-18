@@ -18,7 +18,7 @@ from app.services.scenario_registry import (
 from app.services.technology_finance_mapping_query import FiveArticlesMappingLabel
 
 
-PENSION_FINANCE_DECISION_POLICY_VERSION = "pension-direction-share-v2"
+PENSION_FINANCE_DECISION_POLICY_VERSION = "pension-direction-share-v3"
 _THRESHOLD_PERCENT = Decimal("50")
 _LOAN_SHARE_FIELD = "pension_loan_direction_share"
 _REVENUE_SHARE_FIELD = "main_business_revenue_share"
@@ -83,6 +83,22 @@ def parse_percentage(value: object) -> ParsedPercentage:
     return ParsedPercentage(value, normalized, "valid")
 
 
+def _enterprise_pension_subject_hit(
+    stage_a_result: StageAResult,
+    enterprise_labels: Sequence[FiveArticlesMappingLabel],
+) -> bool:
+    """Ground enterprise identity without leaking loan-direction evidence."""
+    if not enterprise_labels:
+        return False
+    industry_name = str(getattr(stage_a_result, "industry_name", None) or "")
+    matching_basis = str(getattr(stage_a_result, "matching_basis", None) or "")
+    enterprise_evidence = f"{industry_name}\n{matching_basis}"
+    return any(
+        keyword in enterprise_evidence
+        for keyword in ("养老", "老年", "老人", "养护", "护理")
+    )
+
+
 class PensionFinancePolicy(FiveArticlesScenarioPolicy):
     def missing_enterprise_instruction(self) -> str:
         return (
@@ -118,20 +134,26 @@ class PensionFinancePolicy(FiveArticlesScenarioPolicy):
         enterprise_labels: Sequence[FiveArticlesMappingLabel],
         loan_direction_labels: Sequence[FiveArticlesMappingLabel],
     ) -> TechnologyFinanceStageBResult | None:
-        del stage_a_result
         loan_share = parse_percentage(input_payload.get(_LOAN_SHARE_FIELD))
         revenue_share = parse_business_revenue_share(
             input_payload.get(_REVENUE_SHARE_FIELD)
         )
+        enterprise_mapping_hit = bool(enterprise_labels)
+        enterprise_subject_hit = _enterprise_pension_subject_hit(
+            stage_a_result,
+            enterprise_labels,
+        )
 
         # The loan-direction share is the primary matrix input.  Revenue share
-        # is only a fallback when that primary share is missing, so ambiguity
-        # in a revenue breakdown must not override an explicit loan share.
+        # is only a fallback when both the primary share and enterprise pension
+        # identity are unavailable.  Its ambiguity must not override either
+        # stronger input.
         invalid = []
         if loan_share.state in {"invalid", "ambiguous"}:
             invalid.append((_LOAN_SHARE_FIELD, loan_share))
         elif (
             loan_share.state == "missing"
+            and not enterprise_subject_hit
             and revenue_share.state in {"invalid", "ambiguous"}
         ):
             invalid.append((_REVENUE_SHARE_FIELD, revenue_share))
@@ -151,7 +173,6 @@ class PensionFinancePolicy(FiveArticlesScenarioPolicy):
                 qualifies=None,
             )
 
-        enterprise_mapping_hit = bool(enterprise_labels)
         if loan_share.state == "valid":
             qualifies = loan_share.reaches_threshold
             branch = (
@@ -170,13 +191,13 @@ class PensionFinancePolicy(FiveArticlesScenarioPolicy):
                 "按贷款实际投向优先规则判定。"
             )
         else:
-            subject_basis = enterprise_mapping_hit or revenue_share.reaches_threshold
+            subject_basis = enterprise_subject_hit or revenue_share.reaches_threshold
             qualifies = subject_basis
-            if enterprise_mapping_hit:
+            if enterprise_subject_hit:
                 branch = "PENSION_ENTERPRISE_UNKNOWN_LOAN_SHARE"
                 basis = (
                     "贷款实际投向已命中养老产业但养老投向占比未知；"
-                    "企业侧命中养老产业映射，以主体养老属性辅助认定。"
+                    "企业行业及养老产业映射共同建立主体养老属性，以主体属性辅助认定。"
                 )
             elif revenue_share.reaches_threshold:
                 branch = "PENSION_REVENUE_AT_LEAST_50_UNKNOWN_LOAN_SHARE"
@@ -193,8 +214,20 @@ class PensionFinancePolicy(FiveArticlesScenarioPolicy):
                     else "养老产业营业收入占比未知"
                 )
                 basis = (
-                    "贷款实际投向已命中养老产业但养老投向占比未知；企业侧未命中养老产业映射，"
-                    f"且{revenue_detail}，主体辅助条件不成立。"
+                    "贷款实际投向已命中养老产业但养老投向占比未知；企业行业不属于养老产业，"
+                    f"且{revenue_detail}，当前不自动认定为养老金融，需人工复核养老投向占比。"
+                )
+
+                return self._decision(
+                    input_payload,
+                    loan_direction_labels,
+                    loan_share,
+                    revenue_share,
+                    matrix_branch=branch,
+                    result_status="needs_review",
+                    consistency_status="needs_review",
+                    basis=basis,
+                    qualifies=None,
                 )
 
         return self._decision(

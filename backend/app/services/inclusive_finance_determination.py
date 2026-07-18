@@ -96,8 +96,13 @@ def determine_inclusive_finance(
     ]
     borrower_type_basis = (
         f"农户条件命中：{'、'.join(farmer_matched_conditions)}"
-        if farmer_matched_conditions
-        else f"主体类型填报：{raw['entity_type'] or '未明确，按企业处理'}"
+        if borrower_type == "farmer" and farmer_matched_conditions
+        else (
+            f"主体类型填报：{raw['entity_type']}；农户条件作为补充证据，"
+            f"不覆盖明确主体类型：{'、'.join(farmer_matched_conditions)}"
+            if farmer_matched_conditions
+            else f"主体类型填报：{raw['entity_type'] or '未明确，按企业处理'}"
+        )
     )
     farmer_registration_address_support = _farmer_registration_address_support(
         raw["registered_address"]
@@ -409,12 +414,16 @@ def _parse_amount(value: object, *, allow_units: bool) -> float | None:
 
 def _determine_borrower_type(raw: Mapping[str, str]) -> str:
     entity_type = raw["entity_type"]
-    if "农户" in entity_type or any(_is_yes(raw[key]) for key in FARMER_FIELD_KEYS):
+    if "农户" in entity_type:
         return "farmer"
     if "个体工商户" in entity_type:
         return "individual_business"
     if "小微企业主" in entity_type:
         return "small_micro_owner"
+    if "企业" in entity_type:
+        return "enterprise"
+    if any(_is_yes(raw[key]) for key in FARMER_FIELD_KEYS):
+        return "farmer"
     return "enterprise"
 
 

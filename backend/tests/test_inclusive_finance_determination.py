@@ -56,9 +56,14 @@ def test_four_borrower_types_qualify_at_their_credit_boundaries(
     assert result["qualifies"] is True
 
 
-def test_farmer_recognition_field_overrides_entity_type() -> None:
+def test_farmer_recognition_field_fills_missing_entity_type() -> None:
     result = determine_inclusive_finance(
-        _payload(farmer_town_village_resident="是", credit_amount="500万元"), _stage_a()
+        _payload(
+            entity_type="",
+            farmer_town_village_resident="是",
+            credit_amount="500万元",
+        ),
+        _stage_a(),
     )
 
     assert result["borrower_type"] == "farmer"
@@ -307,14 +312,44 @@ def test_address_alone_does_not_change_a_non_farmer_borrower_type() -> None:
 
 
 @pytest.mark.parametrize("field", tuple(_payload())[-4:])
-def test_each_farmer_identity_condition_has_priority_over_entity_type(field: str) -> None:
+def test_each_farmer_identity_condition_fills_missing_entity_type(field: str) -> None:
     result = determine_inclusive_finance(
-        _payload(**{field: "是", "credit_amount": "500万元"}), _stage_a()
+        _payload(**{field: "是", "entity_type": "", "credit_amount": "500万元"}),
+        _stage_a(),
     )
 
     assert result["status"] == "completed"
     assert result["borrower_type"] == "farmer"
     assert len(result["determination"]["farmer_matched_conditions"]) == 1
+
+
+@pytest.mark.parametrize(
+    ("entity_type", "expected_type", "expected_category"),
+    (
+        ("企业", "enterprise", "小微企业贷款"),
+        ("个体工商户", "individual_business", "个体工商户经营性贷款"),
+        ("小微企业主", "small_micro_owner", "小微企业主经营性贷款"),
+    ),
+)
+def test_explicit_non_farmer_type_is_not_overridden_by_farmer_supporting_fields(
+    entity_type: str, expected_type: str, expected_category: str
+) -> None:
+    result = determine_inclusive_finance(
+        _payload(
+            entity_type=entity_type,
+            farmer_long_term_town_resident="是",
+            farmer_town_village_resident="是",
+            farmer_state_farm_employee_or_rural_individual_business="是",
+            credit_amount="600万元",
+        ),
+        _stage_a(),
+    )
+
+    assert result["status"] == "completed"
+    assert result["borrower_type"] == expected_type
+    assert result["inclusive_category"] == expected_category
+    assert result["qualifies"] is True
+    assert "不覆盖明确主体类型" in result["determination"]["borrower_type_basis"]
 
 
 def test_identical_input_produces_an_identical_deterministic_decision() -> None:

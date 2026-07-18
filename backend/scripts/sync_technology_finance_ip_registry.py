@@ -15,6 +15,11 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings, get_settings
 from app.db.session import get_sessionmaker
 from app.models import TechnologyFinanceIpRegistryEntry, TechnologyFinanceIpRegistryVersion
+from app.services.technology_finance_ip_registry import (
+    HIGH_TECH_REGISTRY,
+    SPECIALIZED_INNOVATION_REGISTRY,
+    TechnologyFinanceRegistryType,
+)
 
 
 class TechnologyFinanceIpRegistryParseError(ValueError):
@@ -82,6 +87,7 @@ def synchronize_technology_finance_ip_registry(
     session: Session,
     source_path: Path,
     *,
+    registry_type: TechnologyFinanceRegistryType = HIGH_TECH_REGISTRY,
     settings: Settings | None = None,
 ) -> RegistrySyncResult:
     """Validate and publish a source file; the caller owns the transaction/commit."""
@@ -89,7 +95,10 @@ def synchronize_technology_finance_ip_registry(
     source_hash = sha256(source_bytes).hexdigest()
     latest = session.scalar(
         select(TechnologyFinanceIpRegistryVersion)
-        .where(TechnologyFinanceIpRegistryVersion.status == "published")
+        .where(
+            TechnologyFinanceIpRegistryVersion.status == "published",
+            TechnologyFinanceIpRegistryVersion.registry_type == registry_type,
+        )
         .order_by(TechnologyFinanceIpRegistryVersion.version.desc())
         .limit(1)
     )
@@ -100,6 +109,7 @@ def synchronize_technology_finance_ip_registry(
     next_version = (session.scalar(select(func.max(TechnologyFinanceIpRegistryVersion.version))) or 0) + 1
     version = TechnologyFinanceIpRegistryVersion(
         version=next_version,
+        registry_type=registry_type,
         source_path=str(source_path),
         source_hash=source_hash,
         row_count=len(rows),
@@ -120,14 +130,44 @@ def synchronize_technology_finance_ip_registry(
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source-path", type=Path, default=None)
+    parser.add_argument(
+        "--registry-type",
+        choices=(HIGH_TECH_REGISTRY, SPECIALIZED_INNOVATION_REGISTRY),
+        default=None,
+    )
     args = parser.parse_args(argv)
     settings = get_settings()
-    source_path = args.source_path or settings.technology_finance_ip_registry_source_path
+    default_paths = {
+        HIGH_TECH_REGISTRY: settings.technology_finance_ip_registry_source_path,
+        SPECIALIZED_INNOVATION_REGISTRY: (
+            settings.technology_finance_specialized_innovation_registry_source_path
+        ),
+    }
+    registry_types: tuple[TechnologyFinanceRegistryType, ...] = (
+        (args.registry_type,)
+        if args.registry_type is not None
+        else (HIGH_TECH_REGISTRY,)
+        if args.source_path is not None
+        else (HIGH_TECH_REGISTRY, SPECIALIZED_INNOVATION_REGISTRY)
+    )
+    results: list[tuple[TechnologyFinanceRegistryType, RegistrySyncResult]] = []
     with get_sessionmaker()() as session:
         with session.begin():
-            result = synchronize_technology_finance_ip_registry(session, source_path, settings=settings)
-    action = "reused" if result.reused else "published"
-    print(f"technology-finance IP registry {action}: version={result.version.version} rows={result.version.row_count}")
+            for registry_type in registry_types:
+                result = synchronize_technology_finance_ip_registry(
+                    session,
+                    args.source_path or default_paths[registry_type],
+                    registry_type=registry_type,
+                    settings=settings,
+                )
+                results.append((registry_type, result))
+    for registry_type, result in results:
+        action = "reused" if result.reused else "published"
+        print(
+            "technology-finance registry "
+            f"{registry_type} {action}: version={result.version.version} "
+            f"rows={result.version.row_count}"
+        )
     return 0
 
 

@@ -264,6 +264,20 @@ def test_technology_export_writes_direction_and_auxiliary_evidence_columns() -> 
             "excerpt": "高新技术企业",
         },
         {
+            "type": "technology_registry",
+            "registry_type": "high_tech",
+            "status": "satisfied",
+            "matched": True,
+            "excerpt": "企业名称已在高新技术企业名单中匹配到（来源序号 1）。",
+        },
+        {
+            "type": "technology_registry",
+            "registry_type": "specialized_innovation",
+            "status": "unsatisfied",
+            "matched": False,
+            "excerpt": "企业名称未在专精特新企业名单中匹配到。",
+        },
+        {
             "type": "technology_auxiliary",
             "evidence_role": "rd_staff_ratio",
             "status": "satisfied",
@@ -296,6 +310,12 @@ def test_technology_export_writes_direction_and_auxiliary_evidence_columns() -> 
         "命中科技金融映射：2710 化学药品原料药制造 · 高技术产业 / 医药制造"
     )
     assert row["官方科技资质"] == "满足：高新技术企业"
+    assert row["高新技术企业名单"] == (
+        "满足：企业名称已在高新技术企业名单中匹配到（来源序号 1）。"
+    )
+    assert row["专精特新企业名单"] == (
+        "未满足：企业名称未在专精特新企业名单中匹配到。"
+    )
     assert row["研发人员占比"] == "满足：10%"
     assert row["研发投入"] == "299万元"
     assert row["研发投入占营收比例"] == "未满足：2.99%"

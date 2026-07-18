@@ -14,10 +14,17 @@ class TechnologyFinanceIpRegistryVersion(Base):
             "status IN ('published')",
             name="ck_technology_finance_ip_registry_versions_status",
         ),
+        CheckConstraint(
+            "registry_type IN ('high_tech', 'specialized_innovation', 'legacy_combined')",
+            name="ck_technology_finance_ip_registry_versions_registry_type",
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
+    registry_type: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="high_tech"
+    )
     source_path: Mapped[str] = mapped_column(Text, nullable=False)
     source_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     row_count: Mapped[int] = mapped_column(Integer, nullable=False)

@@ -19,6 +19,9 @@ from app.services.five_articles_stage_b_types import (
 )
 from app.services.scenario_registry import TECHNOLOGY_FINANCE_SCENARIO
 from app.services.technology_finance_ip_registry import (
+    HIGH_TECH_REGISTRY,
+    SPECIALIZED_INNOVATION_REGISTRY,
+    TechnologyFinanceIpRegistryMatch,
     lookup_technology_finance_ip_registry_match,
 )
 from app.services.technology_finance_mapping_query import (
@@ -27,7 +30,7 @@ from app.services.technology_finance_mapping_query import (
 )
 
 
-TECHNOLOGY_FINANCE_DECISION_POLICY_VERSION = "technology-direction-v3"
+TECHNOLOGY_FINANCE_DECISION_POLICY_VERSION = "technology-direction-v4"
 _RD_STAFF_THRESHOLD = Decimal("10")
 _RD_INVESTMENT_RATIO_THRESHOLD = Decimal("3")
 _RD_STAFF_FIELD = "rd_staff_ratio"
@@ -46,6 +49,10 @@ _DIRECTION_FIELDS = (
 _IP_INTENSIVE_INDUSTRY_SUBJECTS = frozenset(
     {"知识产权（专利）密集型产业", "知识产权(专利)密集型产业"}
 )
+_REGISTRY_LABELS = {
+    HIGH_TECH_REGISTRY: "江苏省高新技术企业备案名单",
+    SPECIALIZED_INNOVATION_REGISTRY: "江苏省专精特新中小企业名单",
+}
 _QUALIFICATION_KEYWORDS = (
     "高新技术企业",
     "专精特新",
@@ -230,6 +237,77 @@ class TechnologyFinancePolicy(FiveArticlesScenarioPolicy):
                     )
             result_labels.append(result_label)
         return result_labels
+
+    def postprocess_decision(
+        self,
+        session: Session,
+        input_payload: dict[str, object],
+        decision: TechnologyFinanceStageBResult,
+    ) -> TechnologyFinanceStageBResult:
+        enterprise_name = input_payload.get("enterprise_name")
+        registry_matches = tuple(
+            lookup_technology_finance_ip_registry_match(
+                session,
+                enterprise_name if isinstance(enterprise_name, str) else None,
+                registry_type=registry_type,
+            )
+            for registry_type in (
+                HIGH_TECH_REGISTRY,
+                SPECIALIZED_INNOVATION_REGISTRY,
+            )
+        )
+        registry_refs = tuple(
+            _technology_registry_ref(enterprise_name, match)
+            for match in registry_matches
+        )
+        matched_names = [
+            _REGISTRY_LABELS[match.registry_type]
+            for match in registry_matches
+            if match.matched
+        ]
+        unavailable_names = [
+            _REGISTRY_LABELS[match.registry_type]
+            for match in registry_matches
+            if not match.registry_available
+        ]
+        if not _text(enterprise_name):
+            registry_basis = " 企业名单核验：未提供企业名称，两类名单状态记为未知。"
+        elif matched_names:
+            registry_basis = f" 企业名单核验：命中{'、'.join(matched_names)}。"
+        elif unavailable_names:
+            registry_basis = (
+                f" 企业名单核验：{'、'.join(unavailable_names)}尚未发布，"
+                "对应名单状态记为未知。"
+            )
+        else:
+            registry_basis = " 企业名单核验：两类官方企业名单均未命中。"
+
+        model_output = dict(decision.model_output)
+        technology_decision = model_output.get("technology_decision")
+        technology_decision = (
+            dict(technology_decision)
+            if isinstance(technology_decision, Mapping)
+            else {}
+        )
+        technology_decision["registry_hits"] = {
+            match.registry_type: {
+                "matched": match.matched,
+                "registry_available": match.registry_available,
+                "registry_version_id": match.registry_version_id,
+                "source_row": match.source_row,
+            }
+            for match in registry_matches
+        }
+        model_output["technology_decision"] = technology_decision
+        return replace(
+            decision,
+            consistency_basis=decision.consistency_basis + registry_basis,
+            consistency_evidence_refs=(
+                *decision.consistency_evidence_refs,
+                *registry_refs,
+            ),
+            model_output=model_output,
+        )
 
 
 def _technology_decision(
@@ -513,6 +591,48 @@ def _technology_direction_ref(
             }
         )
     return reference
+
+
+def _technology_registry_ref(
+    enterprise_name: object,
+    match: TechnologyFinanceIpRegistryMatch,
+) -> dict[str, object]:
+    display_name = _text(enterprise_name) or "（未填写）"
+    registry_name = _REGISTRY_LABELS[match.registry_type]
+    if not _text(enterprise_name):
+        status: AuxiliaryStatus = "unknown"
+        excerpt = f"未提供企业名称，无法核验{registry_name}。"
+        warning = excerpt
+    elif not match.registry_available:
+        status = "unknown"
+        excerpt = f"{registry_name}尚未发布，无法核验企业名称『{display_name}』。"
+        warning = excerpt
+    elif match.matched:
+        status = "satisfied"
+        excerpt = (
+            f"企业名称『{display_name}』已在{registry_name}中匹配到"
+            f"（来源序号 {match.source_row}）。"
+        )
+        warning = None
+    else:
+        status = "unsatisfied"
+        excerpt = f"企业名称『{display_name}』未在{registry_name}中匹配到。"
+        warning = None
+    return {
+        "type": "technology_registry",
+        "evidence_role": f"registry_{match.registry_type}",
+        "registry_type": match.registry_type,
+        "registry_name": registry_name,
+        "registry_available": match.registry_available,
+        "registry_version_id": match.registry_version_id,
+        "source_row": match.source_row,
+        "matched": match.matched,
+        "status": status,
+        "field_key": "enterprise_name",
+        "field_label": "企业名称",
+        "excerpt": excerpt,
+        "warning": warning,
+    }
 
 
 def _text_status(text: str, positive_keywords: Sequence[str]) -> AuxiliaryStatus:

@@ -21,6 +21,9 @@ MIGRATION_PATH = ROOT_DIR / (
     "backend/alembic/versions/0014_technology_finance_ip_registry.py"
 )
 SOURCE_PDF = ROOT_DIR / "模板文件/江苏省高新技术企业备案公示名单.pdf"
+SPECIALIZED_INNOVATION_SOURCE_PDF = (
+    ROOT_DIR / "模板文件/2025年省级专精特新中小企业.pdf"
+)
 
 
 def _fake_pdf(monkeypatch: pytest.MonkeyPatch, rows: list[list[str]]) -> None:
@@ -45,17 +48,22 @@ def _table(*names: str | None, numbers: list[str] | None = None) -> list[list[st
     return [["序号", "企业名称"], *[[number, name or ""] for number, name in zip(numbers, names)]]
 
 
-def _sync(session, source_path: Path) -> registry_sync.RegistrySyncResult:
+def _sync(
+    session,
+    source_path: Path,
+    *,
+    registry_type: str = registry_sync.HIGH_TECH_REGISTRY,
+) -> registry_sync.RegistrySyncResult:
     with session.begin():
         return registry_sync.synchronize_technology_finance_ip_registry(
-            session, source_path
+            session, source_path, registry_type=registry_type
         )
 
 
 def test_registry_model_declares_fields_fk_and_unique_constraint() -> None:
     version_columns = TechnologyFinanceIpRegistryVersion.__table__.columns
     assert {
-        "id", "version", "source_path", "source_hash", "row_count", "status", "published_at"
+        "id", "version", "registry_type", "source_path", "source_hash", "row_count", "status", "published_at"
     } == set(version_columns.keys())
     entry_columns = TechnologyFinanceIpRegistryEntry.__table__.columns
     assert {"id", "version_id", "enterprise_name", "source_row"} == set(entry_columns.keys())
@@ -73,6 +81,18 @@ def test_registry_source_path_has_default_and_environment_alias() -> None:
         _env_file=None,
         TECHNOLOGY_FINANCE_IP_REGISTRY_SOURCE_PATH="/mnt/assets/ip-registry.pdf",
     ).technology_finance_ip_registry_source_path == Path("/mnt/assets/ip-registry.pdf")
+    assert (
+        Settings(_env_file=None).technology_finance_specialized_innovation_registry_source_path
+        == Path("模板文件/2025年省级专精特新中小企业.pdf")
+    )
+    assert Settings(
+        _env_file=None,
+        TECHNOLOGY_FINANCE_SPECIALIZED_INNOVATION_REGISTRY_SOURCE_PATH=(
+            "/mnt/assets/specialized-innovation.pdf"
+        ),
+    ).technology_finance_specialized_innovation_registry_source_path == Path(
+        "/mnt/assets/specialized-innovation.pdf"
+    )
 
 
 def test_registry_migration_creates_tables_fk_and_unique_constraint() -> None:
@@ -150,6 +170,16 @@ def test_real_registry_pdf_has_571_continuous_rows() -> None:
     assert all(row.enterprise_name for row in rows)
 
 
+def test_real_specialized_innovation_registry_has_753_continuous_rows() -> None:
+    rows = registry_sync.parse_technology_finance_ip_registry(
+        SPECIALIZED_INNOVATION_SOURCE_PDF
+    )
+    assert len(rows) == 753
+    assert [row.source_row for row in rows] == list(range(1, 754))
+    assert all(row.enterprise_name == row.enterprise_name.strip() for row in rows)
+    assert all(row.enterprise_name for row in rows)
+
+
 @pytest.mark.parametrize(
     ("names", "numbers"),
     [
@@ -216,5 +246,36 @@ def test_same_source_is_idempotent_and_changed_source_publishes_new_version(
         assert changed.version.id != first.version.id
         assert changed.version.source_hash != first.version.source_hash
         assert changed.version.row_count == 2
+    finally:
+        session.close()
+
+
+def test_same_source_hash_is_versioned_independently_per_registry_type(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_path = tmp_path / "registry.pdf"
+    source_path.write_bytes(b"same-source")
+    _fake_pdf(monkeypatch, _table("企业一"))
+    session = get_sessionmaker()()
+    try:
+        high_tech = _sync(
+            session,
+            source_path,
+            registry_type=registry_sync.HIGH_TECH_REGISTRY,
+        )
+        specialized = _sync(
+            session,
+            source_path,
+            registry_type=registry_sync.SPECIALIZED_INNOVATION_REGISTRY,
+        )
+
+        assert high_tech.reused is False
+        assert specialized.reused is False
+        assert high_tech.version.registry_type == registry_sync.HIGH_TECH_REGISTRY
+        assert (
+            specialized.version.registry_type
+            == registry_sync.SPECIALIZED_INNOVATION_REGISTRY
+        )
+        assert high_tech.version.id != specialized.version.id
     finally:
         session.close()

@@ -63,6 +63,8 @@ _TECHNOLOGY_FINANCE_HEADERS = (
     "知识产权条件",
     "贷款实际投向依据",
     "官方科技资质",
+    "高新技术企业名单",
+    "专精特新企业名单",
     "研发人员占比",
     "研发投入",
     "研发投入占营收比例",
@@ -320,6 +322,8 @@ def _write_technology_finance_result(
                 "",
                 "",
                 "",
+                "",
+                "",
                 "不适用",
                 "尚无科技金融判定结果，一致性不适用。",
             )
@@ -401,18 +405,25 @@ def _technology_auxiliary_export_values(
         for ref in refs
         if ref.get("type") == "technology_auxiliary"
     }
+    registries = {
+        str(ref.get("registry_type")): ref
+        for ref in refs
+        if ref.get("type") == "technology_registry"
+    }
     qualification = auxiliary.get("official_qualification")
     staff = auxiliary.get("rd_staff_ratio")
     investment = auxiliary.get("rd_investment_ratio")
     patent = auxiliary.get("patent_software_copyright")
     warnings = [
         str(ref["warning"])
-        for ref in auxiliary.values()
+        for ref in (*auxiliary.values(), *registries.values())
         if ref.get("warning")
     ]
     return (
         _technology_direction_summary(direction),
         _technology_auxiliary_summary(qualification),
+        _technology_auxiliary_summary(registries.get("high_tech")),
+        _technology_auxiliary_summary(registries.get("specialized_innovation")),
         _technology_percentage_summary(staff, "normalized_percent"),
         _technology_amount_summary(investment),
         _technology_percentage_summary(investment, "derived_ratio_percent"),

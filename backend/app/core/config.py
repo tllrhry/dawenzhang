@@ -63,6 +63,12 @@ class Settings(BaseSettings):
         default=Path("模板文件/江苏省高新技术企业备案公示名单.pdf"),
         validation_alias=AliasChoices("TECHNOLOGY_FINANCE_IP_REGISTRY_SOURCE_PATH"),
     )
+    technology_finance_specialized_innovation_registry_source_path: Path = Field(
+        default=Path("模板文件/2025年省级专精特新中小企业.pdf"),
+        validation_alias=AliasChoices(
+            "TECHNOLOGY_FINANCE_SPECIALIZED_INNOVATION_REGISTRY_SOURCE_PATH"
+        ),
+    )
     five_articles_mapping_source_path: Path = Field(
         default=Path("五篇大文章映射/贷款投向-五篇大文章映射表.xlsx"),
         validation_alias=AliasChoices("FIVE_ARTICLES_MAPPING_SOURCE_PATH"),

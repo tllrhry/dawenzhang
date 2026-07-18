@@ -3,6 +3,8 @@ from sqlalchemy import func, select
 from app.db.session import get_sessionmaker
 from app.models import TechnologyFinanceIpRegistryEntry, TechnologyFinanceIpRegistryVersion
 from app.services.technology_finance_ip_registry import (
+    HIGH_TECH_REGISTRY,
+    SPECIALIZED_INNOVATION_REGISTRY,
     lookup_technology_finance_ip_registry_match,
 )
 
@@ -11,9 +13,15 @@ def _next_version(session) -> int:
     return (session.scalar(select(func.max(TechnologyFinanceIpRegistryVersion.version))) or 0) + 1
 
 
-def _published_version(session, version: int, *entries: tuple[str, int]) -> None:
+def _published_version(
+    session,
+    version: int,
+    *entries: tuple[str, int],
+    registry_type: str = HIGH_TECH_REGISTRY,
+) -> None:
     registry_version = TechnologyFinanceIpRegistryVersion(
         version=version,
+        registry_type=registry_type,
         source_path=f"registry-{version}.pdf",
         source_hash=f"{version:064x}",
         row_count=len(entries),
@@ -99,5 +107,49 @@ def test_lookup_rejects_ambiguous_normalized_registry_names() -> None:
 
         assert matched.matched is False
         assert matched.source_row is None
+    finally:
+        session.close()
+
+
+def test_lookup_keeps_high_tech_and_specialized_innovation_versions_independent() -> None:
+    session = get_sessionmaker()()
+    try:
+        version = _next_version(session)
+        _published_version(
+            session,
+            version,
+            ("仅高新企业", 10),
+            registry_type=HIGH_TECH_REGISTRY,
+        )
+        _published_version(
+            session,
+            version + 1,
+            ("仅专精特新企业", 20),
+            registry_type=SPECIALIZED_INNOVATION_REGISTRY,
+        )
+        session.commit()
+
+        high_tech = lookup_technology_finance_ip_registry_match(
+            session,
+            "仅高新企业",
+            registry_type=HIGH_TECH_REGISTRY,
+        )
+        high_tech_in_specialized = lookup_technology_finance_ip_registry_match(
+            session,
+            "仅高新企业",
+            registry_type=SPECIALIZED_INNOVATION_REGISTRY,
+        )
+        specialized = lookup_technology_finance_ip_registry_match(
+            session,
+            "仅专精特新企业",
+            registry_type=SPECIALIZED_INNOVATION_REGISTRY,
+        )
+
+        assert high_tech.matched is True
+        assert high_tech.source_row == 10
+        assert high_tech_in_specialized.matched is False
+        assert high_tech_in_specialized.registry_available is True
+        assert specialized.matched is True
+        assert specialized.source_row == 20
     finally:
         session.close()

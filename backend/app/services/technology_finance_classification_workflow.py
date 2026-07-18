@@ -298,7 +298,9 @@ def _build_stage_b_result(
     )
     mapping_result = resolution.mapping_result
     if resolution.terminal_result is not None:
-        decision = resolution.terminal_result
+        decision = policy.postprocess_decision(
+            session, case.input_payload, resolution.terminal_result
+        )
         labels = policy.postprocess_labels(session, case.input_payload, decision.labels)
         return _new_result(
             session,
@@ -335,6 +337,7 @@ def _build_stage_b_result(
     decision = stage_b_classifier(
         profile, case.input_payload, stage_a_result, enterprise_labels, loan_labels, settings
     )
+    decision = policy.postprocess_decision(session, case.input_payload, decision)
     labels = policy.postprocess_labels(session, case.input_payload, decision.labels)
     return _new_result(
         session, case=case, stage_a_result=stage_a_result, status=decision.result_status,

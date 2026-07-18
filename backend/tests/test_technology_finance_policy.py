@@ -3,8 +3,14 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from sqlalchemy import func, select
 
 from app.core.config import Settings
+from app.db.session import get_sessionmaker
+from app.models import (
+    TechnologyFinanceIpRegistryEntry,
+    TechnologyFinanceIpRegistryVersion,
+)
 from app.services.five_articles_policies.technology import (
     TECHNOLOGY_FINANCE_DECISION_POLICY_VERSION,
     TECHNOLOGY_FINANCE_POLICY,
@@ -20,6 +26,10 @@ from app.services.technology_finance_mapping_query import (
     FiveArticlesMappingLookupResult,
 )
 from app.services.technology_finance_stage_b import classify_five_articles_stage_b
+from app.services.technology_finance_ip_registry import (
+    HIGH_TECH_REGISTRY,
+    SPECIALIZED_INNOVATION_REGISTRY,
+)
 
 
 def _label(source_row: int = 18) -> FiveArticlesMappingLabel:
@@ -294,3 +304,105 @@ def test_workflow_uses_server_owned_technology_decision_before_model_call() -> N
     assert result.decision_policy_version == TECHNOLOGY_FINANCE_DECISION_POLICY_VERSION
     assert result.labels[0]["decision_policy_version"] == TECHNOLOGY_FINANCE_DECISION_POLICY_VERSION
     assert result.consistency_status == "consistent"
+    registry_refs = [
+        ref
+        for ref in result.consistency_evidence_refs
+        if ref.get("type") == "technology_registry"
+    ]
+    assert len(registry_refs) == 2
+
+
+def test_registry_evidence_is_typed_and_not_inferred_from_certification_text() -> None:
+    session = get_sessionmaker()()
+    try:
+        next_version = (
+            session.scalar(select(func.max(TechnologyFinanceIpRegistryVersion.version)))
+            or 0
+        ) + 1
+        high_tech = TechnologyFinanceIpRegistryVersion(
+            version=next_version,
+            registry_type=HIGH_TECH_REGISTRY,
+            source_path="high-tech.pdf",
+            source_hash="a" * 64,
+            row_count=1,
+            status="published",
+        )
+        high_tech.entries = [
+            TechnologyFinanceIpRegistryEntry(
+                enterprise_name="真实高新企业", source_row=11
+            )
+        ]
+        specialized = TechnologyFinanceIpRegistryVersion(
+            version=next_version + 1,
+            registry_type=SPECIALIZED_INNOVATION_REGISTRY,
+            source_path="specialized.pdf",
+            source_hash="b" * 64,
+            row_count=1,
+            status="published",
+        )
+        specialized.entries = [
+            TechnologyFinanceIpRegistryEntry(
+                enterprise_name="真实专精特新企业", source_row=22
+            )
+        ]
+        session.add_all((high_tech, specialized))
+        session.commit()
+
+        decision = TECHNOLOGY_FINANCE_POLICY.preclassify_stage_b(
+            _input(
+                enterprise_name="真实专精特新企业",
+                certifications="自填高新技术企业资质",
+            ),
+            SimpleNamespace(),
+            (),
+            (_label(),),
+        )
+        assert decision is not None
+        processed = TECHNOLOGY_FINANCE_POLICY.postprocess_decision(
+            session,
+            _input(
+                enterprise_name="真实专精特新企业",
+                certifications="自填高新技术企业资质",
+            ),
+            decision,
+        )
+
+        refs = {
+            ref["registry_type"]: ref
+            for ref in processed.consistency_evidence_refs
+            if ref.get("type") == "technology_registry"
+        }
+        assert refs[HIGH_TECH_REGISTRY]["matched"] is False
+        assert refs[HIGH_TECH_REGISTRY]["status"] == "unsatisfied"
+        assert refs[SPECIALIZED_INNOVATION_REGISTRY]["matched"] is True
+        assert refs[SPECIALIZED_INNOVATION_REGISTRY]["source_row"] == 22
+        assert "命中江苏省专精特新中小企业名单" in processed.consistency_basis
+        assert "自填高新技术企业资质" not in refs[HIGH_TECH_REGISTRY]["excerpt"]
+    finally:
+        session.close()
+
+
+def test_missing_enterprise_name_marks_registry_evidence_unknown_without_query() -> None:
+    decision = TECHNOLOGY_FINANCE_POLICY.preclassify_stage_b(
+        _input(enterprise_name=""),
+        SimpleNamespace(),
+        (),
+        (_label(),),
+    )
+    assert decision is not None
+    session = MagicMock()
+
+    processed = TECHNOLOGY_FINANCE_POLICY.postprocess_decision(
+        session,
+        _input(enterprise_name=""),
+        decision,
+    )
+
+    session.scalar.assert_not_called()
+    refs = [
+        ref
+        for ref in processed.consistency_evidence_refs
+        if ref.get("type") == "technology_registry"
+    ]
+    assert [ref["status"] for ref in refs] == ["unknown", "unknown"]
+    assert "未提供企业名称" in processed.consistency_basis

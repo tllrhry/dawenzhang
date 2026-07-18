@@ -119,11 +119,15 @@ function technologyDecisionDetails(result: FiveArticlesResult | null) {
   if (!result) return null
   const directionRef = result.consistency_evidence_refs.find((reference) => reference.type === 'technology_direction')
   const auxiliaryRefs = result.consistency_evidence_refs.filter((reference) => reference.type === 'technology_auxiliary')
-  if (!directionRef && auxiliaryRefs.length === 0) return null
+  const registryRefs = result.consistency_evidence_refs.filter((reference) => reference.type === 'technology_registry')
+  if (!directionRef && auxiliaryRefs.length === 0 && registryRefs.length === 0) return null
   return {
     directionRef,
     auxiliaryRefs,
-    warnings: auxiliaryRefs.map((reference) => reference.warning).filter((warning): warning is string => Boolean(warning)),
+    registryRefs,
+    warnings: [...auxiliaryRefs, ...registryRefs]
+      .map((reference) => reference.warning)
+      .filter((warning): warning is string => Boolean(warning)),
   }
 }
 
@@ -172,19 +176,10 @@ const ipIntensiveIndustrySubjects = new Set(['知识产权（专利）密集型�
 
 function technologyRegistryHits(result: FiveArticlesResult | null): { specializedInnovation: boolean; highTech: boolean } {
   if (!result) return { specializedInnovation: false, highTech: false }
-
-  const hasNamedRegistryHit = (keyword: string) => result.labels.some((label) => {
-    const classificationText = [label.subject, ...label.taxonomy_path].join('')
-    if (classificationText.includes(keyword)) return true
-
-    return [label.matching_basis, label.ip_intensive_industry_basis, ...label.evidence_refs.map((reference) => reference.excerpt)]
-      .filter((value): value is string => Boolean(value))
-      .some((value) => value.includes(keyword) && /(命中|匹配到)/.test(value) && !/(未命中|未能匹配到)/.test(value))
-  })
-
+  const registryRefs = result.consistency_evidence_refs.filter((reference) => reference.type === 'technology_registry')
   return {
-    specializedInnovation: hasNamedRegistryHit('专精特新'),
-    highTech: result.labels.some((label) => label.ip_intensive_industry_status === 'satisfied') || hasNamedRegistryHit('高新技术'),
+    specializedInnovation: registryRefs.some((reference) => reference.registry_type === 'specialized_innovation' && reference.matched === true),
+    highTech: registryRefs.some((reference) => reference.registry_type === 'high_tech' && reference.matched === true),
   }
 }
 
@@ -250,6 +245,10 @@ export function FiveArticlesResultCard({ scenarioId, result, stageAFailed, stage
             {technologyDetails.auxiliaryRefs.map((reference) => <div className="green-evidence-row" key={`${reference.evidence_role}-${reference.field_key}`}>
               <span>{technologyAuxiliaryLabel(reference)}</span>
               <p>{technologyAuxiliaryValue(reference)}</p>
+            </div>)}
+            {technologyDetails.registryRefs.map((reference) => <div className="green-evidence-row" key={reference.registry_type}>
+              <span>{reference.registry_type === 'high_tech' ? '高新技术企业名单' : '专精特新企业名单'}</span>
+              <p>{`${auxiliaryStatusLabel(reference.status)} · ${reference.excerpt || '--'}`}</p>
             </div>)}
             <div className="green-evidence-row">
               <span>最终判定依据</span>

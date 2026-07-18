@@ -84,6 +84,16 @@ class FiveArticlesScenarioPolicy:
         del session, input_payload
         return [dict(label) for label in labels]
 
+    def postprocess_decision(
+        self,
+        session: Session,
+        input_payload: dict[str, object],
+        decision: TechnologyFinanceStageBResult,
+    ) -> TechnologyFinanceStageBResult:
+        """Attach scenario-owned deterministic evidence after classification."""
+        del session, input_payload
+        return decision
+
     def missing_enterprise_instruction(self) -> str:
         return "企业侧未命中、"
 

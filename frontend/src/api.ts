@@ -72,6 +72,11 @@ export interface EvidenceReference {
   evidence_status?: 'positive' | 'provided' | 'missing' | 'unrecognized'
   status?: 'satisfied' | 'unsatisfied' | 'unknown'
   mapping_hit?: boolean
+  matched?: boolean
+  registry_type?: 'high_tech' | 'specialized_innovation'
+  registry_name?: string
+  registry_available?: boolean
+  registry_version_id?: number | null
 }
 
 export interface TechnologyFinanceLabel {

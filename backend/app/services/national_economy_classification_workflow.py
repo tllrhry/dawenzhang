@@ -1,3 +1,4 @@
+import re
 from collections.abc import Callable, Mapping, Sequence
 from typing import Protocol
 
@@ -50,6 +51,14 @@ _EVIDENCE_FIELDS = (
         ("loan_purpose", "credit_approval_opinion"),
     ),
     (EvidenceLevel.BUSINESS_SCOPE, ("business_scope",)),
+)
+
+_CREDIT_APPROVAL_FIELD = "credit_approval_opinion"
+_MONETARY_AMOUNT_RE = re.compile(
+    r"(?<![A-Za-z0-9０-９])(?:(?:人民币|RMB|¥|￥)\s*)?"
+    r"[0-9０-９][0-9０-９,，]*(?:[.．][0-9０-９]+)?\s*"
+    r"(?:亿元?|万元?|元)(?![A-Za-z])",
+    re.IGNORECASE,
 )
 
 RetrievalCallable = Callable[
@@ -112,8 +121,8 @@ def _build_evidence_layer(
     facts = tuple(
         EvidenceFact(
             field_label=FIELD_LABELS[field],
-            raw_text=value,
-            indicated_business=value,
+            raw_text=(normalized_value := _normalize_industry_evidence(field, value)),
+            indicated_business=normalized_value,
         )
         for field in fields
         if (value := _field_text(input_payload.get(field)))
@@ -123,6 +132,13 @@ def _build_evidence_layer(
         facts=facts,
         unavailable_reason=None if facts else "该证据层没有可用输入字段",
     )
+
+
+def _normalize_industry_evidence(field: str, value: str) -> str:
+    """Remove financing amounts that cannot determine an enterprise industry."""
+    if field != _CREDIT_APPROVAL_FIELD:
+        return value
+    return _MONETARY_AMOUNT_RE.sub("[金额]", value)
 
 
 def _field_text(value: object) -> str:

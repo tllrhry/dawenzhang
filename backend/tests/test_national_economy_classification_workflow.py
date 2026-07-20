@@ -183,6 +183,51 @@ def test_build_query_marks_empty_layers_unavailable_without_stringifying_none() 
     assert layers[3].facts[0].raw_text == "软件开发"
 
 
+def test_credit_approval_amounts_do_not_change_stage_a_industry_evidence() -> None:
+    hundred_payload = dict(_case().input_payload)
+    hundred_payload.update(
+        {
+            "credit_amount": "100万元",
+            "credit_approval_opinion": (
+                "同意授信金额：100 万元，期限2年，用于瓜果种植100亩，"
+                "年均净现金流95万元"
+            ),
+        }
+    )
+    six_hundred_payload = dict(hundred_payload)
+    six_hundred_payload.update(
+        {
+            "credit_amount": "600万元",
+            "credit_approval_opinion": (
+                "同意授信金额：600万元，期限2年，用于瓜果种植100亩，"
+                "年均净现金流95万元"
+            ),
+        }
+    )
+
+    hundred_layers = build_classification_query(hundred_payload)
+    six_hundred_layers = build_classification_query(six_hundred_payload)
+
+    assert hundred_layers == six_hundred_layers
+    loan_purpose_layer = next(
+        layer
+        for layer in hundred_layers
+        if layer.level is EvidenceLevel.LOAN_PURPOSE
+    )
+    approval_fact = next(
+        fact
+        for fact in loan_purpose_layer.facts
+        if fact.field_label == "授信审批意见"
+    )
+    assert approval_fact.raw_text == (
+        "同意授信金额：[金额]，期限2年，用于瓜果种植100亩，年均净现金流[金额]"
+    )
+    assert hundred_payload["credit_approval_opinion"].startswith("同意授信金额：100 万元")
+    assert six_hundred_payload["credit_approval_opinion"].startswith(
+        "同意授信金额：600万元"
+    )
+
+
 def test_initial_classification_saves_first_completed_version() -> None:
     session = MagicMock()
     case = _case()

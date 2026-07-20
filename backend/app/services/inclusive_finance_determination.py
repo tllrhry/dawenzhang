@@ -414,7 +414,9 @@ def _parse_amount(value: object, *, allow_units: bool) -> float | None:
 
 def _determine_borrower_type(raw: Mapping[str, str]) -> str:
     entity_type = raw["entity_type"]
-    if "农户" in entity_type:
+    if "农户" in entity_type or any(
+        _is_yes(raw[key]) for key in FARMER_FIELD_KEYS
+    ):
         return "farmer"
     if "个体工商户" in entity_type:
         return "individual_business"
@@ -422,8 +424,6 @@ def _determine_borrower_type(raw: Mapping[str, str]) -> str:
         return "small_micro_owner"
     if "企业" in entity_type:
         return "enterprise"
-    if any(_is_yes(raw[key]) for key in FARMER_FIELD_KEYS):
-        return "farmer"
     return "enterprise"
 
 

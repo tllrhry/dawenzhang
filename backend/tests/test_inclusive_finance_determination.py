@@ -324,15 +324,11 @@ def test_each_farmer_identity_condition_fills_missing_entity_type(field: str) ->
 
 
 @pytest.mark.parametrize(
-    ("entity_type", "expected_type", "expected_category"),
-    (
-        ("企业", "enterprise", "小微企业贷款"),
-        ("个体工商户", "individual_business", "个体工商户经营性贷款"),
-        ("小微企业主", "small_micro_owner", "小微企业主经营性贷款"),
-    ),
+    "entity_type",
+    ("企业", "个体工商户", "小微企业主"),
 )
-def test_explicit_non_farmer_type_is_not_overridden_by_farmer_supporting_fields(
-    entity_type: str, expected_type: str, expected_category: str
+def test_farmer_identity_conditions_override_non_farmer_entity_type(
+    entity_type: str,
 ) -> None:
     result = determine_inclusive_finance(
         _payload(
@@ -345,11 +341,12 @@ def test_explicit_non_farmer_type_is_not_overridden_by_farmer_supporting_fields(
         _stage_a(),
     )
 
-    assert result["status"] == "completed"
-    assert result["borrower_type"] == expected_type
-    assert result["inclusive_category"] == expected_category
-    assert result["qualifies"] is True
-    assert "不覆盖明确主体类型" in result["determination"]["borrower_type_basis"]
+    assert result["status"] == "not_applicable"
+    assert result["borrower_type"] == "farmer"
+    assert result["inclusive_category"] is None
+    assert result["qualifies"] is False
+    assert "超过500万元上限" in result["basis"]
+    assert "农户条件命中" in result["determination"]["borrower_type_basis"]
 
 
 def test_identical_input_produces_an_identical_deterministic_decision() -> None:

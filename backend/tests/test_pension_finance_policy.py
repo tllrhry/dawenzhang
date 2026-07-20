@@ -89,7 +89,7 @@ def test_reused_main_business_share_extracts_explicit_pension_percentage(
         (False, "49", "80%", "not_applicable", "NON_PENSION_ENTERPRISE_LOAN_SHARE_BELOW_50"),
         (True, "", "", "completed", "PENSION_ENTERPRISE_UNKNOWN_LOAN_SHARE"),
         (False, "", "50%", "completed", "PENSION_REVENUE_AT_LEAST_50_UNKNOWN_LOAN_SHARE"),
-        (False, "", "49.99%", "needs_review", "NON_PENSION_SUBJECT_UNKNOWN_LOAN_SHARE"),
+        (False, "", "49.99%", "not_applicable", "NON_PENSION_SUBJECT_UNKNOWN_LOAN_SHARE"),
     ],
 )
 def test_pension_seven_cell_matrix(
@@ -141,10 +141,12 @@ def test_direction_catalog_match_does_not_turn_non_pension_enterprise_into_pensi
     )
 
     assert result is not None
-    assert result.result_status == "needs_review"
-    assert result.consistency_status == "needs_review"
+    assert result.result_status == "not_applicable"
+    assert result.consistency_status == "inconsistent"
     assert result.labels == ()
+    assert result.model_output["pension_decision"]["qualifies"] is False
     assert "企业行业不属于养老产业" in result.consistency_basis
+    assert "不属于养老金融" in result.consistency_basis
     assert (
         result.model_output["pension_decision"]["matrix_branch"]
         == "NON_PENSION_SUBJECT_UNKNOWN_LOAN_SHARE"

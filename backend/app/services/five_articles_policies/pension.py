@@ -18,7 +18,7 @@ from app.services.scenario_registry import (
 from app.services.technology_finance_mapping_query import FiveArticlesMappingLabel
 
 
-PENSION_FINANCE_DECISION_POLICY_VERSION = "pension-direction-share-v3"
+PENSION_FINANCE_DECISION_POLICY_VERSION = "pension-direction-share-v4"
 _THRESHOLD_PERCENT = Decimal("50")
 _LOAN_SHARE_FIELD = "pension_loan_direction_share"
 _REVENUE_SHARE_FIELD = "main_business_revenue_share"
@@ -215,7 +215,7 @@ class PensionFinancePolicy(FiveArticlesScenarioPolicy):
                 )
                 basis = (
                     "贷款实际投向已命中养老产业但养老投向占比未知；企业行业不属于养老产业，"
-                    f"且{revenue_detail}，当前不自动认定为养老金融，需人工复核养老投向占比。"
+                    f"且{revenue_detail}，主体辅助条件不成立，因此不属于养老金融。"
                 )
 
                 return self._decision(
@@ -224,10 +224,10 @@ class PensionFinancePolicy(FiveArticlesScenarioPolicy):
                     loan_share,
                     revenue_share,
                     matrix_branch=branch,
-                    result_status="needs_review",
-                    consistency_status="needs_review",
+                    result_status="not_applicable",
+                    consistency_status="inconsistent",
                     basis=basis,
-                    qualifies=None,
+                    qualifies=False,
                 )
 
         return self._decision(

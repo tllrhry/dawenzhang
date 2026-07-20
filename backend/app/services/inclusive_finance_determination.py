@@ -204,6 +204,48 @@ def determine_inclusive_finance(
     evidence_refs = _build_evidence_refs(
         raw, industry_code, industry_major_code, borrower_type
     )
+
+    # A proven exclusion is terminal even when another field is missing.  The
+    # missing field could affect the positive category, but cannot overturn a
+    # rule that already makes the case ineligible.
+    limit = 500.0 if borrower_type == "farmer" else 1000.0
+    exclusion_reasons: list[str] = []
+    if is_operating_loan is False:
+        exclusion_reasons.append("贷款不属于经营性贷款")
+    if credit_amount_wan is not None and credit_amount_wan > limit:
+        exclusion_reasons.append(
+            f"授信金额 {credit_amount_wan:g} 万元超过{limit:g}万元上限"
+        )
+    if (
+        borrower_type == "enterprise"
+        and computed_size not in {None, "不可判定", "小型", "微型"}
+    ):
+        exclusion_reasons.append(f"计算企业规模为{computed_size}，不属于小微企业")
+    if exclusion_reasons:
+        return _result(
+            status="not_applicable",
+            borrower_type=borrower_type,
+            computed_size=computed_size,
+            filled_size=filled_size,
+            is_operating_loan=is_operating_loan,
+            credit_amount_wan=credit_amount_wan,
+            qualifies=False,
+            inclusive_category=None,
+            basis="；".join(
+                (
+                    *exclusion_reasons,
+                    *(
+                        (farmer_registration_address_support,)
+                        if farmer_registration_address_support
+                        else ()
+                    ),
+                )
+            ),
+            evidence_refs=evidence_refs,
+            anomalies=anomalies,
+            determination=determination,
+        )
+
     if missing_elements:
         basis = f"关键要素不可判定：{'、'.join(dict.fromkeys(missing_elements))}"
         return _result(
@@ -222,38 +264,6 @@ def determine_inclusive_finance(
         )
 
     assert credit_amount_wan is not None and is_operating_loan is not None
-    reasons: list[str] = []
-    if not is_operating_loan:
-        reasons.append("贷款不属于经营性贷款")
-    limit = 500.0 if borrower_type == "farmer" else 1000.0
-    if credit_amount_wan > limit:
-        reasons.append(f"授信金额 {credit_amount_wan:g} 万元超过{limit:g}万元上限")
-    if borrower_type == "enterprise" and computed_size not in {"小型", "微型"}:
-        reasons.append(f"计算企业规模为{computed_size}，不属于小微企业")
-    if reasons:
-        return _result(
-            status="not_applicable",
-            borrower_type=borrower_type,
-            computed_size=computed_size,
-            filled_size=filled_size,
-            is_operating_loan=is_operating_loan,
-            credit_amount_wan=credit_amount_wan,
-            qualifies=False,
-            inclusive_category=None,
-            basis="；".join(
-                (
-                    *reasons,
-                    *(
-                        (farmer_registration_address_support,)
-                        if farmer_registration_address_support
-                        else ()
-                    ),
-                )
-            ),
-            evidence_refs=evidence_refs,
-            anomalies=anomalies,
-            determination=determination,
-        )
     category = {
         "farmer": "农户经营性贷款",
         "individual_business": "个体工商户经营性贷款",

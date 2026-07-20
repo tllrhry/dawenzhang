@@ -110,6 +110,50 @@ def test_unknown_operating_nature_needs_review() -> None:
 
 
 @pytest.mark.parametrize(
+    ("overrides", "expected_reason"),
+    (
+        (
+            {
+                "entity_type": "农户",
+                "credit_amount": "600万元",
+                "credit_variety": "",
+                "loan_purpose": "一般用途",
+            },
+            "超过500万元上限",
+        ),
+        (
+            {
+                "entity_type": "个体工商户",
+                "credit_amount": "",
+                "credit_variety": "个人消费贷款",
+                "loan_purpose": "购买家电",
+            },
+            "不属于经营性贷款",
+        ),
+        (
+            {
+                "entity_type": "企业",
+                "annual_revenue": "20000万元",
+                "employee_count": "1",
+                "credit_amount": "",
+                "credit_variety": "",
+                "loan_purpose": "一般用途",
+            },
+            "不属于小微企业",
+        ),
+    ),
+)
+def test_definite_exclusion_takes_priority_over_unresolved_fields(
+    overrides: dict[str, object], expected_reason: str
+) -> None:
+    result = determine_inclusive_finance(_payload(**overrides), _stage_a())
+
+    assert result["status"] == "not_applicable"
+    assert result["qualifies"] is False
+    assert expected_reason in result["basis"]
+
+
+@pytest.mark.parametrize(
     ("payload", "expected_source"),
     (
         ({"credit_variety": "流贷", "loan_purpose": "购买种子"}, "credit_variety"),
@@ -139,6 +183,7 @@ def test_conflicting_operating_evidence_needs_review() -> None:
     result = determine_inclusive_finance(
         _payload(
             entity_type="农户",
+            credit_amount="500万元",
             credit_variety="个人消费贷款",
             loan_purpose="采购原材料用于生产",
         ),

@@ -418,7 +418,7 @@ def test_missing_enterprise_mapping_requires_and_accepts_needs_review() -> None:
     assert "证据不足" in result.consistency_basis
 
 
-def test_missing_enterprise_mapping_and_unknown_share_requires_review() -> None:
+def test_non_pension_enterprise_with_unknown_share_is_not_applicable() -> None:
     loan = replace(
         _label(code="8514", name="老年人、残疾人养护服务", source_row=1520),
         scenario_id=PENSION_FINANCE_REGISTRATION.id,
@@ -441,10 +441,10 @@ def test_missing_enterprise_mapping_and_unknown_share_requires_review() -> None:
             client=client,
         )
 
-    assert result.consistency_status == "needs_review"
-    assert result.result_status == "needs_review"
+    assert result.consistency_status == "inconsistent"
+    assert result.result_status == "not_applicable"
     assert result.labels == ()
-    assert "需人工复核养老投向占比" in result.consistency_basis
+    assert "不属于养老金融" in result.consistency_basis
     assert len(result.consistency_evidence_refs) == 3
 
 

@@ -43,6 +43,9 @@ URBAN_AGRICULTURE_SUBCATEGORIES = (
     "乡村文旅或种养基地建设或农机制造销售",
 )
 _CHINESE_PATTERN = re.compile(r"[\u3400-\u9fff]")
+_QUOTED_ADDRESS_MARKER_PATTERN = re.compile(
+    r"['\"“‘「『](城关镇|市辖区|村|乡|镇)['\"”’」』]"
+)
 
 
 class AgricultureRelatedAIError(RuntimeError):
@@ -306,8 +309,14 @@ def _call_agriculture_ai(settings: Settings, client: httpx.Client | None, raw_te
                          task: str, labels: tuple[str, ...]) -> dict[str, object]:
     if not settings.deepseek_api_key:
         raise AgricultureRelatedAIError("DEEPSEEK_API_KEY is required for agriculture fallback")
+    grounding_instruction = (
+        "basis 必须直接复制输入中的至少连续4个中文字符；address 任务若只引用村、乡、镇、"
+        "城关镇或市辖区等短行政标志，必须逐字复制并用引号括起。"
+        if task == "address"
+        else "basis 必须直接复制输入中的至少连续4个中文字符。"
+    )
     payload = {"model": settings.deepseek_model, "response_format": {"type": "json_object"}, "temperature": 0,
-               "messages": [{"role": "system", "content": f"你只能从 {'、'.join(labels)} 中选择一个，并只输出 JSON：label、basis。basis 必须是非空中文，且引用输入原文。任务：{task}。"},
+               "messages": [{"role": "system", "content": f"你只能从 {'、'.join(labels)} 中选择一个，并只输出 JSON：label、basis。basis 必须是非空中文，且引用输入原文。{grounding_instruction}任务：{task}。"},
                              {"role": "user", "content": json.dumps({"source": source, "text": raw_text, "candidates": labels}, ensure_ascii=False)}]}
     owns_client = client is None
     http_client = client or httpx.Client(base_url=settings.deepseek_base_url.rstrip("/"), timeout=httpx.Timeout(settings.deepseek_timeout_seconds, connect=settings.http_connect_timeout_seconds))
@@ -334,7 +343,11 @@ def _call_agriculture_ai(settings: Settings, client: httpx.Client | None, raw_te
             raise AgricultureRelatedAIError("DeepSeek output must contain one label and one basis")
         label, basis = output[label_key], output[basis_key]
         original_values = [part.split("：", 1)[-1].strip() for part in _text(raw_text).split("；")]
-        grounded = isinstance(basis, str) and _has_grounded_basis(original_values, basis)
+        grounded = isinstance(basis, str) and _has_grounded_basis(
+            original_values,
+            basis,
+            task=task,
+        )
         if label not in labels or not isinstance(basis, str) or not basis.strip() or _CHINESE_PATTERN.search(basis) is None or not grounded:
             raise AgricultureRelatedAIError("DeepSeek basis must be Chinese and quote original input")
         return {"label": label, "basis": basis.strip(), "raw": output}
@@ -347,16 +360,37 @@ def _call_agriculture_ai(settings: Settings, client: httpx.Client | None, raw_te
             http_client.close()
 
 
-def _has_grounded_basis(original_values: list[str], basis: str, *, minimum_length: int = 4) -> bool:
+def _has_grounded_basis(
+    original_values: list[str],
+    basis: str,
+    *,
+    task: str,
+    minimum_length: int = 4,
+) -> bool:
     """Accept a rewritten citation when it preserves a meaningful Chinese phrase.
 
     Model explanations commonly omit connective words or add punctuation, so an
     entire field value is too strict.  Short placeholders such as ``无`` are
     deliberately ignored by requiring a contiguous Chinese overlap of at least
-    four characters.
+    four characters.  Address fallback additionally accepts a quoted short
+    administrative marker that is present verbatim in the source address; the
+    quoted, task-specific exception prevents generic label words or category-four
+    placeholders from weakening the shared grounding contract.
     """
-    return any(
+    if any(
         _longest_common_chinese_substring_length(value, basis) >= minimum_length
+        for value in original_values
+        if value
+    ):
+        return True
+    if task != "address":
+        return False
+    quoted_markers = {
+        match.group(1) for match in _QUOTED_ADDRESS_MARKER_PATTERN.finditer(basis)
+    }
+    return any(
+        marker in value
+        for marker in quoted_markers
         for value in original_values
         if value
     )

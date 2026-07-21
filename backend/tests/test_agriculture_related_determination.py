@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 import httpx
@@ -212,6 +213,9 @@ def test_category_two_ai_and_request_contract() -> None:
     assert result["method"] == "ai"
     assert b'"temperature":0' in body
     assert b'"response_format":{"type":"json_object"}' in body
+    system_prompt = json.loads(body)["messages"][0]["content"]
+    assert "至少连续4个中文字符" in system_prompt
+    assert "短行政标志" in system_prompt
 
 
 def test_category_two_ai_can_return_needs_review() -> None:
@@ -254,6 +258,32 @@ def test_category_two_accepts_rewritten_basis_with_meaningful_address_excerpt() 
     with _ai_client({"label": "城区", "basis": basis}) as client:
         result = determine_category_two({"registered_address": address}, _ai_settings(), client)
     assert result["result"] == "not_matched"
+
+
+def test_category_two_accepts_quoted_short_marker_for_mixed_address() -> None:
+    address = "江苏省南京市高淳区阳江镇（示例）"
+    basis = "文本中包含'镇'，通常指农村行政单位"
+    with _ai_client({"label": "农村地区", "basis": basis}) as client:
+        result = determine_category_two(
+            {"registered_address": address},
+            _ai_settings(),
+            client,
+        )
+    assert result["result"] == "matched"
+    assert result["method"] == "ai"
+    assert basis in result["basis"]
+
+
+def test_category_two_rejects_unquoted_short_marker_for_mixed_address() -> None:
+    address = "江苏省南京市高淳区阳江镇（示例）"
+    with _ai_client(
+        {"label": "农村地区", "basis": "文本中包含镇，通常指农村行政单位"}
+    ) as client, pytest.raises(AgricultureRelatedAIError):
+        determine_category_two(
+            {"registered_address": address},
+            _ai_settings(),
+            client,
+        )
 
 
 def test_agriculture_ai_rejects_basis_with_only_short_placeholder() -> None:

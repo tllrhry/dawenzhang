@@ -161,6 +161,9 @@ def _build_request_payload(
                     "当 dominant_main_business 非空时，表示原文存在单项占比不低于50%的"
                     "唯一主导主营：企业结论必须落在该主导主营对应的四级行业，绝对不得因"
                     "核心产品/服务中的其他条目或更低占比业务线改判；该锁定只约束企业结论。"
+                    "此时只有 dominant_main_business 才是本次比较中的主营；低于50%的其他"
+                    "业务线即使已登记、已有收入或属于经营范围，也不得称为主营，不得据此将"
+                    "其贷款投向回落为企业结论。"
                     "当 dominant_main_business 为空时，不存在主导主营锁定，企业结论继续按"
                     "上述四级证据优先级综合判定，既有行为不变。"
                     "企业结论与贷款投向结论都必须以各自候选携带的完整目录定义、包括和"
@@ -179,17 +182,19 @@ def _build_request_payload(
                     "冲突时必须以贸易合同揭示的资金真实流向为准。不得采用逐级降级只取"
                     "最高可用层的布尔机制，不得因某一类证据可用就丢弃其余证据，必须综合"
                     "三类证据得出真实投向。该融合只决定贷款投向，不得改变企业结论。"
-                    "贸易合同标的物或贷款用途若是为企业自身主营经营采购的投入品或原材料，"
-                    "真实投向仍属企业主营，必须回落企业结论，不得改判为该投入品所属行业；"
-                    "只有资金实际流向区别于主营经营的领域时才可另判。"
+                    "贸易合同标的物或贷款用途若是为某项经营活动采购的投入品或原材料，真实"
+                    "投向应归入使用该投入品的经营活动，不得改判为该投入品所属行业；具体用途"
+                    "仍必须在贷款投向候选池中独立完成目录分类，不得直接借用企业结论。"
                     "贷款投向必须按以下决策树判定：一、贷款用途为空或仅为经营周转、"
                     "流动资金、经营使用等笼统表述，且贸易合同未揭示具体非主营经营领域、"
                     "授信审批意见也未限定具体经营领域时，返回 specificity=generic，投向代码"
                     "和名称必须回落为企业结论；二、融合三类证据得出的真实投向写明具体经营"
-                    "项时，必须先判断该经营项是否属于已识别的主营；命中主营则返回 "
-                    "specificity=specific，投向仍回落为企业结论；只有确认不属于主营时才可"
-                    "独立判断。三、真实投向确认不属于主营后，无论是否已登记在营业执照经营"
-                    "范围内，都必须依据融合后的真实资金流向和给定候选的完整目录定义独立分类；"
+                    "项时，返回 specificity=specific，并只依据贷款用途、交易品类和审批约束"
+                    "形成的 loan_direction_candidates 独立分类；即使具体经营项服务于企业"
+                    "主营，也必须由贷款投向候选的目录定义独立支持，独立分类结果可以与企业"
+                    "代码相同，但不得直接回落或借用 enterprise_candidates。三、具体经营项"
+                    "属于低占比业务线或其他经营领域时，无论是否已登记在营业执照经营范围内，"
+                    "都必须依据融合后的真实资金流向和给定候选的完整目录定义独立分类；"
                     "营业执照经营范围只用于说明企业现有经营边界，不得作为否定真实贷款投向或"
                     "拒绝选择候选的门槛。四、只有给定候选均无法覆盖真实投向时，贷款投向才"
                     "返回 no_match=true 及非空 reason；reason 必须说明候选定义为何不匹配或"
@@ -206,8 +211,8 @@ def _build_request_payload(
                     "仍须按实际资金用途完成分类。企业代码/名称"
                     "只能从"
                     "enterprise_candidates 的同一记录选择；specific 的贷款投向代码/名称"
-                    "只能从 enterprise_candidates 或 loan_direction_candidates 的同一记录"
-                    "选择，generic 只能等于企业结论。必须仅返回 JSON，根对象只能包含"
+                    "只能从 loan_direction_candidates 的同一记录选择，generic 只能等于企业"
+                    "结论且只能使用 enterprise_candidates。必须仅返回 JSON，根对象只能包含"
                     "enterprise 和 loan_direction。每个成功子结论返回 no_match=false、"
                     "industry_code、industry_name、matching_basis，贷款投向还须返回"
                     "specificity；每个无匹配子结论仅返回 no_match=true 和非空 reason，"
@@ -365,22 +370,26 @@ def _validate_model_response(
         loan_code = _required_text(loan_output, "industry_code")
         loan_name = _required_text(loan_output, "industry_name")
         loan_basis = _required_text(loan_output, "matching_basis")
+        if loan_specificity == "generic":
+            if enterprise_code is None:
+                raise NationalEconomyClassificationError(
+                    "generic loan_direction requires successful enterprise and loan conclusions"
+                )
+            if (loan_code, loan_name) != (enterprise_code, enterprise_name):
+                raise NationalEconomyClassificationError(
+                    "generic loan_direction must exactly match the enterprise conclusion"
+                )
+        allowed_loan_candidates = (
+            loan_direction_candidates
+            if loan_specificity == "specific"
+            else candidates
+        )
         loan_candidate = _require_candidate_pair(
             loan_code,
             loan_name,
-            (*candidates, *loan_direction_candidates),
+            allowed_loan_candidates,
             branch="loan_direction",
         )
-
-    if loan_specificity == "generic":
-        if enterprise_code is None or loan_code is None:
-            raise NationalEconomyClassificationError(
-                "generic loan_direction requires successful enterprise and loan conclusions"
-            )
-        if (loan_code, loan_name) != (enterprise_code, enterprise_name):
-            raise NationalEconomyClassificationError(
-                "generic loan_direction must exactly match the enterprise conclusion"
-            )
 
     enterprise_major_code = (
         enterprise_candidate.major_category_code

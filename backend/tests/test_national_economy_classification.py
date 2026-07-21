@@ -230,10 +230,77 @@ def test_specific_loan_direction_can_select_enterprise_candidate_and_recomputes_
 
     with _client(output) as client:
         result = classify_national_economy(
-            _evidence(), candidates, _settings(), client=client
+            _evidence(),
+            candidates,
+            _settings(),
+            client=client,
+            loan_direction_candidates=candidates,
         )
 
     assert result.loan_matches_enterprise is True
+
+
+def test_specific_loan_direction_cannot_borrow_enterprise_only_candidate() -> None:
+    enterprise_candidates = (
+        _candidate("1951", "纺织面料鞋制造", "纺织面料鞋制造"),
+    )
+    loan_candidates = (
+        _candidate("1819", "其他机织服装制造", "其他机织服装制造"),
+    )
+    output = _dual_success(
+        enterprise_code="1951",
+        enterprise_name="纺织面料鞋制造",
+        loan_code="1951",
+        loan_name="纺织面料鞋制造",
+        specificity="specific",
+    )
+
+    with _client(output) as client:
+        with pytest.raises(
+            NationalEconomyClassificationError,
+            match="loan_direction.*same candidate",
+        ):
+            classify_national_economy(
+                _dominant_evidence("鞋制造"),
+                enterprise_candidates,
+                _settings(),
+                client=client,
+                loan_direction_candidates=loan_candidates,
+            )
+
+
+@pytest.mark.parametrize(
+    ("enterprise", "loan"),
+    [
+        (("6513", "应用软件开发"), ("6210", "正餐服务")),
+        (("4710", "住宅房屋建筑"), ("5165", "建材批发")),
+        (("2927", "日用塑料制品制造"), ("5199", "其他未列明批发业")),
+    ],
+)
+def test_specific_loan_candidate_pool_isolated_across_industries(
+    enterprise: tuple[str, str],
+    loan: tuple[str, str],
+) -> None:
+    output = _dual_success(
+        enterprise_code=enterprise[0],
+        enterprise_name=enterprise[1],
+        loan_code=enterprise[0],
+        loan_name=enterprise[1],
+        specificity="specific",
+    )
+
+    with _client(output) as client:
+        with pytest.raises(
+            NationalEconomyClassificationError,
+            match="loan_direction.*same candidate",
+        ):
+            classify_national_economy(
+                _dominant_evidence(enterprise[1]),
+                (_candidate(*enterprise, enterprise[1]),),
+                _settings(),
+                client=client,
+                loan_direction_candidates=(_candidate(*loan, loan[1]),),
+            )
 
 
 def test_matched_candidate_major_codes_are_captured_from_the_correct_pools() -> None:
@@ -378,9 +445,13 @@ def test_request_contains_two_candidate_pools_and_loan_decision_tree() -> None:
     assert "贸易合同与授信审批意见冲突时必须以贸易合同" in system_prompt
     assert "不得采用逐级降级只取最高可用层的布尔机制" in system_prompt
     assert "必须综合三类证据得出真实投向" in system_prompt
-    assert "为企业自身主营经营采购的投入品或原材料" in system_prompt
-    assert "真实投向仍属企业主营" in system_prompt
+    assert "为某项经营活动采购的投入品或原材料" in system_prompt
+    assert "不得直接借用企业结论" in system_prompt
     assert "不得改判为该投入品所属行业" in system_prompt
+    assert "低于50%的其他业务线" in system_prompt
+    assert "不得称为主营" in system_prompt
+    assert "只能从 loan_direction_candidates 的同一记录选择" in system_prompt
+    assert "generic 只能等于企业结论且只能使用 enterprise_candidates" in system_prompt
     assert (
         "贷款投向 matching_basis 必须明确指明真实投向依据贷款用途、贸易合同核心"
         "交易品类、授信审批意见中的哪一类或哪几类证据判定"
@@ -487,9 +558,9 @@ def test_request_carries_complete_catalog_and_definition_grounded_constraints() 
     assert "批发与零售按客户对象区分" in system_prompt
     assert "面向经营单位、经销商或集团等客户的销售属于批发" in system_prompt
     assert "面向最终消费者的销售属于零售" in system_prompt
-    assert "必须先判断该经营项是否属于已识别的主营" in system_prompt
-    assert "投向仍回落为企业结论" in system_prompt
-    assert "只有确认不属于主营时才可独立判断" in system_prompt
+    assert "具体用途仍必须在贷款投向候选池中独立完成目录分类" in system_prompt
+    assert "不得直接借用企业结论" in system_prompt
+    assert "不得直接回落或借用 enterprise_candidates" in system_prompt
     assert "matching_basis 与 reason 的内容必须全中文" in system_prompt
     assert "直接用业务语言陈述结论与支撑事实" in system_prompt
     assert "不得写采用了哪个优先级、字段或证据层" in system_prompt

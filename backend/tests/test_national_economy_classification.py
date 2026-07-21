@@ -623,7 +623,8 @@ def test_request_carries_complete_catalog_and_definition_grounded_constraints() 
     assert "批发与零售按客户对象区分" in system_prompt
     assert "面向经营单位、经销商或集团等客户的销售属于批发" in system_prompt
     assert "面向最终消费者的销售属于零售" in system_prompt
-    assert "或将资金支付给其他行业购买员工培训等独立" in system_prompt
+    assert "将资金支付给其他行业购买员工培训、软件" in system_prompt
+    assert "归入该活动本身，不得归入" in system_prompt
     assert "借款人自身使用资金开展另一项" in system_prompt
     assert "不得仅因交易标的为著作权转让就把软件技术购买归入知识产权服务" in system_prompt
     assert "已有少量收入或使用相似原材料而回落企业结论" in system_prompt

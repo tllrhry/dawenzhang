@@ -13,6 +13,15 @@ const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\/$
 export type ClassificationStatus = 'completed' | 'needs_review' | 'classification_failed'
 export type FiveArticlesStatus = ClassificationStatus | 'not_applicable'
 export type ConsistencyStatus = 'consistent' | 'inconsistent' | 'needs_review' | 'not_applicable'
+export type EnterpriseRegistryType = 'high_tech' | 'specialized_innovation'
+
+export interface EnterpriseRegistryUploadResult {
+  registry_type: EnterpriseRegistryType
+  version: number
+  row_count: number
+  reused: boolean
+  published_at: string
+}
 
 export interface InputField {
   field: string
@@ -257,6 +266,19 @@ export function createCase(scenarioId: ScenarioId, file: File): Promise<CreatedC
   const body = new FormData()
   body.append('file', file)
   return requestJson<CreatedCase>(scenarioCasesPath(scenarioId), { method: 'POST', body })
+}
+
+export function uploadEnterpriseRegistry(
+  registryType: EnterpriseRegistryType,
+  file: File,
+): Promise<EnterpriseRegistryUploadResult> {
+  const body = new FormData()
+  body.append('registry_type', registryType)
+  body.append('file', file)
+  return requestJson<EnterpriseRegistryUploadResult>(
+    '/technology-finance/enterprise-registries',
+    { method: 'POST', body },
+  )
 }
 
 export function getCase(scenarioId: ScenarioId, caseId: string): Promise<ClassificationCase> {

@@ -7,7 +7,9 @@ import {
   Descriptions,
   Divider,
   Input,
+  Modal,
   Progress,
+  Radio,
   Steps,
   Tag,
   Timeline,
@@ -20,6 +22,7 @@ import {
   BankOutlined,
   CheckCircleFilled,
   CloudUploadOutlined,
+  DatabaseOutlined,
   DownloadOutlined,
   FileTextOutlined,
   HistoryOutlined,
@@ -40,6 +43,7 @@ import {
   getHistory,
   submitObjection,
   templateUrl,
+  uploadEnterpriseRegistry,
 } from './api'
 import type {
   AgricultureRelatedResult,
@@ -48,6 +52,8 @@ import type {
   ClassificationHistoryItem,
   ClassificationOutcome,
   ClassificationResult,
+  EnterpriseRegistryType,
+  EnterpriseRegistryUploadResult,
   FiveArticlesResult,
   InclusiveFinanceResult,
   InclusiveFinanceWorkflowResult,
@@ -183,6 +189,53 @@ function AppFooter() {
 
 function HomePage() {
   const navigate = useNavigate()
+  const [registryModalOpen, setRegistryModalOpen] = useState(false)
+  const [registryType, setRegistryType] = useState<EnterpriseRegistryType>('high_tech')
+  const [registryFile, setRegistryFile] = useState<File>()
+  const [registryUploadResult, setRegistryUploadResult] = useState<EnterpriseRegistryUploadResult>()
+  const [registryUploadError, setRegistryUploadError] = useState<string>()
+  const [registryUploading, setRegistryUploading] = useState(false)
+  const registryUploadProps: UploadProps = {
+    accept: '.pdf,application/pdf',
+    maxCount: 1,
+    beforeUpload: (file) => {
+      if (!file.name.toLowerCase().endsWith('.pdf')) {
+        setRegistryUploadError('请上传单个 .pdf 文件')
+        return Upload.LIST_IGNORE
+      }
+      setRegistryFile(file)
+      setRegistryUploadError(undefined)
+      setRegistryUploadResult(undefined)
+      return false
+    },
+    onRemove: () => setRegistryFile(undefined),
+    showUploadList: false,
+  }
+  const openRegistryImport = () => {
+    setRegistryModalOpen(true)
+    setRegistryFile(undefined)
+    setRegistryUploadResult(undefined)
+    setRegistryUploadError(undefined)
+  }
+  const closeRegistryImport = () => {
+    if (!registryUploading) setRegistryModalOpen(false)
+  }
+  const submitRegistryImport = async () => {
+    if (!registryFile) return
+    setRegistryUploading(true)
+    setRegistryUploadError(undefined)
+    setRegistryUploadResult(undefined)
+    try {
+      setRegistryUploadResult(await uploadEnterpriseRegistry(registryType, registryFile))
+    } catch (error) {
+      setRegistryUploadError(error instanceof ApiError ? error.message : '企业名单导入失败，请稍后重试。')
+    } finally {
+      setRegistryUploading(false)
+    }
+  }
+  const registryResultLabel = registryUploadResult?.registry_type === 'high_tech'
+    ? '高新技术企业名单'
+    : '专精特新企业名单'
   return (
     <>
       <section className="hero-section">
@@ -217,6 +270,46 @@ function HomePage() {
           </Card>
           <FiveArticlesScenario />
         </section>
+
+        <section className="enterprise-registry-toolbar" aria-label="企业名单维护">
+          <div className="enterprise-registry-toolbar-icon"><DatabaseOutlined /></div>
+          <div>
+            <strong>企业名单维护</strong>
+            <span>导入高新技术或专精特新企业名单 PDF，发布后用于科技金融名单匹配。</span>
+          </div>
+          <Button type="primary" size="large" icon={<CloudUploadOutlined />} onClick={openRegistryImport}>导入企业名单</Button>
+        </section>
+
+        <Modal
+          className="enterprise-registry-modal"
+          title="导入企业名单"
+          open={registryModalOpen}
+          okText="上传并发布"
+          cancelText="关闭"
+          confirmLoading={registryUploading}
+          okButtonProps={{ disabled: !registryFile || registryUploading }}
+          cancelButtonProps={{ disabled: registryUploading }}
+          maskClosable={!registryUploading}
+          onOk={() => void submitRegistryImport()}
+          onCancel={closeRegistryImport}
+        >
+          <p className="enterprise-registry-description">请选择名单类型，并上传与项目现有名单格式一致的 PDF。表格须包含连续的“序号”和“企业名称”。</p>
+          <div className="enterprise-registry-type">
+            <b>名单类型</b>
+            <Radio.Group value={registryType} onChange={(event) => { setRegistryType(event.target.value as EnterpriseRegistryType); setRegistryUploadResult(undefined); setRegistryUploadError(undefined) }}>
+              <Radio.Button value="high_tech">高新技术企业名单</Radio.Button>
+              <Radio.Button value="specialized_innovation">专精特新企业名单</Radio.Button>
+            </Radio.Group>
+          </div>
+          <Upload.Dragger {...registryUploadProps} className="enterprise-registry-dragger">
+            <p className="ant-upload-drag-icon"><CloudUploadOutlined /></p>
+            <p className="ant-upload-text">点击或拖拽企业名单 PDF 到此处</p>
+            <p className="ant-upload-hint">仅支持单个 PDF，文件大小不超过 20 MB</p>
+          </Upload.Dragger>
+          {registryFile && <div className="selected-file"><CheckCircleFilled /><span>{registryFile.name}</span><button type="button" disabled={registryUploading} onClick={() => setRegistryFile(undefined)}>移除</button></div>}
+          {registryUploadError && <Alert className="enterprise-registry-feedback" type="error" showIcon message={registryUploadError} />}
+          {registryUploadResult && <Alert className="enterprise-registry-feedback" type="success" showIcon message={`${registryResultLabel}导入成功`} description={`版本 ${registryUploadResult.version} · ${registryUploadResult.row_count} 家企业${registryUploadResult.reused ? ' · 文件未变化，已复用现有版本' : ' · 已发布新版本'}`} />}
+        </Modal>
 
         <Alert className="workflow-alert" showIcon icon={<InfoCircleOutlined />} message="请选择业务分类入口，进入后按流程完成模板下载、案例上传与智能判定，获取分类结果。" />
 
@@ -491,27 +584,24 @@ function ResultPanel({ scenarioId, caseData, result, stageBResult, errorMessage,
   }
   return <section className="result-layout">
     {errorMessage && <Alert className="result-error" type="error" showIcon message={errorMessage} action={<Button size="small" onClick={onRetry}>重试分类</Button>} />}
+    <Card className="result-card conclusion-result-card" bordered={false} title={isFiveArticles ? 'Stage A · 国民经济行业分类' : 'AI 判定结论'}>
+      <div className={`result-status actual-loan-conclusion ${stageAFailed ? 'is-failed' : needsReview ? 'is-review' : ''}`}><span><CheckCircleFilled /></span><div><p>实际贷款投向结论</p><h2 className="final-decision">{result.loan_industry_name || stageAStatusLabel}</h2><b className="actual-loan-code">{result.loan_industry_display_code || '代码待确认'}</b><small>GB/T 4754-2017 · Stage A {stageAStatusLabel} · 版本 {result.version}</small></div></div>
+      <Descriptions className="result-details stage-a-industry-details" column={1} size="small">
+        <Descriptions.Item label="实际贷款投向代码">{result.loan_industry_display_code || '--'}</Descriptions.Item>
+        <Descriptions.Item label="实际贷款投向名称">{result.loan_industry_name || '--'}</Descriptions.Item>
+        <Descriptions.Item label="企业行业代码">{result.industry_display_code || '--'}</Descriptions.Item>
+        <Descriptions.Item label="企业行业名称">{result.industry_name || '--'}</Descriptions.Item>
+        <Descriptions.Item label="案例状态"><Tag color={stageAFailed ? 'error' : needsReview ? 'warning' : 'success'}>{stageAStatusLabel}</Tag></Descriptions.Item>
+        <Descriptions.Item label="贷款投向是否一致"><Tag className="key-decision-tag" color={result.loan_matches_enterprise === true ? 'success' : 'warning'}>{loanConsistencyLabel}</Tag></Descriptions.Item>
+        <Descriptions.Item label="贷款投向匹配依据">{result.loan_matching_basis || '--'}</Descriptions.Item>
+        <Descriptions.Item label="企业行业匹配依据">{result.matching_basis || '--'}</Descriptions.Item>
+        {result.objection?.description && <Descriptions.Item label="关联异议"><span className="objection-highlight">{result.objection.description}</span></Descriptions.Item>}
+      </Descriptions>
+    </Card>
     <Card className="result-card input-result-card" bordered={false} title="Word 企业信息">
       <Descriptions className="result-details source-details" column={1} size="small">
         <Descriptions.Item label="原始文件名">{caseData.original_filename || '--'}</Descriptions.Item>
         {caseData.input_fields.map((field) => <Descriptions.Item key={field.field} label={field.label}>{field.value || '--'}</Descriptions.Item>)}
-      </Descriptions>
-    </Card>
-    <Card className="result-card conclusion-result-card" bordered={false} title={isFiveArticles ? 'Stage A · 国民经济行业分类' : 'AI 判定结论'}>
-      <div className={`result-status ${stageAFailed ? 'is-failed' : needsReview ? 'is-review' : ''}`}><span><CheckCircleFilled /></span><div><p>Stage A {stageAStatusLabel}</p><h2 className="final-decision">{result.industry_name || stageAStatusLabel}</h2><small>GB/T 4754-2017 · 四级行业分类结果 · 版本 {result.version}</small></div></div>
-      <Descriptions className="result-details" column={1} size="small">
-        <Descriptions.Item label="行业代码">{result.industry_display_code || '--'}</Descriptions.Item>
-        <Descriptions.Item label="行业名称">{result.industry_name || '--'}</Descriptions.Item>
-        <Descriptions.Item label="案例状态"><Tag color={stageAFailed ? 'error' : needsReview ? 'warning' : 'success'}>{stageAStatusLabel}</Tag></Descriptions.Item>
-        <Descriptions.Item label="匹配依据">{result.matching_basis || '--'}</Descriptions.Item>
-      </Descriptions>
-      <Divider className="loan-direction-divider" orientation="left" plain>贷款投向结论</Divider>
-      <Descriptions className="result-details loan-direction-details" column={1} size="small">
-        <Descriptions.Item label="贷款投向代码">{result.loan_industry_display_code || '--'}</Descriptions.Item>
-        <Descriptions.Item label="贷款投向名称">{result.loan_industry_name || '--'}</Descriptions.Item>
-        <Descriptions.Item label="贷款投向是否一致"><Tag className="key-decision-tag" color={result.loan_matches_enterprise === true ? 'success' : 'warning'}>{loanConsistencyLabel}</Tag></Descriptions.Item>
-        <Descriptions.Item label="贷款投向匹配依据">{result.loan_matching_basis || '--'}</Descriptions.Item>
-        {result.objection?.description && <Descriptions.Item label="关联异议"><span className="objection-highlight">{result.objection.description}</span></Descriptions.Item>}
       </Descriptions>
     </Card>
     {isFiveArticles && scenarioId !== INCLUSIVE_FINANCE_SCENARIO && scenarioId !== AGRICULTURE_RELATED_SCENARIO && <FiveArticlesResultCard scenarioId={scenarioId} result={technologyResult} stageAFailed={stageAFailed} stageAStatusLabel={stageAStatusLabel} />}

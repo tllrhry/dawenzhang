@@ -94,7 +94,38 @@ button { font: inherit; }
 .key-decision-tag { padding: 2px 9px; font-size: 14px; font-weight: 700; line-height: 22px; }
 .objection-highlight { display: inline-block; padding: 8px 11px; color: #a84b1f; background: #fff2e9; border: 1px solid #ffcda9; border-radius: 7px; font-weight: 700; line-height: 1.7; }
 
+.enterprise-registry-toolbar { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 16px; align-items: center; margin-top: 26px; padding: 18px 20px; background: linear-gradient(135deg, #fff, #f3f8ff); border: 1px solid #d8e6f8; border-radius: 14px; box-shadow: 0 8px 22px rgba(34, 75, 132, .05); }
+.enterprise-registry-toolbar-icon { display: grid; place-items: center; width: 48px; height: 48px; color: #1768e6; background: #eaf3ff; border-radius: 13px; font-size: 24px; }
+.enterprise-registry-toolbar strong, .enterprise-registry-toolbar span { display: block; }
+.enterprise-registry-toolbar strong { color: #172b50; font-size: 18px; }
+.enterprise-registry-toolbar span { margin-top: 4px; color: #71809a; line-height: 1.55; }
+.enterprise-registry-toolbar .ant-btn { min-width: 154px; font-weight: 700; }
+.enterprise-registry-description { margin-top: 0; color: #61738d; line-height: 1.7; }
+.enterprise-registry-type { display: grid; gap: 10px; margin: 20px 0; }
+.enterprise-registry-type > b { color: #263b5e; }
+.enterprise-registry-type .ant-radio-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.enterprise-registry-type .ant-radio-button-wrapper { text-align: center; }
+.enterprise-registry-dragger .ant-upload-drag { padding: 26px 16px !important; background: #f9fbff !important; border-color: #b9d4fa !important; }
+.enterprise-registry-dragger .ant-upload-drag-icon .anticon { color: #2774e8; font-size: 38px; }
+.enterprise-registry-feedback { margin-top: 14px; }
+
+.actual-loan-conclusion { padding: 24px; background: linear-gradient(135deg, #edf5ff 0%, #f9fcff 62%, #eef8f4 100%); border: 1px solid #d2e4fb; border-radius: 14px; }
+.actual-loan-conclusion > span { width: 64px; height: 64px; border-radius: 18px; font-size: 31px; box-shadow: 0 10px 22px rgba(45, 163, 107, .2); }
+.actual-loan-conclusion > div { min-width: 0; }
+.actual-loan-conclusion p { color: #3971ba; font-size: 15px; letter-spacing: .08em; }
+.actual-loan-conclusion .final-decision { margin: 5px 0 7px; font-size: clamp(30px, 4vw, 44px); line-height: 1.25; overflow-wrap: anywhere; }
+.actual-loan-code { display: inline-block; margin: 0 10px 8px 0; padding: 4px 10px; color: #1453a2; background: #fff; border: 1px solid #c9ddf6; border-radius: 8px; font-size: 16px; letter-spacing: .04em; }
+.actual-loan-conclusion small { display: inline-block; }
+.stage-a-industry-details .ant-descriptions-item-label { width: 150px; }
+
 @media (max-width: 760px) {
+  .enterprise-registry-toolbar { grid-template-columns: auto 1fr; }
+  .enterprise-registry-toolbar .ant-btn { grid-column: 1 / -1; width: 100%; }
+  .enterprise-registry-type .ant-radio-group { grid-template-columns: 1fr; }
+  .enterprise-registry-type .ant-radio-button-wrapper { width: 100%; }
+  .actual-loan-conclusion { align-items: flex-start; padding: 20px; }
+  .actual-loan-conclusion .final-decision { font-size: 30px; }
+  .stage-a-industry-details .ant-descriptions-item-label { width: 128px; }
   .technology-status-row { align-items: flex-start; flex-direction: column; }
   .consistency-panel { padding-right: 0; }
   .consistency-panel > .ant-tag { position: static; margin-bottom: 10px; }

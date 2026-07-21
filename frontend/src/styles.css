@@ -100,6 +100,7 @@ button { font: inherit; }
 .enterprise-registry-toolbar strong { color: #172b50; font-size: 18px; }
 .enterprise-registry-toolbar span { margin-top: 4px; color: #71809a; line-height: 1.55; }
 .enterprise-registry-toolbar .ant-btn { min-width: 154px; font-weight: 700; }
+.enterprise-registry-success { margin-top: 14px; }
 .enterprise-registry-description { margin-top: 0; color: #61738d; line-height: 1.7; }
 .enterprise-registry-type { display: grid; gap: 10px; margin: 20px 0; }
 .enterprise-registry-type > b { color: #263b5e; }

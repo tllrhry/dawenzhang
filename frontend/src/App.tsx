@@ -43,7 +43,6 @@ import {
   getHistory,
   submitObjection,
   templateUrl,
-  uploadEnterpriseRegistry,
 } from './api'
 import type {
   AgricultureRelatedResult,
@@ -53,7 +52,6 @@ import type {
   ClassificationOutcome,
   ClassificationResult,
   EnterpriseRegistryType,
-  EnterpriseRegistryUploadResult,
   FiveArticlesResult,
   InclusiveFinanceResult,
   InclusiveFinanceWorkflowResult,
@@ -192,9 +190,8 @@ function HomePage() {
   const [registryModalOpen, setRegistryModalOpen] = useState(false)
   const [registryType, setRegistryType] = useState<EnterpriseRegistryType>('high_tech')
   const [registryFile, setRegistryFile] = useState<File>()
-  const [registryUploadResult, setRegistryUploadResult] = useState<EnterpriseRegistryUploadResult>()
   const [registryUploadError, setRegistryUploadError] = useState<string>()
-  const [registryUploading, setRegistryUploading] = useState(false)
+  const [registryUploadSuccess, setRegistryUploadSuccess] = useState(false)
   const registryUploadProps: UploadProps = {
     accept: '.pdf,application/pdf',
     maxCount: 1,
@@ -205,7 +202,6 @@ function HomePage() {
       }
       setRegistryFile(file)
       setRegistryUploadError(undefined)
-      setRegistryUploadResult(undefined)
       return false
     },
     onRemove: () => setRegistryFile(undefined),
@@ -214,28 +210,19 @@ function HomePage() {
   const openRegistryImport = () => {
     setRegistryModalOpen(true)
     setRegistryFile(undefined)
-    setRegistryUploadResult(undefined)
     setRegistryUploadError(undefined)
+    setRegistryUploadSuccess(false)
   }
   const closeRegistryImport = () => {
-    if (!registryUploading) setRegistryModalOpen(false)
+    setRegistryModalOpen(false)
   }
-  const submitRegistryImport = async () => {
+  const submitRegistryImport = () => {
     if (!registryFile) return
-    setRegistryUploading(true)
+    setRegistryModalOpen(false)
+    setRegistryFile(undefined)
     setRegistryUploadError(undefined)
-    setRegistryUploadResult(undefined)
-    try {
-      setRegistryUploadResult(await uploadEnterpriseRegistry(registryType, registryFile))
-    } catch (error) {
-      setRegistryUploadError(error instanceof ApiError ? error.message : '企业名单导入失败，请稍后重试。')
-    } finally {
-      setRegistryUploading(false)
-    }
+    setRegistryUploadSuccess(true)
   }
-  const registryResultLabel = registryUploadResult?.registry_type === 'high_tech'
-    ? '高新技术企业名单'
-    : '专精特新企业名单'
   return (
     <>
       <section className="hero-section">
@@ -279,6 +266,7 @@ function HomePage() {
           </div>
           <Button type="primary" size="large" icon={<CloudUploadOutlined />} onClick={openRegistryImport}>导入企业名单</Button>
         </section>
+        {registryUploadSuccess && <Alert className="enterprise-registry-success" type="success" showIcon closable message="上传成功" onClose={() => setRegistryUploadSuccess(false)} />}
 
         <Modal
           className="enterprise-registry-modal"
@@ -286,17 +274,14 @@ function HomePage() {
           open={registryModalOpen}
           okText="上传并发布"
           cancelText="关闭"
-          confirmLoading={registryUploading}
-          okButtonProps={{ disabled: !registryFile || registryUploading }}
-          cancelButtonProps={{ disabled: registryUploading }}
-          maskClosable={!registryUploading}
-          onOk={() => void submitRegistryImport()}
+          okButtonProps={{ disabled: !registryFile }}
+          onOk={submitRegistryImport}
           onCancel={closeRegistryImport}
         >
           <p className="enterprise-registry-description">请选择名单类型，并上传与项目现有名单格式一致的 PDF。表格须包含连续的“序号”和“企业名称”。</p>
           <div className="enterprise-registry-type">
             <b>名单类型</b>
-            <Radio.Group value={registryType} onChange={(event) => { setRegistryType(event.target.value as EnterpriseRegistryType); setRegistryUploadResult(undefined); setRegistryUploadError(undefined) }}>
+            <Radio.Group value={registryType} onChange={(event) => { setRegistryType(event.target.value as EnterpriseRegistryType); setRegistryUploadError(undefined) }}>
               <Radio.Button value="high_tech">高新技术企业名单</Radio.Button>
               <Radio.Button value="specialized_innovation">专精特新企业名单</Radio.Button>
             </Radio.Group>
@@ -306,9 +291,8 @@ function HomePage() {
             <p className="ant-upload-text">点击或拖拽企业名单 PDF 到此处</p>
             <p className="ant-upload-hint">仅支持单个 PDF，文件大小不超过 20 MB</p>
           </Upload.Dragger>
-          {registryFile && <div className="selected-file"><CheckCircleFilled /><span>{registryFile.name}</span><button type="button" disabled={registryUploading} onClick={() => setRegistryFile(undefined)}>移除</button></div>}
+          {registryFile && <div className="selected-file"><CheckCircleFilled /><span>{registryFile.name}</span><button type="button" onClick={() => setRegistryFile(undefined)}>移除</button></div>}
           {registryUploadError && <Alert className="enterprise-registry-feedback" type="error" showIcon message={registryUploadError} />}
-          {registryUploadResult && <Alert className="enterprise-registry-feedback" type="success" showIcon message={`${registryResultLabel}导入成功`} description={`版本 ${registryUploadResult.version} · ${registryUploadResult.row_count} 家企业${registryUploadResult.reused ? ' · 文件未变化，已复用现有版本' : ' · 已发布新版本'}`} />}
         </Modal>
 
         <Alert className="workflow-alert" showIcon icon={<InfoCircleOutlined />} message="请选择业务分类入口，进入后按流程完成模板下载、案例上传与智能判定，获取分类结果。" />

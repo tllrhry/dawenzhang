@@ -192,6 +192,7 @@ function HomePage() {
   const [registryFile, setRegistryFile] = useState<File>()
   const [registryUploadError, setRegistryUploadError] = useState<string>()
   const [registryUploadSuccess, setRegistryUploadSuccess] = useState(false)
+  const [registryUploading, setRegistryUploading] = useState(false)
   const registryUploadProps: UploadProps = {
     accept: '.pdf,application/pdf',
     maxCount: 1,
@@ -216,11 +217,15 @@ function HomePage() {
   const closeRegistryImport = () => {
     setRegistryModalOpen(false)
   }
-  const submitRegistryImport = () => {
-    if (!registryFile) return
+  const submitRegistryImport = async () => {
+    if (!registryFile || registryUploading) return
+    setRegistryUploading(true)
+    setRegistryUploadError(undefined)
+    setRegistryUploadSuccess(false)
+    await new Promise((resolve) => window.setTimeout(resolve, 3000))
+    setRegistryUploading(false)
     setRegistryModalOpen(false)
     setRegistryFile(undefined)
-    setRegistryUploadError(undefined)
     setRegistryUploadSuccess(true)
   }
   return (
@@ -274,8 +279,9 @@ function HomePage() {
           open={registryModalOpen}
           okText="上传并发布"
           cancelText="关闭"
-          okButtonProps={{ disabled: !registryFile }}
-          onOk={submitRegistryImport}
+          confirmLoading={registryUploading}
+          okButtonProps={{ disabled: !registryFile || registryUploading }}
+          onOk={() => void submitRegistryImport()}
           onCancel={closeRegistryImport}
         >
           <p className="enterprise-registry-description">请选择名单类型，并上传与项目现有名单格式一致的 PDF。表格须包含连续的“序号”和“企业名称”。</p>

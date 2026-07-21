@@ -118,7 +118,7 @@ test('Stage A 优先突出实际贷款投向并明确展示企业行业信息', 
   assert.match(stylesSource, /\.actual-loan-conclusion \.final-decision/)
 })
 
-test('首页提供两类企业名单的单 PDF 导入入口并立即关闭弹窗提示成功', () => {
+test('首页提供两类企业名单的单 PDF 导入入口并等待三秒后关闭弹窗提示成功', () => {
   const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
   const apiSource = readFileSync(new URL('../src/api.ts', import.meta.url), 'utf8')
 
@@ -127,7 +127,8 @@ test('首页提供两类企业名单的单 PDF 导入入口并立即关闭弹窗
   assert.match(appSource, /accept: '\.pdf,application\/pdf'/)
   assert.match(appSource, /value="high_tech"/)
   assert.match(appSource, /value="specialized_innovation"/)
-  assert.match(appSource, /setRegistryModalOpen\(false\)[\s\S]*setRegistryUploadSuccess\(true\)/)
+  assert.match(appSource, /setRegistryUploading\(true\)[\s\S]*setTimeout\(resolve, 3000\)[\s\S]*setRegistryModalOpen\(false\)[\s\S]*setRegistryUploadSuccess\(true\)/)
+  assert.match(appSource, /confirmLoading=\{registryUploading\}/)
   assert.match(appSource, /message="上传成功"/)
   assert.doesNotMatch(appSource, /await uploadEnterpriseRegistry/)
   assert.match(apiSource, /\/technology-finance\/enterprise-registries/)

@@ -143,7 +143,7 @@ def test_rerank_returns_top_evidence_snapshots_with_configured_model() -> None:
         )
 
     assert captured_payload["model"] == settings.siliconflow_rerank_model
-    assert captured_payload["top_n"] == 8
+    assert captured_payload["top_n"] == 10
     assert "priority=1" in captured_payload["query"]
     assert "主营业务及营收占比" in captured_payload["query"]
     assert captured_payload["query"].index("priority=1") < captured_payload["query"].index("priority=4")
@@ -229,9 +229,9 @@ def test_complete_finalists_adds_all_catalog_fragments_without_reordering() -> N
     ]
 
 
-@pytest.mark.parametrize("top_n", [4, 9])
-def test_rerank_rejects_result_count_outside_five_to_eight(top_n: int) -> None:
-    with pytest.raises(ValueError, match="between 5 and 8"):
+@pytest.mark.parametrize("top_n", [4, 13])
+def test_rerank_rejects_result_count_outside_five_to_twelve(top_n: int) -> None:
+    with pytest.raises(ValueError, match="between 5 and 12"):
         rerank_candidates((), (), _settings(), top_n=top_n)
 
 

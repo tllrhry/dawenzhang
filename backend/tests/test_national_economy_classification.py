@@ -133,7 +133,30 @@ def _dual_success(
     loan_code: str = "0111",
     loan_name: str = "稻谷种植",
     specificity: str = "generic",
+    route: str | None = None,
 ) -> dict[str, object]:
+    selected_route = route or (
+        "use_enterprise_conclusion"
+        if (loan_code, loan_name) == (enterprise_code, enterprise_name)
+        else "classify_actual_direction"
+    )
+    if selected_route == "use_enterprise_conclusion":
+        loan_direction = {
+            "route": selected_route,
+            "matching_basis": "实际投向服务于企业主导主营，由服务端继承企业结论。",
+            "specificity": specificity,
+        }
+    else:
+        loan_direction = {
+            "route": selected_route,
+            "no_match": False,
+            "industry_code": loan_code,
+            "industry_name": loan_name,
+            "matching_basis": (
+                f"实际投向属于另一经营活动，对应四级代码 {loan_code}。"
+            ),
+            "specificity": specificity,
+        }
     return {
         "enterprise": {
             "no_match": False,
@@ -141,15 +164,7 @@ def _dual_success(
             "industry_name": enterprise_name,
             "matching_basis": "主营水稻种植，匹配四级代码 0111。",
         },
-        "loan_direction": {
-            "no_match": False,
-            "industry_code": loan_code,
-            "industry_name": loan_name,
-            "matching_basis": (
-                f"实际投向采购相关产品，匹配经营范围条目，对应四级代码 {loan_code}。"
-            ),
-            "specificity": specificity,
-        },
+        "loan_direction": loan_direction,
     }
 
 
@@ -224,7 +239,7 @@ def test_specific_loan_direction_can_select_loan_candidate_and_recomputes_false(
     assert "5263" in result.loan_matching_basis
 
 
-def test_specific_loan_direction_can_select_enterprise_candidate_and_recomputes_true() -> None:
+def test_specific_main_business_route_inherits_enterprise_without_loan_candidate() -> None:
     candidates = (_candidate("0111", "稻谷种植", "稻谷种植"),)
     output = _dual_success(specificity="specific")
 
@@ -234,9 +249,49 @@ def test_specific_loan_direction_can_select_enterprise_candidate_and_recomputes_
             candidates,
             _settings(),
             client=client,
-            loan_direction_candidates=candidates,
         )
 
+    assert result.loan_industry_code == result.industry_code
+    assert result.loan_matches_enterprise is True
+
+
+@pytest.mark.parametrize(
+    ("enterprise", "loan_only_candidate"),
+    [
+        (("4790", "其他房屋建筑业"), ("5090", "其他未列明建筑业")),
+        (("5132", "服装批发"), ("5131", "纺织品、针织品及原料批发")),
+        (("0141", "蔬菜种植"), ("0511", "种子种苗培育活动")),
+        (("6513", "应用软件开发"), ("6560", "信息技术咨询服务")),
+    ],
+)
+def test_specific_main_business_route_is_stable_when_retrieval_pools_disagree(
+    enterprise: tuple[str, str],
+    loan_only_candidate: tuple[str, str],
+) -> None:
+    output = _dual_success(
+        enterprise_code=enterprise[0],
+        enterprise_name=enterprise[1],
+        loan_code=enterprise[0],
+        loan_name=enterprise[1],
+        specificity="specific",
+        route="use_enterprise_conclusion",
+    )
+
+    with _client(output) as client:
+        result = classify_national_economy(
+            _dominant_evidence(enterprise[1]),
+            (_candidate(*enterprise, enterprise[1]),),
+            _settings(),
+            client=client,
+            loan_direction_candidates=(
+                _candidate(
+                    *loan_only_candidate,
+                    loan_only_candidate[1],
+                ),
+            ),
+        )
+
+    assert (result.loan_industry_code, result.loan_industry_name) == enterprise
     assert result.loan_matches_enterprise is True
 
 
@@ -253,6 +308,7 @@ def test_specific_loan_direction_cannot_borrow_enterprise_only_candidate() -> No
         loan_code="1951",
         loan_name="纺织面料鞋制造",
         specificity="specific",
+        route="classify_actual_direction",
     )
 
     with _client(output) as client:
@@ -287,6 +343,7 @@ def test_specific_loan_candidate_pool_isolated_across_industries(
         loan_code=enterprise[0],
         loan_name=enterprise[1],
         specificity="specific",
+        route="classify_actual_direction",
     )
 
     with _client(output) as client:
@@ -355,6 +412,7 @@ def test_no_match_branches_leave_major_codes_empty() -> None:
     output = {
         "enterprise": {"no_match": True, "reason": "企业候选均不匹配。"},
         "loan_direction": {
+            "route": "classify_actual_direction",
             "no_match": True,
             "reason": "贷款用途候选均不匹配。",
             "specificity": "specific",
@@ -445,13 +503,17 @@ def test_request_contains_two_candidate_pools_and_loan_decision_tree() -> None:
     assert "贸易合同与授信审批意见冲突时必须以贸易合同" in system_prompt
     assert "不得采用逐级降级只取最高可用层的布尔机制" in system_prompt
     assert "必须综合三类证据得出真实投向" in system_prompt
-    assert "为某项经营活动采购的投入品或原材料" in system_prompt
-    assert "不得直接借用企业结论" in system_prompt
-    assert "不得改判为该投入品所属行业" in system_prompt
+    assert "生产设备等直接进入主导主营产品/服务生产、销售或交付的投入品" in system_prompt
+    assert "不得改判为投入品所属行业" in system_prompt
+    assert "真实投向为资金收款方所提供产品或服务对应的行业" in system_prompt
+    assert "明确声明不用于主营业务投入时，不得返回 route=use_enterprise_conclusion" in system_prompt
+    assert "项目终端用途也不得改变借款人实际开展的经营活动" in system_prompt
+    assert "route=use_enterprise_conclusion" in system_prompt
+    assert "route=classify_actual_direction" in system_prompt
     assert "低于50%的其他业务线" in system_prompt
     assert "不得称为主营" in system_prompt
     assert "只能从 loan_direction_candidates 的同一记录选择" in system_prompt
-    assert "generic 只能等于企业结论且只能使用 enterprise_candidates" in system_prompt
+    assert "行业代码/名称由服务端继承企业结论" in system_prompt
     assert (
         "贷款投向 matching_basis 必须明确指明真实投向依据贷款用途、贸易合同核心"
         "交易品类、授信审批意见中的哪一类或哪几类证据判定"
@@ -466,7 +528,9 @@ def test_request_contains_two_candidate_pools_and_loan_decision_tree() -> None:
     assert "企业结论必须落在该主导主营对应的四级行业" in system_prompt
     assert "必须采用最高可用层；低层冲突不得推翻高层" in system_prompt
     assert "所选行业必须有业务证据命中其包括中的至少一条" in system_prompt
-    assert "根对象只能包含enterprise 和 loan_direction" in system_prompt
+    assert "语义匹配不要求业务原文与目录逐字重复" in system_prompt
+    assert "不得仅因业务名称比目录更细而拒绝最匹配候选" in system_prompt
+    assert "根对象只能包含 enterprise 和 loan_direction" in system_prompt
     assert "不得返回置信度、AI 总结或 matched" in system_prompt
     assert "一致性由服务端复算" in system_prompt
 
@@ -549,6 +613,7 @@ def test_request_carries_complete_catalog_and_definition_grounded_constraints() 
         expected_fragments
     )
     assert "所选行业必须有业务证据命中其包括中的至少一条" in system_prompt
+    assert "目录中的概括项、其他项或未列明项" in system_prompt
     assert "业务证据不得命中其不包括" in system_prompt
     assert "业务证据与候选定义相斥" in system_prompt
     assert "不得仅因候选重排靠前而选中" in system_prompt
@@ -558,9 +623,10 @@ def test_request_carries_complete_catalog_and_definition_grounded_constraints() 
     assert "批发与零售按客户对象区分" in system_prompt
     assert "面向经营单位、经销商或集团等客户的销售属于批发" in system_prompt
     assert "面向最终消费者的销售属于零售" in system_prompt
-    assert "具体用途仍必须在贷款投向候选池中独立完成目录分类" in system_prompt
-    assert "不得直接借用企业结论" in system_prompt
-    assert "不得直接回落或借用 enterprise_candidates" in system_prompt
+    assert "或将资金支付给其他行业购买员工培训等独立" in system_prompt
+    assert "借款人自身使用资金开展另一项" in system_prompt
+    assert "不得仅因交易标的为著作权转让就把软件技术购买归入知识产权服务" in system_prompt
+    assert "已有少量收入或使用相似原材料而回落企业结论" in system_prompt
     assert "matching_basis 与 reason 的内容必须全中文" in system_prompt
     assert "直接用业务语言陈述结论与支撑事实" in system_prompt
     assert "不得写采用了哪个优先级、字段或证据层" in system_prompt
@@ -571,6 +637,7 @@ def test_request_carries_complete_catalog_and_definition_grounded_constraints() 
 def test_specific_loan_direction_no_match_returns_needs_review() -> None:
     output = _dual_success()
     output["loan_direction"] = {
+        "route": "classify_actual_direction",
         "no_match": True,
         "reason": "实际投向购买芯片，超出经营范围，需人工确认。",
         "specificity": "specific",
@@ -600,6 +667,7 @@ def test_enterprise_no_match_returns_needs_review_without_forced_conclusion() ->
             "reason": "企业候选均不覆盖软件开发活动。",
         },
         "loan_direction": {
+            "route": "classify_actual_direction",
             "no_match": True,
             "reason": "具体贷款用途也不在经营范围内。",
             "specificity": "specific",
@@ -633,7 +701,12 @@ def test_enterprise_no_match_returns_needs_review_without_forced_conclusion() ->
 def test_each_success_side_requires_an_exact_candidate_pair(
     side: str, code: str, name: str, message: str
 ) -> None:
-    output = _dual_success(specificity="specific")
+    output = _dual_success(
+        loan_code="5263",
+        loan_name="汽车零配件零售",
+        specificity="specific",
+        route="classify_actual_direction",
+    )
     output[side]["industry_code"] = code
     output[side]["industry_name"] = name
 
@@ -674,7 +747,7 @@ def test_enterprise_cannot_select_from_loan_direction_candidate_pool() -> None:
             )
 
 
-def test_generic_loan_direction_must_equal_enterprise_conclusion() -> None:
+def test_generic_loan_direction_cannot_use_independent_route() -> None:
     output = _dual_success(
         loan_code="5263",
         loan_name="汽车零配件零售",
@@ -684,7 +757,7 @@ def test_generic_loan_direction_must_equal_enterprise_conclusion() -> None:
     with _client(output) as client:
         with pytest.raises(
             NationalEconomyClassificationError,
-            match="generic loan_direction must exactly match",
+            match="classify_actual_direction requires specificity=specific",
         ):
             classify_national_economy(
                 _evidence(),
@@ -694,6 +767,49 @@ def test_generic_loan_direction_must_equal_enterprise_conclusion() -> None:
                 loan_direction_candidates=(
                     _candidate("5263", "汽车零配件零售", "定义"),
                 ),
+            )
+
+
+def test_inherited_route_rejects_model_supplied_industry_fields() -> None:
+    output = _dual_success(specificity="specific")
+    output["loan_direction"].update(
+        {
+            "no_match": False,
+            "industry_code": "0111",
+            "industry_name": "稻谷种植",
+        }
+    )
+
+    with _client(output) as client:
+        with pytest.raises(
+            NationalEconomyClassificationError,
+            match="loan_direction inherited.*unexpected",
+        ):
+            classify_national_economy(
+                _evidence(),
+                (_candidate("0111", "稻谷种植", "定义"),),
+                _settings(),
+                client=client,
+            )
+
+
+@pytest.mark.parametrize(
+    "route", ["", "inherit", "needs_manual_review", None, True]
+)
+def test_loan_route_is_constrained(route: object) -> None:
+    output = _dual_success()
+    output["loan_direction"]["route"] = route
+
+    with _client(output) as client:
+        with pytest.raises(
+            NationalEconomyClassificationError,
+            match="route must be use_enterprise_conclusion or classify_actual_direction",
+        ):
+            classify_national_economy(
+                _evidence(),
+                (_candidate("0111", "稻谷种植", "定义"),),
+                _settings(),
+                client=client,
             )
 
 
@@ -728,6 +844,93 @@ def test_model_reported_match_flag_is_rejected() -> None:
                 _settings(),
                 client=client,
             )
+
+
+def test_invalid_model_contract_is_repaired_with_bounded_follow_up() -> None:
+    invalid_output = {
+        "enterprise": {"no_match": True, "reason": "企业候选暂未匹配。"},
+        "loan_direction": {
+            "route": "use_enterprise_conclusion",
+            "matching_basis": "贷款用途服务于企业主导主营。",
+            "specificity": "specific",
+        },
+    }
+    outputs = [invalid_output, _dual_success(specificity="specific")]
+    requests: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {"message": {"content": json.dumps(outputs.pop(0))}}
+                ]
+            },
+        )
+
+    settings = _settings()
+    with httpx.Client(
+        transport=httpx.MockTransport(handler), base_url=settings.deepseek_base_url
+    ) as client:
+        result = classify_national_economy(
+            _dominant_evidence("稻谷种植"),
+            (_candidate("0111", "稻谷种植", "定义"),),
+            settings,
+            client=client,
+        )
+
+    assert result.status == "completed"
+    assert result.loan_matches_enterprise is True
+    assert len(requests) == 2
+    assert [message["role"] for message in requests[1]["messages"]] == [
+        "system",
+        "user",
+        "assistant",
+        "user",
+    ]
+    assert "不得放宽候选约束" in requests[1]["messages"][-1]["content"]
+
+
+def test_repeated_invalid_model_contract_still_fails_after_three_attempts() -> None:
+    invalid_output = {
+        "enterprise": {"no_match": True, "reason": "企业候选暂未匹配。"},
+        "loan_direction": {
+            "route": "use_enterprise_conclusion",
+            "matching_basis": "贷款用途服务于企业主导主营。",
+            "specificity": "specific",
+        },
+    }
+    call_count = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal call_count
+        call_count += 1
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {"message": {"content": json.dumps(invalid_output)}}
+                ]
+            },
+        )
+
+    settings = _settings()
+    with httpx.Client(
+        transport=httpx.MockTransport(handler), base_url=settings.deepseek_base_url
+    ) as client:
+        with pytest.raises(
+            NationalEconomyClassificationError,
+            match="cannot inherit an unsuccessful enterprise conclusion",
+        ):
+            classify_national_economy(
+                _dominant_evidence("稻谷种植"),
+                (_candidate("0111", "稻谷种植", "定义"),),
+                settings,
+                client=client,
+            )
+
+    assert call_count == 3
 
 
 @pytest.mark.parametrize(
@@ -767,8 +970,43 @@ def test_http_failure_is_reported_as_classification_failure() -> None:
             )
 
 
-def test_timeout_is_reported_as_classification_failure() -> None:
+def test_transient_transport_failure_is_retried_without_changing_contract() -> None:
+    call_count = 0
+
     def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise httpx.ConnectTimeout("TLS handshake timed out")
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {"message": {"content": json.dumps(_dual_success())}}
+                ]
+            },
+        )
+
+    with httpx.Client(
+        transport=httpx.MockTransport(handler), base_url=_settings().deepseek_base_url
+    ) as client:
+        result = classify_national_economy(
+            _evidence(),
+            (_candidate("0111", "稻谷种植", "定义"),),
+            _settings(),
+            client=client,
+        )
+
+    assert call_count == 2
+    assert result.status == "completed"
+
+
+def test_timeout_is_reported_as_classification_failure() -> None:
+    call_count = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal call_count
+        call_count += 1
         raise httpx.ReadTimeout("timed out")
 
     with httpx.Client(
@@ -781,3 +1019,5 @@ def test_timeout_is_reported_as_classification_failure() -> None:
                 _settings(),
                 client=client,
             )
+
+    assert call_count == 3

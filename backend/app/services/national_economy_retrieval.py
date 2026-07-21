@@ -18,7 +18,7 @@ from app.services.national_economy_decision_policy import (
 
 RECALL_LIMIT = 30
 MIN_RERANK_RESULTS = 5
-MAX_RERANK_RESULTS = 8
+MAX_RERANK_RESULTS = 12
 CHUNK_TYPE_LABELS = {
     "definition": "定义",
     "include": "包括",
@@ -232,7 +232,7 @@ def rerank_candidates(
     client: httpx.Client | None = None,
 ) -> tuple[EvidenceSnapshot, ...]:
     if not MIN_RERANK_RESULTS <= top_n <= MAX_RERANK_RESULTS:
-        raise ValueError("top_n must be between 5 and 8")
+        raise ValueError("top_n must be between 5 and 12")
     if not candidates:
         return ()
     ordered_evidence = _ordered_available_layers(evidence_layers)

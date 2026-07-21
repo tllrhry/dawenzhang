@@ -6,7 +6,11 @@ from typing import Literal
 import httpx
 
 from app.core.config import Settings
-from app.services.national_economy_decision_policy import EvidenceLayer, EvidenceLevel
+from app.services.national_economy_decision_policy import (
+    EvidenceLayer,
+    EvidenceLevel,
+    LoanDirectionRoute,
+)
 from app.services.national_economy_retrieval import EvidenceSnapshot, display_chunk_type
 
 
@@ -16,8 +20,12 @@ _ENTERPRISE_SUCCESS_OUTPUT_FIELDS = frozenset(
     {"no_match", "industry_code", "industry_name", "matching_basis"}
 )
 _ENTERPRISE_NO_MATCH_OUTPUT_FIELDS = frozenset({"no_match", "reason"})
-_LOAN_SUCCESS_OUTPUT_FIELDS = frozenset(
+_LOAN_INHERITED_OUTPUT_FIELDS = frozenset(
+    {"route", "matching_basis", "specificity"}
+)
+_LOAN_CLASSIFIED_SUCCESS_OUTPUT_FIELDS = frozenset(
     {
+        "route",
         "no_match",
         "industry_code",
         "industry_name",
@@ -25,8 +33,11 @@ _LOAN_SUCCESS_OUTPUT_FIELDS = frozenset(
         "specificity",
     }
 )
-_LOAN_NO_MATCH_OUTPUT_FIELDS = frozenset({"no_match", "reason", "specificity"})
+_LOAN_CLASSIFIED_NO_MATCH_OUTPUT_FIELDS = frozenset(
+    {"route", "no_match", "reason", "specificity"}
+)
 _DUAL_OUTPUT_FIELDS = frozenset({"enterprise", "loan_direction"})
+_MAX_MODEL_VALIDATION_ATTEMPTS = 3
 
 
 class NationalEconomyClassificationError(RuntimeError):
@@ -94,19 +105,57 @@ def classify_national_economy(
         ),
     )
     try:
-        response = http_client.post(
-            "/chat/completions",
-            headers={"Authorization": f"Bearer {settings.deepseek_api_key}"},
-            json=request_payload,
-        )
-        response.raise_for_status()
-        return _validate_model_response(
-            response.json(),
-            candidates,
-            loan_direction_candidates,
-            candidate_snapshot,
-            objection,
-        )
+        for attempt in range(_MAX_MODEL_VALIDATION_ATTEMPTS):
+            try:
+                response = http_client.post(
+                    "/chat/completions",
+                    headers={"Authorization": f"Bearer {settings.deepseek_api_key}"},
+                    json=request_payload,
+                )
+                response.raise_for_status()
+            except httpx.TransportError:
+                if attempt == _MAX_MODEL_VALIDATION_ATTEMPTS - 1:
+                    raise
+                continue
+            response_payload = response.json()
+            try:
+                return _validate_model_response(
+                    response_payload,
+                    candidates,
+                    loan_direction_candidates,
+                    candidate_snapshot,
+                    objection,
+                )
+            except NationalEconomyClassificationError as exc:
+                if attempt == _MAX_MODEL_VALIDATION_ATTEMPTS - 1:
+                    raise
+                messages = list(request_payload["messages"])
+                try:
+                    previous_content = response_payload["choices"][0]["message"][
+                        "content"
+                    ]
+                except (TypeError, KeyError, IndexError):
+                    previous_content = None
+                if isinstance(previous_content, str) and previous_content.strip():
+                    messages.append(
+                        {"role": "assistant", "content": previous_content}
+                    )
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "上次 JSON 未通过服务端契约校验："
+                            f"{exc}。请重新检查全部业务证据与两组候选并返回完整 JSON。"
+                            "不得放宽候选约束，不得沿用矛盾结论。尤其当贷款投向选择 "
+                            "use_enterprise_conclusion 时，先依据主导主营重新逐项检查企业候选，"
+                            "若存在语义或结构上覆盖主导主营的企业候选，必须选出该候选并保持"
+                            "继承路由，不得仅为消除格式矛盾而改成独立分类。只有全部企业候选"
+                            "确实不匹配时，贷款投向才不得选择继承路由。"
+                        ),
+                    }
+                )
+                request_payload = {**request_payload, "messages": messages}
+        raise AssertionError("unreachable model validation loop")
     except (httpx.HTTPError, json.JSONDecodeError, TypeError, ValueError, KeyError) as exc:
         raise NationalEconomyClassificationError(
             f"DeepSeek classification failed: {exc}"
@@ -170,9 +219,17 @@ def _build_request_payload(
                     "不包括逐条校验：所选行业必须有业务证据命中其包括中的至少一条，且"
                     "业务证据不得命中其不包括；业务证据与候选定义相斥，或命中候选不包括"
                     "时，必须排除该候选，不得仅因候选重排靠前而选中。matching_basis 必须"
-                    "明确指出业务证据命中了所选行业包括中的哪一条。门类级结构性判别原则"
+                    "明确指出业务证据命中了所选行业包括中的哪一条。语义匹配不要求业务原文"
+                    "与目录逐字重复；目录中的概括项、其他项或未列明项可以覆盖语义明确的同类"
+                    "经营活动。只有全部企业候选都与主导主营定义相斥、命中不包括项或属于不同"
+                    "经营活动时，企业结论才可返回 no_match，不得仅因业务名称比目录更细而"
+                    "拒绝最匹配候选。门类级结构性判别原则"
                     "数量有限，不得逐项业务枚举关键词：批发与零售按客户对象区分，面向经营"
                     "单位、经销商或集团等客户的销售属于批发，面向最终消费者的销售属于零售。"
+                    "购买软件产品、软件著作权、源代码、算法模型或成套技术包，资金流向软件"
+                    "研发提供方的，属于购买软件产品与技术，归入软件开发相关行业；知识产权"
+                    "服务仅指知识产权代理、登记、鉴定、评估、检索及交易中介等专门服务活动，"
+                    "不得仅因交易标的为著作权转让就把软件技术购买归入知识产权服务。"
                     "判定贷款真实投向时必须融合三类证据：贷款用途详细描述是主信号，"
                     "贸易合同核心交易品类用于揭示并校正资金真实流向，授信审批意见是"
                     "资金用途的刚性约束。固定仲裁优先顺序为贷款用途详细描述高于贸易合同"
@@ -182,19 +239,27 @@ def _build_request_payload(
                     "冲突时必须以贸易合同揭示的资金真实流向为准。不得采用逐级降级只取"
                     "最高可用层的布尔机制，不得因某一类证据可用就丢弃其余证据，必须综合"
                     "三类证据得出真实投向。该融合只决定贷款投向，不得改变企业结论。"
-                    "贸易合同标的物或贷款用途若是为某项经营活动采购的投入品或原材料，真实"
-                    "投向应归入使用该投入品的经营活动，不得改判为该投入品所属行业；具体用途"
-                    "仍必须在贷款投向候选池中独立完成目录分类，不得直接借用企业结论。"
+                    "必须先区分交易对象、项目终端用途与借款人实际开展的经营活动。购买原材料、"
+                    "库存商品、生产设备等直接进入主导主营产品/服务生产、销售或交付的投入品，"
+                    "真实投向仍是该主导主营，不得改判为投入品所属行业。借款人以自身"
+                    "主导主营能力为客户交付项目时，客户所属行业、项目服务对象或项目终端用途"
+                    "也不得改变借款人实际开展的经营活动。借款人自身使用资金开展另一项"
+                    "生产、销售、运营或投资活动，或将资金支付给其他行业购买员工培训等独立"
+                    "服务、该服务本身不构成主导主营产品/服务的生产交付投入时，都属于不同"
+                    "经营活动，真实投向为资金收款方所提供产品或服务对应的行业；贷款用途"
+                    "明确声明不用于主营业务投入时，不得返回 route=use_enterprise_conclusion。"
                     "贷款投向必须按以下决策树判定：一、贷款用途为空或仅为经营周转、"
                     "流动资金、经营使用等笼统表述，且贸易合同未揭示具体非主营经营领域、"
-                    "授信审批意见也未限定具体经营领域时，返回 specificity=generic，投向代码"
-                    "和名称必须回落为企业结论；二、融合三类证据得出的真实投向写明具体经营"
-                    "项时，返回 specificity=specific，并只依据贷款用途、交易品类和审批约束"
-                    "形成的 loan_direction_candidates 独立分类；即使具体经营项服务于企业"
-                    "主营，也必须由贷款投向候选的目录定义独立支持，独立分类结果可以与企业"
-                    "代码相同，但不得直接回落或借用 enterprise_candidates。三、具体经营项"
-                    "属于低占比业务线或其他经营领域时，无论是否已登记在营业执照经营范围内，"
-                    "都必须依据融合后的真实资金流向和给定候选的完整目录定义独立分类；"
+                    "授信审批意见也未限定具体经营领域时，返回 specificity=generic、"
+                    "route=use_enterprise_conclusion，由服务端继承企业结论；二、融合三类"
+                    "证据得出的具体用途服务于 dominant_main_business 所指主导主营，包括"
+                    "为主导主营采购投入品、备货、设备，或以主导主营能力交付不同客户/终端"
+                    "用途的项目时，返回 specificity=specific、route=use_enterprise_conclusion，"
+                    "只说明用途如何服务于主导主营，不返回贷款行业代码和名称；三、具体用途"
+                    "属于低占比业务线或其他经营活动时，无论是否已登记在营业执照经营范围内，"
+                    "都返回 specificity=specific、route=classify_actual_direction，并依据"
+                    "融合后的真实资金流向和 loan_direction_candidates 的完整目录定义独立分类；"
+                    "不得因为该活动是已登记业务、已有少量收入或使用相似原材料而回落企业结论。"
                     "营业执照经营范围只用于说明企业现有经营边界，不得作为否定真实贷款投向或"
                     "拒绝选择候选的门槛。四、只有给定候选均无法覆盖真实投向时，贷款投向才"
                     "返回 no_match=true 及非空 reason；reason 必须说明候选定义为何不匹配或"
@@ -208,15 +273,17 @@ def _build_request_payload(
                     "贷款用途、贸易合同核心交易品类、授信审批意见中的哪一类或哪几类证据"
                     "判定，并写明真实投向命中的业务事实及对应四级代码；真实投向不属于主营或"
                     "不在营业执照经营范围内时，应如实说明资金流向与企业现有经营边界不同，但"
-                    "仍须按实际资金用途完成分类。企业代码/名称"
-                    "只能从"
-                    "enterprise_candidates 的同一记录选择；specific 的贷款投向代码/名称"
-                    "只能从 loan_direction_candidates 的同一记录选择，generic 只能等于企业"
-                    "结论且只能使用 enterprise_candidates。必须仅返回 JSON，根对象只能包含"
-                    "enterprise 和 loan_direction。每个成功子结论返回 no_match=false、"
-                    "industry_code、industry_name、matching_basis，贷款投向还须返回"
-                    "specificity；每个无匹配子结论仅返回 no_match=true 和非空 reason，"
-                    "贷款投向还须返回 specificity。不得返回置信度、AI 总结或 matched；"
+                    "仍须按实际资金用途完成分类。企业代码/名称只能从 enterprise_candidates"
+                    "的同一记录选择。贷款投向 route=use_enterprise_conclusion 时只能返回"
+                    "route、specificity 和 matching_basis，行业代码/名称由服务端继承企业"
+                    "结论；route=classify_actual_direction 时，成功代码/名称只能从 "
+                    "loan_direction_candidates 的同一记录选择。必须仅返回 JSON，根对象只能"
+                    "包含 enterprise 和 loan_direction。企业成功结论返回 no_match=false、"
+                    "industry_code、industry_name、matching_basis；企业无匹配返回"
+                    "no_match=true 和非空 reason。独立分类的贷款成功结论返回 route、"
+                    "no_match=false、industry_code、industry_name、matching_basis、specificity；"
+                    "独立分类无匹配返回 route、no_match=true、非空 reason、specificity。"
+                    "不得返回置信度、AI 总结或 matched；"
                     "一致性由服务端复算。"
                 ),
             },
@@ -317,7 +384,7 @@ def _validate_model_response(
     enterprise_output = _required_object(model_output, "enterprise")
     loan_output = _required_object(model_output, "loan_direction")
     enterprise_no_match = _required_boolean(enterprise_output, "no_match", "enterprise")
-    loan_no_match = _required_boolean(loan_output, "no_match", "loan_direction")
+    loan_route = _required_loan_route(loan_output)
     loan_specificity = _required_specificity(loan_output)
     objection_snapshot = dict(objection) if objection is not None else None
 
@@ -350,46 +417,51 @@ def _validate_model_response(
     loan_code: str | None = None
     loan_name: str | None = None
     loan_candidate: EvidenceSnapshot | None = None
-    if loan_no_match:
+    if loan_route is LoanDirectionRoute.USE_ENTERPRISE_CONCLUSION:
         _require_exact_output_fields(
             loan_output,
-            _LOAN_NO_MATCH_OUTPUT_FIELDS,
-            branch="loan_direction no_match",
+            _LOAN_INHERITED_OUTPUT_FIELDS,
+            branch="loan_direction inherited",
         )
+        if enterprise_code is None or enterprise_candidate is None:
+            raise NationalEconomyClassificationError(
+                "loan_direction cannot inherit an unsuccessful enterprise conclusion"
+            )
+        loan_no_match = False
+        loan_code = enterprise_code
+        loan_name = enterprise_name
+        loan_candidate = enterprise_candidate
+        loan_basis = _required_text(loan_output, "matching_basis")
+    else:
         if loan_specificity != "specific":
             raise NationalEconomyClassificationError(
-                "loan_direction no_match requires specificity=specific"
+                "classify_actual_direction requires specificity=specific"
             )
-        loan_basis = _required_text(loan_output, "reason")
-    else:
-        _require_exact_output_fields(
-            loan_output,
-            _LOAN_SUCCESS_OUTPUT_FIELDS,
-            branch="loan_direction successful",
+        loan_no_match = _required_boolean(
+            loan_output, "no_match", "loan_direction"
         )
-        loan_code = _required_text(loan_output, "industry_code")
-        loan_name = _required_text(loan_output, "industry_name")
-        loan_basis = _required_text(loan_output, "matching_basis")
-        if loan_specificity == "generic":
-            if enterprise_code is None:
-                raise NationalEconomyClassificationError(
-                    "generic loan_direction requires successful enterprise and loan conclusions"
-                )
-            if (loan_code, loan_name) != (enterprise_code, enterprise_name):
-                raise NationalEconomyClassificationError(
-                    "generic loan_direction must exactly match the enterprise conclusion"
-                )
-        allowed_loan_candidates = (
-            loan_direction_candidates
-            if loan_specificity == "specific"
-            else candidates
-        )
-        loan_candidate = _require_candidate_pair(
-            loan_code,
-            loan_name,
-            allowed_loan_candidates,
-            branch="loan_direction",
-        )
+        if loan_no_match:
+            _require_exact_output_fields(
+                loan_output,
+                _LOAN_CLASSIFIED_NO_MATCH_OUTPUT_FIELDS,
+                branch="loan_direction no_match",
+            )
+            loan_basis = _required_text(loan_output, "reason")
+        else:
+            _require_exact_output_fields(
+                loan_output,
+                _LOAN_CLASSIFIED_SUCCESS_OUTPUT_FIELDS,
+                branch="loan_direction successful",
+            )
+            loan_code = _required_text(loan_output, "industry_code")
+            loan_name = _required_text(loan_output, "industry_name")
+            loan_basis = _required_text(loan_output, "matching_basis")
+            loan_candidate = _require_candidate_pair(
+                loan_code,
+                loan_name,
+                loan_direction_candidates,
+                branch="loan_direction",
+            )
 
     enterprise_major_code = (
         enterprise_candidate.major_category_code
@@ -399,7 +471,7 @@ def _validate_model_response(
     loan_major_code = (
         loan_candidate.major_category_code if loan_candidate is not None else None
     )
-    if loan_specificity == "generic":
+    if loan_route is LoanDirectionRoute.USE_ENTERPRISE_CONCLUSION:
         loan_major_code = enterprise_major_code
     enterprise_middle_code = (
         enterprise_candidate.middle_category_code
@@ -417,7 +489,7 @@ def _validate_model_response(
     loan_middle_name = loan_candidate.middle_category_name if loan_middle_code else None
     enterprise_category_name = enterprise_candidate.category_name if enterprise_candidate else None
     loan_category_name = loan_candidate.category_name if loan_candidate else None
-    if loan_specificity == "generic":
+    if loan_route is LoanDirectionRoute.USE_ENTERPRISE_CONCLUSION:
         loan_middle_code = enterprise_middle_code
         loan_middle_name = enterprise_middle_name
         loan_category_name = enterprise_category_name
@@ -486,6 +558,21 @@ def _required_specificity(
             "loan_direction specificity must be generic or specific"
         )
     return value
+
+
+def _required_loan_route(
+    loan_output: Mapping[str, object],
+) -> LoanDirectionRoute:
+    value = loan_output.get("route")
+    if value not in {
+        LoanDirectionRoute.USE_ENTERPRISE_CONCLUSION.value,
+        LoanDirectionRoute.CLASSIFY_ACTUAL_DIRECTION.value,
+    }:
+        raise NationalEconomyClassificationError(
+            "loan_direction route must be use_enterprise_conclusion or "
+            "classify_actual_direction"
+        )
+    return LoanDirectionRoute(value)
 
 
 def _require_candidate_pair(
